@@ -1,0 +1,16 @@
+# runtime data（绝对不能上传）
+users/
+registry.db
+
+# secrets
+*.env
+*.key
+*.pem
+
+# logs
+*.log
+
+# system
+.DS_Store
+
+logs/

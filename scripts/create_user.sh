@@ -19,6 +19,9 @@ USER_DIR="$BASE_DIR/users/$USER_ID"
 LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
 PORT_FILE="$BASE_DIR/ports.txt"
 
+# ===== 创建日志目录 =====
+mkdir -p "$(dirname "$LOG_FILE")"
+
 # ===== 日志函数 =====
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" | tee -a "$LOG_FILE"

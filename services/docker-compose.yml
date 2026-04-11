@@ -1,0 +1,14 @@
+services:
+
+  pdf-extract-text:
+    build: ./pdf-extract-text
+    container_name: pdf-extract-text
+    restart: unless-stopped
+
+    networks:
+      - agent-net
+
+
+networks:
+  agent-net:
+    external: true

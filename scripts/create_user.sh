@@ -39,8 +39,8 @@ if [ ! -f "$PORT_FILE" ]; then
 fi
 
 PORT=$(cat "$PORT_FILE")
-NEXT_PORT=$((PORT + 1))
-echo "$NEXT_PORT" > "$PORT_FILE"
+#NEXT_PORT=$((PORT + 1))
+#echo "$NEXT_PORT" > "$PORT_FILE"
 
 log "Alloc port $PORT for user $USER_ID"
 
@@ -70,6 +70,9 @@ docker compose up -d
 # ===== 输出 =====
 log "User $USER_ID created successfully"
 log "Port: $PORT"
+
+NEXT_PORT=$((PORT + 1))
+echo "$NEXT_PORT" > "$PORT_FILE"
 
 echo ""
 echo "=============================="

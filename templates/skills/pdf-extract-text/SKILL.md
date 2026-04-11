@@ -12,14 +12,14 @@ Use this skill when:
 
 ## Priority
 
-This skill MUST be used instead of any other PDF-related skill when extracti    ng raw text.
+This skill MUST be used instead of any other PDF-related skill when extracting raw text.
 
 ## Steps
 
 1. Extract the file path
 2. Call:
 
-curl -X POST "http://pdf-parser:8001/parse_pdf" \
+curl -X POST "http://pdf-extract-text:8001/parse_pdf" \
    -F "file=@<PDF_PATH>"
 
 3. Parse JSON

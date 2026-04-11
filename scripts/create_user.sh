@@ -51,7 +51,7 @@ mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions}
 cp -r "$(dirname "$0")/../templates/skills/"* "$USER_DIR/skills/"
 
 # ===== 复制模板 =====
-TEMPLATE="$BASE_DIR/templates/docker-compose.tpl.yml"
+TEMPLATE="$(dirname "$0")/../templates/docker-compose.tpl.yml"
 TARGET_COMPOSE="$USER_DIR/docker-compose.yml"
 
 cp "$TEMPLATE" "$TARGET_COMPOSE"

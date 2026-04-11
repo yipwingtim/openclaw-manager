@@ -44,6 +44,9 @@ log "Alloc port $PORT for user $USER_ID"
 # ===== 创建目录 =====
 mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions}
 
+# ===== 注入默认 skills =====
+cp -r "$(dirname "$0")/../templates/skills/"* "$USER_DIR/skills/"
+
 # ===== 复制模板 =====
 TEMPLATE="$BASE_DIR/templates/docker-compose.tpl.yml"
 TARGET_COMPOSE="$USER_DIR/docker-compose.yml"

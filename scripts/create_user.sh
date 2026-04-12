@@ -104,4 +104,11 @@ echo "Access URL:"
 echo "👉 http://$HOST_IP:$PORT"
 echo "Login Token:"
 echo "👉 $(grep '"token"' "$USER_DIR/config/openclaw.json" | head -n1 | sed -E 's/.*"token": ?"([^"]+)".*/\1/')"
+
+echo "Login Token:"
+if [ -z "$TOKEN" ]; then
+  echo "👉 (请查看 config/openclaw.json)"
+else
+  echo "👉 $TOKEN"
+fi
 echo "=============================="

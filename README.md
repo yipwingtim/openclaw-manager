@@ -8,85 +8,228 @@ A lightweight multi-user OpenClaw instance management platform.
 
 ## 🚀 Overview | 项目简介
 
-OpenClaw Manager is designed to provide a scalable way to run multiple isolated OpenClaw instances, one per user, with centralized management.
+OpenClaw Manager 提供一种“每用户一个实例”的部署模式，在不修改 OpenClaw 源码的前提下，实现：
 
-OpenClaw Manager 用于在服务器上为多个用户提供隔离的 OpenClaw 实例，实现统一管理与运维。
+- 多用户隔离
+- 自动化部署
+- 生命周期管理（创建 / 删除 / 恢复）
+- 运维可控
+
+适用于：
+
+- 高校 / 数据中心
+- 内部 AI 平台
+- 私有化部署环境
 
 ---
 
 ## ✨ Features | 功能特点
 
-- Per-user OpenClaw container isolation  
-  每用户独立 OpenClaw 容器实例
+### 🧩 实例隔离
 
-- Script-based user provisioning  
-  基于脚本的用户创建与管理
+- 每用户独立 OpenClaw 容器
+- 无共享状态，避免权限污染
 
-- Nginx reverse proxy with authentication  
-  基于 Nginx 的反向代理与访问控制
+---
 
-- Secure multi-layer access control  
-  多层安全机制（Basic Auth + Token + Device Approve）
+### ⚙️ 用户生命周期管理
 
-- Ready for OAuth2 integration (future)  
-  预留 OAuth2（统一认证）接入能力
+- 创建用户：create_user.sh
+- 删除用户（回收站）：delete_user.sh
+- 恢复用户：restore_user.sh
+- 用户列表：list_users.sh
 
-- Extensible for quota / rate limiting  
-  支持后续接入限流与配额控制（API Gateway）
+完整流程：
+
+创建 → 使用 → 删除（回收）→ 恢复
+
+---
+
+### 🌐 端口访问模型（核心设计）
+
+每个用户绑定一个端口：
+
+userA → http://IP:30000  
+userB → http://IP:30001  
+
+特点：
+
+- 不使用子路径（避免 WebSocket 问题）
+- 不依赖域名
+- 简单稳定
+
+---
+
+### 🔐 安全机制
+
+- 容器隔离
+- OpenClaw Token 认证
+- 可选 Nginx Basic Auth
+
+---
+
+### ♻️ 安全删除机制
+
+删除用户不会直接删除数据：
+
+users/testuser  
+→ deleted/testuser_时间戳  
+
+支持恢复。
 
 ---
 
 ## 📁 Project Structure | 项目结构
 
 openclaw-manager/
-├── templates/        # 模板（docker-compose / config）
-├── scripts/          # 自动化脚本
-├── nginx/            # 反向代理
-│   ├── conf.d/
-│   └── htpasswd/
-├── logs/             # 日志目录
-├── docs/             # 文档
+├── templates/              # docker-compose 模板
+├── scripts/                # 用户管理脚本
+│   ├── create_user.sh
+│   ├── delete_user.sh
+│   ├── restore_user.sh
+│   └── list_users.sh
+├── services/               # 扩展服务（如 pdf-extract）
+├── nginx/                  # 可选反向代理配置
+├── logs/
+├── docs/
 ├── README.md
 └── .gitignore
 
 ---
 
-## 🔐 Security Model | 安全设计
+## 📁 Runtime Structure | 运行时目录（重要）
 
-- One OpenClaw instance per user  
-  每用户独立实例（避免权限污染）
+运行时数据在：
 
-- Nginx Basic Authentication  
-  第一层认证（账号密码）
+/data/docker/openclaw-public/
 
-- OpenClaw token protection  
-  第二层认证（API Token）
+结构如下：
 
-- Device approval mechanism  
-  第三层认证（设备授权）
+/data/docker/openclaw-public/
+├── users/              # 用户实例
+│   ├── userA/
+│   ├── userB/
+├── deleted/            # 回收站
+├── ports.txt           # 端口分配记录
+├── logs/               # 脚本日志
+
+说明：
+
+- users/：运行中的用户
+- deleted/：已删除但可恢复
+- ports.txt：当前端口指针（单向递增）
+
+---
+
+## 🧠 Architecture | 架构说明
+
+User Browser  
+↓  
+http://IP:PORT  
+↓  
+Docker（每用户一个容器）  
+↓  
+OpenClaw Gateway（18789）  
+
+设计原则：
+
+- 不使用子路径
+- 不依赖子域名
+- 使用端口隔离
+- 保持 OpenClaw 原生行为
+
+---
+
+## ⚙️ Usage | 使用方式
+
+### 1️⃣ 创建用户
+
+./scripts/create_user.sh <user_id>
+
+输出：
+
+SUCCESS  
+User: testuser  
+Port: 30000  
+Access URL:  
+http://<服务器IP>:30000  
+
+---
+
+### 2️⃣ 查看用户列表
+
+./scripts/list_users.sh
+
+---
+
+### 3️⃣ 删除用户（温和删除）
+
+./scripts/delete_user.sh <user_id>
+
+---
+
+### 4️⃣ 恢复用户
+
+./scripts/restore_user.sh <user_id>
 
 ---
 
 ## ⚠️ Important Notes | 注意事项
 
-- Do NOT commit runtime data (users/, tokens, configs)  
-  禁止提交运行时数据（users/、token、配置文件）
+### 🚨 端口策略
 
-- Each user instance must be fully isolated  
-  每个用户实例必须完全隔离
+端口单向递增，不回收：
 
-- This project is NOT a multi-tenant OpenClaw modification  
-  本项目不是对 OpenClaw 的多租户改造，而是外部管理方案
+30000 → 30001 → 30002 …
+
+优点：
+
+- 避免冲突
+- 简化管理
+- 提高稳定性
+
+---
+
+### 🚨 数据安全
+
+- 禁止手动删除 users 目录
+- 必须通过脚本管理
+
+---
+
+### 🚨 子路径限制
+
+不支持：
+
+https://domain/testuser  
+
+原因：
+
+- OpenClaw 不支持 basePath
+- WebSocket 会断开（1006）
+
+---
+
+## 🔐 Security Considerations | 安全说明
+
+建议：
+
+- 限制公网访问
+- 使用 Token
+- 控制插件来源
+- 定期清理实例
 
 ---
 
 ## 🛠 Roadmap | 后续规划
 
-- [ ] Automated user provisioning
-- [ ] Port allocation system
-- [ ] Nginx dynamic routing
-- [ ] OAuth2 / SSO integration
-- [ ] API Gateway for quota control
+- [x] 用户生命周期管理
+- [x] 端口分配系统
+- [x] 安全删除与恢复
+- [ ] 端口加锁（并发安全）
+- [ ] Web 管理界面
+- [ ] 配额控制
+- [ ] OAuth2 / SSO
 
 ---
 
@@ -100,4 +243,4 @@ MIT
 
 Maintained for internal multi-user OpenClaw deployment.
 
-面向多用户 OpenClaw 部署场景设计。
+面向高校 / 数据中心 / 私有化部署场景设计。

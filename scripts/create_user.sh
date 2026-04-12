@@ -93,6 +93,8 @@ log "User $USER_ID created successfully"
 log "Port: $PORT"
 
 NEXT_PORT=$((PORT + 1))
+
+log "Alloc port $PORT for user $USER_ID"
 echo "$NEXT_PORT" > "$PORT_FILE"
 
 echo ""

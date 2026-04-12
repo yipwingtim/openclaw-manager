@@ -113,4 +113,6 @@ if [ -z "$TOKEN" ]; then
 else
   echo "👉 $TOKEN"
 fi
+echo "$USER_ID,$PORT,$(date '+%Y-%m-%d %H:%M:%S')" >> "$BASE_DIR/users.csv"
 echo "=============================="
+

@@ -32,3 +32,6 @@ mv "$USER_DIR" "$DELETED_DIR/${USER_ID}_$TIMESTAMP"
 
 echo "[INFO] User $USER_ID moved to recycle bin:"
 echo "👉 $DELETED_DIR/${USER_ID}_$TIMESTAMP"
+
+echo "[INFO] You can restore this user by moving it back:"
+echo "👉 mv $DELETED_DIR/${USER_ID}_$TIMESTAMP $BASE_DIR/users/$USER_ID"

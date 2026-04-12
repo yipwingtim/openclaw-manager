@@ -10,6 +10,8 @@ if [ -z "$USER_ID" ]; then
   exit 1
 fi
 
+HOST_IP=$(hostname -I | awk '{print $1}')
+
 # ===== 可配置参数 =====
 BASE_DIR="/data/docker/openclaw-public"
 VERSION=${VERSION:-2026.3.28}
@@ -47,6 +49,25 @@ log "Alloc port $PORT for user $USER_ID"
 # ===== 创建目录 =====
 mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions}
 
+CONFIG_FILE="$USER_DIR/config/openclaw.json"
+
+# 如果配置文件不存在，创建基础结构
+if [ ! -f "$CONFIG_FILE" ]; then
+  cat > "$CONFIG_FILE" <<EOF
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan"
+  }
+}
+EOF
+else
+  # 如果存在，插入 gateway（简单粗暴但有效）
+  if ! grep -q '"gateway"' "$CONFIG_FILE"; then
+    sed -i '1s/{/{\n  "gateway": {\n    "mode": "local",\n    "bind": "lan"\n  },/' "$CONFIG_FILE"
+  fi
+fi
+
 # ===== 注入默认 skills =====
 cp -r "$(dirname "$0")/../templates/skills/"* "$USER_DIR/skills/"
 
@@ -79,5 +100,8 @@ echo "=============================="
 echo "SUCCESS"
 echo "User: $USER_ID"
 echo "Port: $PORT"
-echo "URL: http://<your-host>:$PORT"
+echo "Access URL:"
+echo "👉 http://$HOST_IP:$PORT"
+echo "Login Token:"
+echo "👉 $(grep '"token"' "$USER_DIR/config/openclaw.json" | head -n1 | sed -E 's/.*"token": ?"([^"]+)".*/\1/')"
 echo "=============================="

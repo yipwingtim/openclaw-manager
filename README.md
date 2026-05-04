@@ -47,24 +47,44 @@ OpenClaw Manager 提供一种“每用户一个实例”的部署模式，在不
 
 ### 🌐 端口访问模型（核心设计）
 
-每个用户绑定一个端口：
+每个用户仍然绑定一个独立访问端口，但端口不再由 OpenClaw 容器直接发布，而是由 Nginx 统一对外发布并反向代理到对应用户容器。
 
-userA → http://IP:30000  
-userB → http://IP:30001  
+示例：
+
+userA → https://IP:30000 → nginx → openclaw_userA:18789  
+userB → https://IP:30001 → nginx → openclaw_userB:18789
 
 特点：
 
-- 不使用子路径（避免 WebSocket 问题）
-- 不依赖域名
-- 简单稳定
+- 不使用子路径，避免 WebSocket 和 basePath 适配问题
+- 不依赖域名，适合内网和数据中心环境
+- 用户容器只 expose 18789，不直接暴露到宿主机
+- 对外入口统一由 Nginx 提供 HTTPS、Basic Auth 和反向代理
+- 每个用户实例仍保持独立容器、独立配置和独立工作区
 
 ---
 
 ### 🔐 安全机制
 
-- 容器隔离
-- OpenClaw Token 认证
-- 可选 Nginx Basic Auth
+当前采用三层访问控制：
+
+1. Nginx Basic Auth  
+   用户首先访问 `https://IP:PORT`，由 Nginx 弹出用户名 / 密码认证窗口。账号信息保存在 `.htpasswd` 文件中，由 `create_user.sh` 自动创建或更新。
+
+2. OpenClaw Token  
+   Basic Auth 通过后，用户还需要输入对应实例的 OpenClaw Login Token。
+
+3. OpenClaw Device Approval  
+   新浏览器或新设备首次访问 Control UI 时，OpenClaw 可能要求管理员批准设备。管理员进入对应容器后执行：
+
+   `openclaw devices approve --latest`
+
+说明：
+
+- Basic Auth 用于外层入口保护
+- OpenClaw Token 用于实例登录认证
+- Device Approval 用于首次设备配对确认
+- `.htpasswd` 文件由宿主机脚本维护，并通过 ACL 授权给 nginx 容器内用户只读访问
 
 ---
 
@@ -82,61 +102,118 @@ users/testuser
 ## 📁 Project Structure | 项目结构
 
 openclaw-manager/
+├── config/                 # 管理器配置文件
+│   └── openclaw-manager.env
 ├── templates/              # docker-compose 模板
+│   └── docker-compose.tpl.yml
 ├── scripts/                # 用户管理脚本
-│   ├── create_user.sh
-│   ├── delete_user.sh
-│   ├── restore_user.sh
-│   └── list_users.sh
+│   ├── create_user.sh      # 创建用户实例、生成 nginx 配置、创建 Basic Auth 用户
+│   ├── delete_user.sh      # 删除用户实例、回收数据、释放 nginx 端口
+│   ├── restore_user.sh     # 恢复用户实例
+│   ├── list_users.sh       # 查看用户列表
+│   └── update_allowed_origins.sh
 ├── services/               # 扩展服务（如 pdf-extract）
-├── nginx/                  # 可选反向代理配置
-├── logs/
 ├── docs/
 ├── README.md
 └── .gitignore
+说明：Nginx 的运行时配置不放在项目目录内，而是由脚本生成到 `/data/docker/nginx/`，包括用户反代配置、端口映射、证书、日志和 Basic Auth 密码文件。
+
 
 ---
 
 ## 📁 Runtime Structure | 运行时目录（重要）
 
-运行时数据在：
+运行时数据主要分为三部分：
 
+### 1. OpenClaw 用户运行数据
+
+路径：
+
+```text
 /data/docker/openclaw-public/
-
 结构如下：
-
 /data/docker/openclaw-public/
-├── users/              # 用户实例
+├── users/                  # 用户实例目录
 │   ├── userA/
-│   ├── userB/
-├── deleted/            # 回收站
-├── ports.txt           # 端口分配记录
-├── logs/               # 脚本日志
+│   └── userB/
+├── deleted/                # 删除用户后的回收站
+├── ports.txt               # 端口分配指针
+├── users.csv               # 用户与端口记录
+└── logs/                   # 脚本运行日志
+说明：
+
+users/：运行中的用户实例
+deleted/：已删除但可恢复的用户数据
+ports.txt：端口分配起点或当前指针
+users.csv：用户、端口、创建时间、状态等记录
+logs/：创建、删除等脚本日志
+```
+### 2. Nginx 运行配置
+
+路径：
+```
+/data/docker/nginx/
+结构如下：
+/data/docker/nginx/
+├── compose/
+│   └── docker-compose.yml      # Nginx 容器 compose 文件，维护对外端口映射
+├── conf/
+│   ├── openclaw.conf           # 默认 / 主入口配置
+│   ├── userA.conf              # 用户 A 的 Nginx 反代配置
+│   └── userB.conf              # 用户 B 的 Nginx 反代配置
+├── certs/                      # HTTPS 证书
+├── auth/
+│   └── .htpasswd               # Basic Auth 用户密码文件
+└── logs/                       # Nginx 日志
+说明：
+
+每个用户对应一个独立的 Nginx 配置文件，例如 userA.conf
+每个用户配置文件监听一个独立 HTTPS 端口
+Nginx 将请求反向代理到 openclaw_<user_id>:18789
+.htpasswd 由 create_user.sh 创建或更新
+.htpasswd 通过 ACL 授权给 nginx 容器内用户只读访问
+```
+
+### 3. OpenClaw Manager 配置
+```
+路径：
+/data/docker/openclaw-manager/config/openclaw-manager.env
+该文件集中管理部署路径和 Nginx 相关路径，例如：
+OPENCLAW_PUBLIC_DIR=/data/docker/openclaw-public
+NGINX_COMPOSE_DIR=/data/docker/nginx/compose
+NGINX_COMPOSE_FILE=/data/docker/nginx/compose/docker-compose.yml
+NGINX_USERS_CONF_DIR=/data/docker/nginx/conf
+NGINX_HTPASSWD_FILE=/data/docker/nginx/auth/.htpasswd
+NGINX_CONTAINER_NAME=openclaw-nginx
 
 说明：
 
-- users/：运行中的用户
-- deleted/：已删除但可恢复
-- ports.txt：当前端口指针（单向递增）
-
+修改部署路径时，优先修改该配置文件
+脚本应尽量从该配置文件读取路径，避免硬编码
+不应将包含敏感信息的配置文件、证书、.htpasswd 提交到公开仓库
+```
 ---
 
 ## 🧠 Architecture | 架构说明
 
-User Browser  
-↓  
-http://IP:PORT  
-↓  
-Docker（每用户一个容器）  
-↓  
-OpenClaw Gateway（18789）  
+User Browser
+↓
+https://IP:PORT
+↓
+Nginx HTTPS + Basic Auth
+↓
+openclaw_<user_id>:18789
+↓
+OpenClaw Gateway / Control UI
 
 设计原则：
 
-- 不使用子路径
-- 不依赖子域名
-- 使用端口隔离
-- 保持 OpenClaw 原生行为
+- 不使用子路径，避免 WebSocket 和 basePath 适配问题
+- 不依赖子域名，适合内网 IP 或单域名多端口访问
+- 使用端口隔离，每个用户对应一个独立访问端口
+- 用户容器不直接发布宿主机端口，只通过 Docker 内部网络暴露 18789
+- 对外入口统一由 Nginx 管理，便于集中配置 HTTPS、Basic Auth 和反向代理
+- 保持 OpenClaw 原生运行方式，尽量不修改 OpenClaw 源码
 
 ---
 
@@ -144,15 +221,67 @@ OpenClaw Gateway（18789）
 
 ### 1️⃣ 创建用户
 
+进入 OpenClaw Manager 项目目录：
+
+```bash
+cd /data/docker/openclaw-manager
+```
+
+执行创建命令：
+```bash
 ./scripts/create_user.sh <user_id>
+```
+示例：
+```bash
+./scripts/create_user.sh testuser
+```
+脚本会自动完成以下操作：
 
-输出：
+为用户分配一个可用端口
+创建用户运行目录
+生成用户专属 docker-compose.yml
+启动 openclaw_<user_id> 容器
+生成 Nginx 用户配置文件
+将访问端口加入 Nginx docker-compose.yml
+创建或更新 Nginx Basic Auth 用户
+更新 OpenClaw Control UI allowedOrigins
+输出访问地址、Basic Auth 用户名和 OpenClaw Login Token
 
-SUCCESS  
-User: testuser  
-Port: 30000  
-Access URL:  
-http://<服务器IP>:30000  
+创建过程中会提示设置该用户的 Nginx Basic Auth 密码。
+
+输出示例：
+
+SUCCESS
+User: testuser
+Port: 30000
+Access URL:
+https://<服务器IP或域名>:30000
+
+Basic Auth:
+username: testuser
+password: 创建用户时输入的密码
+
+Login Token:
+<OpenClaw Login Token>
+
+首次登录流程：
+
+浏览器访问 https://<服务器IP或域名>:PORT
+输入 Nginx Basic Auth 用户名和密码
+输入 OpenClaw Login Token
+如果提示设备审批，管理员进入对应容器批准设备
+
+查看待审批设备:
+docker exec -it openclaw_<user_id> openclaw devices list
+
+批准设备：
+docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
+
+说明：
+
+新浏览器或新设备首次访问时通常需要 approve device
+设备批准后会被 OpenClaw 记住，后续一般不需要重复批准
+如果浏览器更换、认证信息变化或设备被 revoke，可能会再次要求审批
 
 ---
 
@@ -178,15 +307,21 @@ http://<服务器IP>:30000
 
 ### 🚨 端口策略
 
-端口单向递增，不回收：
+端口由 `create_user.sh` 自动分配。
 
-30000 → 30001 → 30002 …
+当前策略：
 
-优点：
+- 从配置的起始端口开始查找
+- 自动跳过已经被占用的端口
+- 新用户端口由 Nginx 对外发布
+- 用户容器自身不直接发布宿主机端口，只 `expose 18789`
+- 删除用户时，`delete_user.sh` 会移除对应 Nginx 配置和端口映射，从而释放端口
 
-- 避免冲突
-- 简化管理
-- 提高稳定性
+注意：
+
+- 不要手工在用户容器里配置 `ports:`
+- 不要手工长期保留无对应用户配置的 Nginx 端口映射
+- 如果发现某个端口被占用但没有对应 `listen PORT ssl;` 的用户配置，说明可能存在孤儿端口映射，需要从 Nginx compose 中清理
 
 ---
 

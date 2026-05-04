@@ -9,8 +9,8 @@ services:
 
     user: "1000:1000"
 
-    ports:
-      - "127.0.0.1:{{PORT}}:18789"
+    expose:
+      - "18789"
 
     volumes:
       - {{BASE_DIR}}/users/{{USER_ID}}/config:/home/node/.openclaw

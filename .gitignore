@@ -14,3 +14,9 @@ registry.db
 .DS_Store
 
 logs/
+
+# Local secrets / environment config
+.env
+*.env
+config/*.env
+!config/*.env.example

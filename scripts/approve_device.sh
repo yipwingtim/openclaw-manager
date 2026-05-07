@@ -23,6 +23,8 @@ set -euo pipefail
 USER_ID="${1:-}"
 TARGET_REQUEST_ID="${2:-}"
 
+LIST_ONLY=false
+
 if [ -z "$USER_ID" ]; then
   echo "Usage:"
   echo "  $0 <user_id>"
@@ -113,6 +115,20 @@ echo "=============================="
 
 LIST_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices list 2>&1 || true)"
 echo "$LIST_OUTPUT"
+CACHE_DIR="$BASE_DIR/users/$USER_ID"
+CACHE_FILE="$CACHE_DIR/devices.txt"
+
+mkdir -p "$CACHE_DIR"
+
+{
+  echo "Generated at: $(date '+%Y-%m-%d %H:%M:%S')"
+  echo
+  echo "$LIST_OUTPUT"
+} > "$CACHE_FILE"
+
+log "Device cache updated: $CACHE_FILE"
+
+
 
 # 如果没有 Pending 段，说明当前没有待审批设备。
 # openclaw devices list 可能只输出 Paired 表格，此时不要从已配对设备里误提取 id。
@@ -155,6 +171,11 @@ echo "=============================="
 echo " Decision"
 echo "=============================="
 
+if [ "$TARGET_REQUEST_ID" = "--list-only" ]; then
+  LIST_ONLY=true
+  TARGET_REQUEST_ID=""
+fi
+
 if [ "$TARGET_REQUEST_ID" = "--latest" ]; then
   if [ "$REQUEST_COUNT" -eq 0 ]; then
     fail "No pending request found. Refuse to approve --latest."
@@ -173,6 +194,11 @@ if [ -n "$TARGET_REQUEST_ID" ]; then
   log "Approving specified requestId: $TARGET_REQUEST_ID"
   docker exec "$CONTAINER_NAME" openclaw devices approve "$TARGET_REQUEST_ID"
   log "Approved request for user: $USER_ID"
+  exit 0
+fi
+
+if [ "$LIST_ONLY" = true ]; then
+  log "List-only mode enabled. Skip approval."
   exit 0
 fi
 

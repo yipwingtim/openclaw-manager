@@ -216,10 +216,173 @@ OpenClaw Gateway / Control UI
 - 保持 OpenClaw 原生运行方式，尽量不修改 OpenClaw 源码
 
 ---
+## 🏗 Standard Provisioning Flow | 标准实例开通流程
+
+### 1️⃣ 创建用户实例
+
+进入 OpenClaw Manager 项目目录：
+
+```bash
+cd /data/docker/openclaw-manager
+```
+
+执行创建命令：
+
+```bash
+./scripts/create_user.sh <user_id>
+```
+
+示例：
+
+```bash
+./scripts/create_user.sh xinxizhongxin
+```
+
+脚本会自动完成：
+
+- 分配独立 HTTPS 访问端口
+- 创建用户运行目录
+- 生成 docker-compose.yml
+- 创建 Nginx 配置
+- 配置 Basic Auth
+- 启动 openclaw_<user_id> 容器
+- 自动 reload Nginx
+
+创建成功后，可通过：
+
+```text
+https://<服务器IP>:<PORT>
+```
+
+访问 OpenClaw WebUI。
+
+---
+
+### 2️⃣ 首次登录与设备审批
+
+用户首次访问 WebUI 时，需要完成 Device Pairing。
+
+管理员可执行：
+
+```bash
+./scripts/approve_device.sh <user_id>
+```
+
+查看待审批设备。
+
+审批最新请求：
+
+```bash
+./scripts/approve_device.sh <user_id> --latest
+```
+
+系统同时会定时刷新设备缓存：
+
+```text
+/data/docker/openclaw-public/users/<user_id>/devices.txt
+```
+
+用于后续只读查询。
+
+---
+
+### 3️⃣ 配置模型 Provider
+
+模型 Provider 配置采用：
+
+```text
+config/model-providers.env
+```
+
+该文件不会提交到 Git。
+
+首次使用时：
+
+```bash
+cp config/model-providers.env.example config/model-providers.env
+```
+
+编辑：
+
+```bash
+vim config/model-providers.env
+```
+
+示例：
+
+```bash
+MODEL_PROVIDER_ID=gpustack
+MODEL_ID=gpustack/minimax-m2.1
+MODEL_BASE_URL=http://10.x.x.x:18080/v1
+MODEL_API_KEY=xxxxxxxx
+MODEL_ALIAS="MiniMax M2.1"
+```
+
+配置完成后：
+
+```bash
+./scripts/set_model_provider.sh <user_id>
+```
+
+示例：
+
+```bash
+./scripts/set_model_provider.sh xinxizhongxin
+```
+
+脚本会自动：
+
+- 备份 openclaw.json
+- 更新模型配置
+- 校验 JSON
+- 重启对应容器
+- 检查容器健康状态
+
+---
+
+### 4️⃣ 验证模型是否生效
+
+访问对应用户 WebUI：
+
+```text
+https://<服务器IP>:<PORT>
+```
+
+发送测试消息：
+
+```text
+你好，请回复“模型配置成功”
+```
+
+若模型正常回复，则说明：
+
+- Provider 可连接
+- API Key 正常
+- Base URL 正常
+- 模型配置成功
+
+---
+
+### 5️⃣ 删除与恢复用户
+
+删除用户（进入回收站）：
+
+```bash
+./scripts/delete_user.sh <user_id>
+```
+
+恢复用户：
+
+```bash
+./scripts/restore_user.sh <user_id>
+```
+
+用户数据不会立即删除。
 
 ## ⚙️ Usage | 使用方式
 
-### 1️⃣ 创建用户
+### 用户声明周期管理
+####  1️⃣ 创建用户
 
 进入 OpenClaw Manager 项目目录：
 
@@ -285,21 +448,29 @@ docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
 
 ---
 
-### 2️⃣ 查看用户列表
+#### 2️⃣ 查看用户列表
 
 ./scripts/list_users.sh
 
 ---
 
-### 3️⃣ 删除用户（温和删除）
+#### 3️⃣ 删除用户（温和删除）
 
 ./scripts/delete_user.sh <user_id>
 
 ---
 
-### 4️⃣ 恢复用户
+#### 4️⃣ 恢复用户
 
 ./scripts/restore_user.sh <user_id>
+
+
+### Device Pairing 管理
+- approve_device.sh
+- refresh_device_cache.sh
+
+### Model Provider 管理
+- set_model_provider.sh
 
 ---
 
@@ -355,6 +526,22 @@ https://domain/testuser
 - 定期清理实例
 
 ---
+
+## 🔐 Security Design | 安全设计
+
+系统采用最小权限原则：
+
+- 用户实例彼此隔离
+- 用户容器不直接暴露宿主机 Docker 权限
+- Nginx 统一负责 HTTPS 与 Basic Auth
+- Device Pairing 使用只读缓存机制
+- OpenClaw 不直接执行 docker.sock
+- 敏感配置通过本地 `.env` 管理
+- `.env` 文件不会提交到 Git
+
+危险操作（如 approve）通过受限 wrapper 执行，而不是直接开放 Docker 控制权限。
+---
+
 
 ## 🛠 Roadmap | 后续规划
 

@@ -20,7 +20,18 @@ for dir in "$USERS_DIR"/*; do
   USER_ID=$(basename "$dir")
 
   # 解析端口
-  PORT=$(grep "127.0.0.1" "$dir/docker-compose.yml" 2>/dev/null | sed -E 's/.*:(.*):18789/\1/')
+NGINX_CONF="/data/docker/nginx/conf/${USER_ID}.conf"
+
+if [ -f "$NGINX_CONF" ]; then
+  PORT=$(grep -E '^[[:space:]]*listen[[:space:]]+[0-9]+' "$NGINX_CONF" \
+    | head -n 1 \
+    | sed -E 's/^[[:space:]]*listen[[:space:]]+([0-9]+).*/\1/')
+else
+  PORT=$(grep -E '127\.0\.0\.1:[0-9]+:18789|[0-9]+:18789' "$dir/docker-compose.yml" 2>/dev/null \
+    | head -n 1 \
+    | sed -E 's/.*:?([0-9]+):18789.*/\1/' \
+    | tr -d '"')
+fi
 
   # 检查容器状态
   if docker ps | grep -q "openclaw_$USER_ID"; then

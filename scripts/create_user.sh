@@ -305,6 +305,14 @@ log "Granting nginx container user UID $NGINX_UID read access to htpasswd file"
 sudo setfacl -m "u:${NGINX_UID}:rx" "$(dirname "$NGINX_HTPASSWD_FILE")"
 sudo setfacl -m "u:${NGINX_UID}:r" "$NGINX_HTPASSWD_FILE"
 
+# ===== 启动用户容器 =====
+cd "$USER_DIR"
+
+if ! docker compose up -d; then
+  fail "Failed to start container for user $USER_ID"
+  fail "User directory is kept for troubleshooting: $USER_DIR"
+  exit 1
+fi
 
 # ===== 更新 nginx 容器并检查配置 =====
 log "Updating nginx container port mappings"
@@ -327,15 +335,6 @@ log "Reloading nginx"
 
 if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
   fail "Failed to reload nginx"
-  exit 1
-fi
-
-# ===== 启动容器 =====
-cd "$USER_DIR"
-
-if ! docker compose up -d; then
-  fail "Failed to start container for user $USER_ID"
-  fail "User directory is kept for troubleshooting: $USER_DIR"
   exit 1
 fi
 

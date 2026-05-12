@@ -1,4 +1,22 @@
 services:
+  manager-web:
+    build: ./manager-web
+    container_name: openclaw-manager-web
+    restart: unless-stopped
+    environment:
+      OPENCLAW_MANAGER_DIR: /opt/openclaw-manager
+      OPENCLAW_PUBLIC_DIR: ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
+      NGINX_USERS_CONF_DIR: ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
+      PUBLIC_HOST: ${PUBLIC_HOST:-}
+    ports:
+      - "127.0.0.1:18081:8080"
+    volumes:
+      - ..:/opt/openclaw-manager:ro
+      - ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}:${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
+      - ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}:${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - agent-net
 
   pdf-extract-text:
     build: ./pdf-extract-text

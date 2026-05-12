@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ user_id }} - OpenClaw Manager</title>
+    <style>
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f6f7f9; color: #1f2933; }
+      main { max-width: 920px; margin: 32px auto; padding: 0 20px; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+      h1 { font-size: 24px; margin: 0; }
+      section { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      dl { display: grid; grid-template-columns: 140px 1fr; gap: 10px 16px; margin: 0; }
+      dt { color: #526070; }
+      dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+      a { color: #1d4ed8; }
+      button, .link-button { display: inline-flex; align-items: center; height: 38px; border-radius: 6px; padding: 0 14px; font-weight: 600; text-decoration: none; }
+      button { border: 0; background: #2563eb; color: #fff; cursor: pointer; }
+      .link-button { background: #eef2ff; color: #1d4ed8; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #101828; color: #e4e7ec; border-radius: 8px; padding: 14px; overflow: auto; max-height: 420px; }
+      .ok { background: #ecfdf3; border-color: #abefc6; color: #067647; }
+      .error { background: #fef3f2; border-color: #fecdca; color: #b42318; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>{{ user_id }}</h1>
+        <a class="link-button" href="/">Switch User</a>
+      </header>
+
+      {% if result %}
+        <section class="ok"><pre>{{ result }}</pre></section>
+      {% endif %}
+      {% if error %}
+        <section class="error"><pre>{{ error }}</pre></section>
+      {% endif %}
+
+      <section>
+        <dl>
+          <dt>Status</dt>
+          <dd>{{ status }}</dd>
+          <dt>Port</dt>
+          <dd>{{ port or "Unknown" }}</dd>
+          <dt>Access URL</dt>
+          <dd>{% if access_url %}<a href="{{ access_url }}" target="_blank" rel="noreferrer">{{ access_url }}</a>{% else %}Unknown{% endif %}</dd>
+        </dl>
+      </section>
+
+      <section>
+        <div class="actions">
+          <form method="post" action="/users/{{ user_id }}/approve-latest">
+            <button type="submit">Approve Latest Device</button>
+          </form>
+        </div>
+      </section>
+
+      <section>
+        <h2>Device Cache</h2>
+        <pre>{{ devices_cache }}</pre>
+      </section>
+    </main>
+  </body>
+</html>

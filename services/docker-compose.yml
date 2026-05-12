@@ -9,7 +9,7 @@ services:
       NGINX_USERS_CONF_DIR: ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
       PUBLIC_HOST: ${PUBLIC_HOST:-}
     ports:
-      - "127.0.0.1:18081:8080"
+      - "127.0.0.1:18082:8080"
     volumes:
       - ..:/opt/openclaw-manager:ro
       - ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}:${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}

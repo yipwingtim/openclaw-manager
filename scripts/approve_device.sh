@@ -177,15 +177,8 @@ if [ "$TARGET_REQUEST_ID" = "--list-only" ]; then
 fi
 
 if [ "$TARGET_REQUEST_ID" = "--latest" ]; then
-  if [ "$REQUEST_COUNT" -eq 0 ]; then
-    fail "No pending request found. Refuse to approve --latest."
-  fi
-
-  # 注意：OpenClaw 官方文档提示 --latest / 省略 requestId 可能只打印选中的 pending request。
-  # 所以这里优先从 devices list 中取最后一个 requestId，再用精确 requestId approve。
-  LATEST_REQUEST_ID="$(echo "$REQUEST_IDS" | awk 'NF' | tail -n 1)"
-  log "Explicit --latest requested. Approving latest requestId: $LATEST_REQUEST_ID"
-  docker exec "$CONTAINER_NAME" openclaw devices approve "$LATEST_REQUEST_ID"
+  log "Explicit --latest requested. Approving latest pending request."
+  docker exec "$CONTAINER_NAME" openclaw devices approve --latest
   log "Approved latest request for user: $USER_ID"
   exit 0
 fi

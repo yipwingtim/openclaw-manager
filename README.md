@@ -121,6 +121,13 @@ openclaw-manager/
 
 ---
 
+## 📚 Documentation | 文档索引
+
+- [Agent Hosting Platform 架构规划](docs/architecture/agent-hosting-platform.md)
+- [User Self-Service Panel 用户自助面板](docs/user-self-service-panel.md)
+
+---
+
 ## 📁 Runtime Structure | 运行时目录（重要）
 
 运行时数据主要分为三部分：
@@ -283,6 +290,18 @@ https://<服务器IP>:<PORT>
 ```
 
 用于后续只读查询。
+
+如果已部署用户自助面板，用户也可以通过管理入口查看自己的实例并触发最新设备审批：
+
+```text
+https://<服务器IP>:30015
+```
+
+详细说明见：
+
+```text
+docs/user-self-service-panel.md
+```
 
 ---
 

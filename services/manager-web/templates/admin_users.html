@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Users - OpenClaw Manager</title>
+    <style>
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f6f7f9; color: #1f2933; }
+      main { max-width: 1100px; margin: 32px auto; padding: 0 20px; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+      h1 { font-size: 24px; margin: 0; }
+      a { color: #1d4ed8; }
+      .link-button { display: inline-flex; align-items: center; height: 38px; border-radius: 6px; padding: 0 14px; font-weight: 600; text-decoration: none; background: #eef2ff; color: #1d4ed8; }
+      section { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid #e4e7ec; vertical-align: top; }
+      th { font-size: 13px; color: #526070; background: #f8fafc; }
+      tr:last-child td { border-bottom: 0; }
+      td { font-size: 14px; }
+      .status { max-width: 260px; overflow-wrap: anywhere; }
+      .empty { padding: 20px; color: #526070; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>OpenClaw Users</h1>
+        <a class="link-button" href="/">Open User</a>
+      </header>
+
+      <section>
+        {% if users %}
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Status</th>
+                <th>Port</th>
+                <th>Access URL</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for user in users %}
+                <tr>
+                  <td>{{ user.user_id }}</td>
+                  <td class="status">{{ user.status }}</td>
+                  <td>{{ user.port or "Unknown" }}</td>
+                  <td>
+                    {% if user.access_url %}
+                      <a href="{{ user.access_url }}" target="_blank" rel="noreferrer">{{ user.access_url }}</a>
+                    {% else %}
+                      Unknown
+                    {% endif %}
+                  </td>
+                  <td><a href="/users/{{ user.user_id }}">View</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No active users found.</div>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

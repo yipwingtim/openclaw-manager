@@ -68,9 +68,38 @@ def build_access_url(port):
     return f"https://{host}:{port}"
 
 
+def list_active_users():
+    users_dir = PUBLIC_DIR / "users"
+    if not users_dir.is_dir():
+        return []
+
+    users = []
+    for user_dir in sorted(users_dir.iterdir(), key=lambda item: item.name):
+        if not user_dir.is_dir():
+            continue
+        user_id = validate_user_id(user_dir.name)
+        if not user_id:
+            continue
+        port = detect_port(user_id)
+        users.append(
+            {
+                "user_id": user_id,
+                "status": get_container_status(user_id),
+                "port": port,
+                "access_url": build_access_url(port),
+            }
+        )
+    return users
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
+
+
+@app.get("/admin/users")
+def admin_users():
+    return render_template("admin_users.html", users=list_active_users())
 
 
 @app.post("/go")

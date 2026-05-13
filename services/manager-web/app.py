@@ -54,6 +54,22 @@ def get_container_status(user_id):
     return result.stdout.strip() or "STOPPED"
 
 
+def get_container_logs(user_id, tail=120):
+    container_name = f"openclaw_{user_id}"
+    result = subprocess.run(
+        ["docker", "logs", "--tail", str(tail), container_name],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    if result.returncode != 0:
+        return output or "Could not read container logs."
+    return output or "No recent logs."
+
+
 def read_devices_cache(user_id):
     cache_file = get_user_dir(user_id) / "devices.txt"
     if not cache_file.is_file():
@@ -128,6 +144,7 @@ def user_detail(user_id):
         access_url=build_access_url(port),
         status=get_container_status(user_id),
         devices_cache=read_devices_cache(user_id),
+        recent_logs=get_container_logs(user_id),
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )

@@ -175,6 +175,31 @@ def approve_latest(user_id):
     return redirect(url_for("user_detail", user_id=user_id, result=output[-1200:]))
 
 
+@app.post("/users/<user_id>/refresh-devices")
+def refresh_devices(user_id):
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    script = MANAGER_DIR / "scripts" / "approve_device.sh"
+    result = subprocess.run(
+        [str(script), user_id, "--list-only"],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    if result.returncode != 0:
+        return redirect(url_for("user_detail", user_id=user_id, error=output[-1200:]))
+    return redirect(url_for("user_detail", user_id=user_id, result=output[-1200:]))
+
+
 if __name__ == "__main__":
     host = os.environ.get("FLASK_HOST", "127.0.0.1")
     port = int(os.environ.get("FLASK_PORT", "8080"))

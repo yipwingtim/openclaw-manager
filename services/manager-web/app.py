@@ -197,7 +197,7 @@ def refresh_devices(user_id):
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:
         return redirect(url_for("user_detail", user_id=user_id, error=output[-1200:]))
-    return redirect(url_for("user_detail", user_id=user_id, result=output[-1200:]))
+    return redirect(url_for("user_detail", user_id=user_id, result="Device cache refreshed."))
 
 
 if __name__ == "__main__":

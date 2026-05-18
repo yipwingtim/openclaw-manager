@@ -17,10 +17,31 @@ fi
 source "$CONFIG_FILE"
 
 # ===== 参数 =====
-USER_ID=$1
+USER_ID="${1:-}"
+BASIC_AUTH_PASSWORD=""
+
+shift || true
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --password)
+      BASIC_AUTH_PASSWORD="${2:-}"
+      if [ -z "$BASIC_AUTH_PASSWORD" ]; then
+        echo "[ERROR] --password requires a value"
+        exit 1
+      fi
+      shift 2
+      ;;
+    *)
+      echo "[ERROR] Unknown argument: $1"
+      echo "Usage: $0 <user_id> [--password <basic_auth_password>]"
+      exit 1
+      ;;
+  esac
+done
 
 if [ -z "$USER_ID" ]; then
-  echo "Usage: $0 <user_id>"
+  echo "Usage: $0 <user_id> [--password <basic_auth_password>]"
   exit 1
 fi
 
@@ -286,10 +307,18 @@ mkdir -p "$(dirname "$NGINX_HTPASSWD_FILE")"
 
 if [ ! -f "$NGINX_HTPASSWD_FILE" ]; then
   log "Creating Basic Auth user: $USER_ID"
-  htpasswd -c "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+    printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -ci "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  else
+    htpasswd -c "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  fi
 else
   log "Creating / updating Basic Auth user: $USER_ID"
-  htpasswd "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+    printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -i "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  else
+    htpasswd "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  fi
 fi
 
 # ===== 修复 nginx 容器读取 .htpasswd 的权限 =====
@@ -390,7 +419,11 @@ echo "👉 https://$PUBLIC_HOST:$PORT"
 echo ""
 echo "Basic Auth:"
 echo "👉 username: $USER_ID"
-echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
+if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+  echo "👉 password: $BASIC_AUTH_PASSWORD"
+else
+  echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
+fi
 
 echo "Login Token:"
 if [ -z "$TOKEN" ]; then

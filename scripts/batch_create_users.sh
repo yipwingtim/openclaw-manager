@@ -6,14 +6,29 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
 
-INPUT_CSV="${1:-}"
-OUTPUT_CSV="${2:-}"
-
-if [ -z "$INPUT_CSV" ] || [ -z "$OUTPUT_CSV" ]; then
+if [ "$#" -ne 2 ]; then
   echo "Usage: $0 <input.csv> <output.csv>"
   echo
   echo "Input CSV columns:"
   echo "  user_id,basic_auth_password"
+  exit 1
+fi
+
+INPUT_CSV="$1"
+OUTPUT_CSV="$2"
+
+if [ ! -f "$INPUT_CSV" ]; then
+  echo "[ERROR] Input CSV not found: $INPUT_CSV" >&2
+  exit 1
+fi
+
+HEADER="$(head -n 1 "$INPUT_CSV" | tr -d '\r')"
+FIRST_COLUMN="${HEADER%%,*}"
+
+if [ "$FIRST_COLUMN" != "user_id" ]; then
+  echo "[ERROR] Invalid input CSV header. First column must be user_id." >&2
+  echo "[ERROR] Expected: user_id,basic_auth_password" >&2
+  echo "[ERROR] Actual: $HEADER" >&2
   exit 1
 fi
 

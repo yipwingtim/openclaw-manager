@@ -45,6 +45,10 @@ PUBLIC_HOST="${PUBLIC_HOST:?Missing PUBLIC_HOST in config}"
 USERS_DIR="$BASE_DIR/users"
 NGINX_COMPOSE_DIR="${NGINX_COMPOSE_DIR:?Missing NGINX_COMPOSE_DIR in config}"
 NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
+PAUSE_EVERY="${BATCH_CREATE_PAUSE_EVERY:-5}"
+PAUSE_SECONDS="${BATCH_CREATE_PAUSE_SECONDS:-30}"
+
+sudo -v
 
 mkdir -p "$(dirname "$OUTPUT_CSV")"
 
@@ -125,6 +129,7 @@ write_output_row() {
 
 echo "user_id,basic_auth_username,basic_auth_password,openclaw_token,access_url,port,container_name,status" > "$OUTPUT_CSV"
 
+created_count=0
 line_no=0
 while IFS=, read -r raw_user_id raw_password _rest; do
   line_no=$((line_no + 1))
@@ -162,9 +167,15 @@ while IFS=, read -r raw_user_id raw_password _rest; do
   echo "[INFO] Creating user: $user_id"
   if "$SCRIPT_DIR/create_user.sh" "$user_id" --password "$password" --skip-nginx-reload; then
     write_output_row "$user_id" "$password" "created"
+    created_count=$((created_count + 1))
   else
     echo "[ERROR] Failed to create user: $user_id" >&2
     write_output_row "$user_id" "$password" "failed"
+  fi
+
+  if [ "$created_count" -gt 0 ] && [ "$PAUSE_EVERY" -gt 0 ] && [ $((created_count % PAUSE_EVERY)) -eq 0 ]; then
+    echo "[INFO] Pause for $PAUSE_SECONDS seconds after $created_count created users"
+    sleep "$PAUSE_SECONDS"
   fi
 done < "$INPUT_CSV"
 

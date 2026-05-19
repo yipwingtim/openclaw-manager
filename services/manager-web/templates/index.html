@@ -15,12 +15,16 @@
       a { color: #1d4ed8; }
       .error { margin-bottom: 14px; color: #b42318; }
       .nav { margin-top: 16px; }
+      .muted { margin-top: 12px; color: #526070; }
     </style>
   </head>
   <body>
     <main>
       <section>
         <h1>OpenClaw Manager</h1>
+        {% if current_user %}
+          <div class="muted">Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}</div>
+        {% endif %}
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="post" action="/go">
           <label for="user_id">User ID</label>

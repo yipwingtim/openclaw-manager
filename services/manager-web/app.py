@@ -16,6 +16,7 @@ PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
 CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
+ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "openclaw").split(",") if user.strip()}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -30,6 +31,37 @@ def validate_user_id(user_id):
 
 def get_user_dir(user_id):
     return PUBLIC_DIR / "users" / user_id
+
+
+def get_actor_user():
+    return (request.headers.get("X-Remote-User") or request.headers.get("X-Forwarded-User") or "").strip()
+
+
+def is_admin_user(user_id=None):
+    user_id = (user_id or get_actor_user()).strip()
+    return user_id in ADMIN_USERS
+
+
+def forbidden(message="Forbidden"):
+    return render_template("error.html", message=message), 403
+
+
+def require_admin():
+    actor = get_actor_user()
+    if not actor or not is_admin_user(actor):
+        return forbidden("Forbidden: admin access required.")
+    return None
+
+
+def require_instance_access(user_id, allow_admin=True):
+    actor = get_actor_user()
+    if not actor:
+        return forbidden("Forbidden: missing authenticated user.")
+    if actor == user_id:
+        return None
+    if allow_admin and is_admin_user(actor):
+        return None
+    return forbidden("Forbidden: you can only access your own instance.")
 
 
 def get_upload_dir(user_id):
@@ -138,11 +170,14 @@ def list_active_users():
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", current_user=get_actor_user(), is_admin=is_admin_user())
 
 
 @app.get("/admin/users")
 def admin_users():
+    denied = require_admin()
+    if denied:
+        return denied
     return render_template("admin_users.html", users=list_active_users())
 
 
@@ -164,10 +199,20 @@ def user_detail(user_id):
     if not user_dir.is_dir():
         return render_template("error.html", message=f"User not found: {user_id}"), 404
 
+    denied = require_instance_access(user_id)
+    if denied:
+        return denied
+
     port = detect_port(user_id)
+    current_user = get_actor_user()
+    current_is_admin = is_admin_user(current_user)
+    current_can_manage = current_is_admin or current_user == user_id
     return render_template(
         "user.html",
         user_id=user_id,
+        current_user=current_user,
+        is_admin=current_is_admin,
+        can_manage=current_can_manage,
         port=port,
         access_url=build_access_url(port),
         status=get_container_status(user_id),
@@ -186,6 +231,10 @@ def approve_latest(user_id):
     user_id = validate_user_id(user_id)
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
+
+    denied = require_admin()
+    if denied:
+        return denied
 
     user_dir = get_user_dir(user_id)
     if not user_dir.is_dir():
@@ -216,6 +265,10 @@ def refresh_devices(user_id):
     if not user_dir.is_dir():
         return render_template("error.html", message=f"User not found: {user_id}"), 404
 
+    denied = require_instance_access(user_id)
+    if denied:
+        return denied
+
     script = MANAGER_DIR / "scripts" / "approve_device.sh"
     result = subprocess.run(
         [str(script), user_id, "--list-only"],
@@ -240,6 +293,10 @@ def upload_file(user_id):
     user_dir = get_user_dir(user_id)
     if not user_dir.is_dir():
         return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    denied = require_instance_access(user_id)
+    if denied:
+        return denied
 
     uploaded = request.files.get("file")
     if uploaded is None or uploaded.filename == "":

@@ -38,6 +38,7 @@
           <a class="link-button" href="/">Switch User</a>
         </div>
       </header>
+      <p class="muted">Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}</p>
 
       {% if result %}
         <section class="ok"><pre>{{ result }}</pre></section>
@@ -59,45 +60,49 @@
 
       <section>
         <div class="actions">
-          <form method="post" action="/users/{{ user_id }}/approve-latest">
-            <button type="submit">Approve Latest Device</button>
-          </form>
+          {% if is_admin %}
+            <form method="post" action="/users/{{ user_id }}/approve-latest">
+              <button type="submit">Approve Latest Device</button>
+            </form>
+          {% endif %}
           <form method="post" action="/users/{{ user_id }}/refresh-devices">
             <button type="submit">Refresh Device Cache</button>
           </form>
         </div>
       </section>
 
-      <section>
-        <h2>Files</h2>
-        <form method="post" action="/users/{{ user_id }}/upload" enctype="multipart/form-data">
-          <input type="file" name="file" required>
-          <button type="submit">Upload</button>
-        </form>
-        <p class="muted">Container path: {{ container_upload_dir }}. Max file size: {{ max_upload_mb }} MB.</p>
-        {% if uploaded_files %}
-          <table class="file-list">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Size</th>
-                <th>Container Path</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for file in uploaded_files %}
+      {% if can_manage %}
+        <section>
+          <h2>Files</h2>
+          <form method="post" action="/users/{{ user_id }}/upload" enctype="multipart/form-data">
+            <input type="file" name="file" required>
+            <button type="submit">Upload</button>
+          </form>
+          <p class="muted">Container path: {{ container_upload_dir }}. Max file size: {{ max_upload_mb }} MB.</p>
+          {% if uploaded_files %}
+            <table class="file-list">
+              <thead>
                 <tr>
-                  <td>{{ file.name }}</td>
-                  <td>{{ file.size }} bytes</td>
-                  <td>{{ file.container_path }}</td>
+                  <th>Name</th>
+                  <th>Size</th>
+                  <th>Container Path</th>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% else %}
-          <p class="muted">No uploaded files.</p>
-        {% endif %}
-      </section>
+              </thead>
+              <tbody>
+                {% for file in uploaded_files %}
+                  <tr>
+                    <td>{{ file.name }}</td>
+                    <td>{{ file.size }} bytes</td>
+                    <td>{{ file.container_path }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="muted">No uploaded files.</p>
+          {% endif %}
+        </section>
+      {% endif %}
 
       <section>
         <h2>Device Cache</h2>

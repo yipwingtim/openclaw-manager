@@ -19,6 +19,7 @@ source "$CONFIG_FILE"
 # ===== 参数 =====
 USER_ID="${1:-}"
 BASIC_AUTH_PASSWORD=""
+SKIP_NGINX_RELOAD=0
 
 shift || true
 
@@ -32,16 +33,20 @@ while [ "$#" -gt 0 ]; do
       fi
       shift 2
       ;;
+    --skip-nginx-reload)
+      SKIP_NGINX_RELOAD=1
+      shift
+      ;;
     *)
       echo "[ERROR] Unknown argument: $1"
-      echo "Usage: $0 <user_id> [--password <basic_auth_password>]"
+      echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--skip-nginx-reload]"
       exit 1
       ;;
   esac
 done
 
 if [ -z "$USER_ID" ]; then
-  echo "Usage: $0 <user_id> [--password <basic_auth_password>]"
+  echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--skip-nginx-reload]"
   exit 1
 fi
 
@@ -343,28 +348,32 @@ if ! docker compose up -d; then
   exit 1
 fi
 
-# ===== 更新 nginx 容器并检查配置 =====
-log "Updating nginx container port mappings"
+if [ "$SKIP_NGINX_RELOAD" -eq 1 ]; then
+  log "Skip nginx update/reload; caller must reload nginx after batch operations"
+else
+  # ===== 更新 nginx 容器并检查配置 =====
+  log "Updating nginx container port mappings"
 
-cd "$NGINX_COMPOSE_DIR"
+  cd "$NGINX_COMPOSE_DIR"
 
-if ! docker compose up -d; then
-  fail "Failed to update nginx container"
-  exit 1
-fi
+  if ! docker compose up -d; then
+    fail "Failed to update nginx container"
+    exit 1
+  fi
 
-log "Testing nginx configuration"
+  log "Testing nginx configuration"
 
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
-  fail "Nginx configuration test failed"
-  exit 1
-fi
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
+    fail "Nginx configuration test failed"
+    exit 1
+  fi
 
-log "Reloading nginx"
+  log "Reloading nginx"
 
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
-  fail "Failed to reload nginx"
-  exit 1
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
+    fail "Failed to reload nginx"
+    exit 1
+  fi
 fi
 
 # ===== 成功后再提交端口 =====

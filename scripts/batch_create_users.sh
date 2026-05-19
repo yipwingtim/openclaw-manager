@@ -43,6 +43,8 @@ source "$CONFIG_FILE"
 BASE_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 PUBLIC_HOST="${PUBLIC_HOST:?Missing PUBLIC_HOST in config}"
 USERS_DIR="$BASE_DIR/users"
+NGINX_COMPOSE_DIR="${NGINX_COMPOSE_DIR:?Missing NGINX_COMPOSE_DIR in config}"
+NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
 
 mkdir -p "$(dirname "$OUTPUT_CSV")"
 
@@ -158,12 +160,32 @@ while IFS=, read -r raw_user_id raw_password _rest; do
   fi
 
   echo "[INFO] Creating user: $user_id"
-  if "$SCRIPT_DIR/create_user.sh" "$user_id" --password "$password"; then
+  if "$SCRIPT_DIR/create_user.sh" "$user_id" --password "$password" --skip-nginx-reload; then
     write_output_row "$user_id" "$password" "created"
   else
     echo "[ERROR] Failed to create user: $user_id" >&2
     write_output_row "$user_id" "$password" "failed"
   fi
 done < "$INPUT_CSV"
+
+if ! cd "$NGINX_COMPOSE_DIR"; then
+  echo "[ERROR] Failed to enter nginx compose directory: $NGINX_COMPOSE_DIR" >&2
+  exit 1
+fi
+
+if ! docker compose up -d; then
+  echo "[ERROR] Failed to update nginx container" >&2
+  exit 1
+fi
+
+if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
+  echo "[ERROR] Nginx configuration test failed" >&2
+  exit 1
+fi
+
+if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
+  echo "[ERROR] Failed to reload nginx" >&2
+  exit 1
+fi
 
 echo "[INFO] Batch create completed: $OUTPUT_CSV"

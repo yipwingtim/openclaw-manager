@@ -16,9 +16,25 @@ source "$CONFIG_FILE"
 
 # ===== 参数 =====
 USER_ID=$1
+SKIP_NGINX_RELOAD=0
+
+shift || true
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip-nginx-reload)
+      SKIP_NGINX_RELOAD=1
+      shift
+      ;;
+    *)
+      echo "Usage: $0 <user_id> [--skip-nginx-reload]"
+      exit 1
+      ;;
+  esac
+done
 
 if [ -z "$USER_ID" ]; then
-  echo "Usage: $0 <user_id>"
+  echo "Usage: $0 <user_id> [--skip-nginx-reload]"
   exit 1
 fi
 
@@ -129,25 +145,29 @@ else
   echo "[WARN] Skip nginx compose port cleanup"
 fi
 
-# ===== 更新 nginx 容器并 reload =====
-echo "[INFO] Updating nginx container..."
-cd "$NGINX_COMPOSE_DIR"
+if [ "$SKIP_NGINX_RELOAD" -eq 1 ]; then
+  echo "[INFO] Skip nginx update/reload; caller must reload nginx after batch operations"
+else
+  # ===== 更新 nginx 容器并 reload =====
+  echo "[INFO] Updating nginx container..."
+  cd "$NGINX_COMPOSE_DIR"
 
-if ! docker compose up -d; then
-  echo "[ERROR] Failed to update nginx container"
-  exit 1
-fi
+  if ! docker compose up -d; then
+    echo "[ERROR] Failed to update nginx container"
+    exit 1
+  fi
 
-echo "[INFO] Testing nginx configuration..."
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
-  echo "[ERROR] Nginx configuration test failed"
-  exit 1
-fi
+  echo "[INFO] Testing nginx configuration..."
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
+    echo "[ERROR] Nginx configuration test failed"
+    exit 1
+  fi
 
-echo "[INFO] Reloading nginx..."
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
-  echo "[ERROR] Failed to reload nginx"
-  exit 1
+  echo "[INFO] Reloading nginx..."
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
+    echo "[ERROR] Failed to reload nginx"
+    exit 1
+  fi
 fi
 
 # ===== 更新 users.csv 状态 =====

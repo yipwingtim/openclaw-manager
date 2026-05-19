@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from flask import Flask, redirect, render_template, request, url_for
+from werkzeug.utils import secure_filename
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -13,8 +14,11 @@ NGINX_USERS_CONF_DIR = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
+CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 
 def validate_user_id(user_id):
@@ -26,6 +30,30 @@ def validate_user_id(user_id):
 
 def get_user_dir(user_id):
     return PUBLIC_DIR / "users" / user_id
+
+
+def get_upload_dir(user_id):
+    return get_user_dir(user_id) / "uploads"
+
+
+def list_uploaded_files(user_id):
+    upload_dir = get_upload_dir(user_id)
+    if not upload_dir.is_dir():
+        return []
+
+    files = []
+    for path in sorted(upload_dir.iterdir(), key=lambda item: item.name):
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        files.append(
+            {
+                "name": path.name,
+                "size": stat.st_size,
+                "container_path": f"{CONTAINER_UPLOAD_DIR}/{path.name}",
+            }
+        )
+    return files
 
 
 def detect_port(user_id):
@@ -145,6 +173,9 @@ def user_detail(user_id):
         status=get_container_status(user_id),
         devices_cache=read_devices_cache(user_id),
         recent_logs=get_container_logs(user_id),
+        uploaded_files=list_uploaded_files(user_id),
+        container_upload_dir=CONTAINER_UPLOAD_DIR,
+        max_upload_mb=MAX_UPLOAD_BYTES // 1024 // 1024,
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )
@@ -198,6 +229,43 @@ def refresh_devices(user_id):
     if result.returncode != 0:
         return redirect(url_for("user_detail", user_id=user_id, error=output[-1200:]))
     return redirect(url_for("user_detail", user_id=user_id, result="Device cache refreshed."))
+
+
+@app.post("/users/<user_id>/upload")
+def upload_file(user_id):
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    uploaded = request.files.get("file")
+    if uploaded is None or uploaded.filename == "":
+        return redirect(url_for("user_detail", user_id=user_id, error="No file selected."))
+
+    filename = secure_filename(uploaded.filename)
+    if not filename:
+        return redirect(url_for("user_detail", user_id=user_id, error="Invalid filename."))
+
+    upload_dir = get_upload_dir(user_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    target = upload_dir / filename
+    if target.exists():
+        return redirect(url_for("user_detail", user_id=user_id, error=f"File already exists: {filename}"))
+
+    uploaded.save(target)
+    os.chmod(target, 0o644)
+
+    return redirect(
+        url_for(
+            "user_detail",
+            user_id=user_id,
+            result=f"Uploaded {filename} to {CONTAINER_UPLOAD_DIR}/{filename}",
+        )
+    )
 
 
 if __name__ == "__main__":

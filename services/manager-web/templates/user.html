@@ -10,6 +10,7 @@
       header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
       h1 { font-size: 24px; margin: 0; }
       section { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+      h2 { font-size: 18px; margin: 0 0 12px; }
       dl { display: grid; grid-template-columns: 140px 1fr; gap: 10px 16px; margin: 0; }
       dt { color: #526070; }
       dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -17,10 +18,15 @@
       button, .link-button { display: inline-flex; align-items: center; height: 38px; border-radius: 6px; padding: 0 14px; font-weight: 600; text-decoration: none; }
       button { border: 0; background: #2563eb; color: #fff; cursor: pointer; }
       .link-button { background: #eef2ff; color: #1d4ed8; }
+      input[type="file"] { box-sizing: border-box; max-width: 100%; }
       pre { white-space: pre-wrap; word-break: break-word; background: #101828; color: #e4e7ec; border-radius: 8px; padding: 14px; overflow: auto; max-height: 420px; }
       .ok { background: #ecfdf3; border-color: #abefc6; color: #067647; }
       .error { background: #fef3f2; border-color: #fecdca; color: #b42318; }
       .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      .file-list { width: 100%; border-collapse: collapse; margin-top: 14px; }
+      .file-list th, .file-list td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e4e7ec; vertical-align: top; }
+      .file-list th { color: #526070; font-size: 13px; background: #f8fafc; }
+      .muted { color: #526070; }
     </style>
   </head>
   <body>
@@ -60,6 +66,37 @@
             <button type="submit">Refresh Device Cache</button>
           </form>
         </div>
+      </section>
+
+      <section>
+        <h2>Files</h2>
+        <form method="post" action="/users/{{ user_id }}/upload" enctype="multipart/form-data">
+          <input type="file" name="file" required>
+          <button type="submit">Upload</button>
+        </form>
+        <p class="muted">Container path: {{ container_upload_dir }}. Max file size: {{ max_upload_mb }} MB.</p>
+        {% if uploaded_files %}
+          <table class="file-list">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Size</th>
+                <th>Container Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for file in uploaded_files %}
+                <tr>
+                  <td>{{ file.name }}</td>
+                  <td>{{ file.size }} bytes</td>
+                  <td>{{ file.container_path }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">No uploaded files.</p>
+        {% endif %}
       </section>
 
       <section>

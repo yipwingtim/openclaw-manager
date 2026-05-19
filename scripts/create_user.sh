@@ -141,7 +141,7 @@ NEXT_PORT=$((PORT + 1))
 log "Alloc port $PORT for user $USER_ID"
 
 # ===== 创建用户目录 =====
-mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions}
+mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions,uploads}
 
 CONFIG_FILE="$USER_DIR/config/openclaw.json"
 

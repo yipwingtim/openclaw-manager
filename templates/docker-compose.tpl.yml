@@ -16,6 +16,7 @@ services:
       - {{BASE_DIR}}/users/{{USER_ID}}/config:/home/node/.openclaw
       - {{BASE_DIR}}/users/{{USER_ID}}/workspaces:/workspaces
       - {{BASE_DIR}}/users/{{USER_ID}}/workspace:/home/node/.openclaw/workspace
+      - {{BASE_DIR}}/users/{{USER_ID}}/uploads:/workspaces/uploads
       - {{BASE_DIR}}/users/{{USER_ID}}/skills:/workspaces/main/skills
       - {{BASE_DIR}}/users/{{USER_ID}}/extensions:/home/node/.openclaw/extensions
       - /etc/localtime:/etc/localtime:ro

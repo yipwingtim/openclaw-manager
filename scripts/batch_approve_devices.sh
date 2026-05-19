@@ -1,0 +1,131 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: $0 <input.csv> <output.csv>"
+  echo
+  echo "Input CSV supported columns:"
+  echo "  user_id"
+  echo "  user_id,request_id"
+  exit 1
+fi
+
+INPUT_CSV="$1"
+OUTPUT_CSV="$2"
+
+if [ ! -f "$INPUT_CSV" ]; then
+  echo "[ERROR] Input CSV not found: $INPUT_CSV" >&2
+  exit 1
+fi
+
+HEADER="$(head -n 1 "$INPUT_CSV" | tr -d '\r')"
+USER_ID_INDEX=0
+REQUEST_ID_INDEX=0
+
+read -r USER_ID_INDEX REQUEST_ID_INDEX <<EOF
+$(python3 - "$HEADER" <<'PY'
+import csv
+import sys
+
+header = sys.argv[1]
+columns = [item.strip() for item in next(csv.reader([header]))]
+user_id_index = columns.index("user_id") + 1 if "user_id" in columns else 0
+request_id_index = columns.index("request_id") + 1 if "request_id" in columns else 0
+print(user_id_index, request_id_index)
+PY
+)
+EOF
+
+if [ "$USER_ID_INDEX" -eq 0 ]; then
+  echo "[ERROR] Invalid input CSV header. Missing user_id column." >&2
+  echo "[ERROR] Actual: $HEADER" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$OUTPUT_CSV")"
+echo "user_id,request_id,status,message" > "$OUTPUT_CSV"
+
+csv_escape() {
+  local value="${1:-}"
+  value="${value//\"/\"\"}"
+  printf '"%s"' "$value"
+}
+
+trim() {
+  local value="${1:-}"
+  value="${value//$'\r'/}"
+  printf '%s' "$value" | xargs
+}
+
+csv_field() {
+  local line="$1"
+  local index="$2"
+  python3 - "$line" "$index" <<'PY'
+import csv
+import sys
+
+line, index = sys.argv[1], int(sys.argv[2])
+row = next(csv.reader([line]))
+if index <= 0 or index > len(row):
+    print("")
+else:
+    print(row[index - 1])
+PY
+}
+
+write_output_row() {
+  local user_id="$1"
+  local request_id="$2"
+  local status="$3"
+  local message="$4"
+  {
+    csv_escape "$user_id"; printf ","
+    csv_escape "$request_id"; printf ","
+    csv_escape "$status"; printf ","
+    csv_escape "$message"; printf "\n"
+  } >> "$OUTPUT_CSV"
+}
+
+line_no=0
+while IFS= read -r line || [ -n "$line" ]; do
+  line_no=$((line_no + 1))
+  if [ "$line_no" -eq 1 ]; then
+    continue
+  fi
+
+  line="${line//$'\r'/}"
+  user_id="$(trim "$(csv_field "$line" "$USER_ID_INDEX")")"
+  request_id=""
+
+  if [ "$REQUEST_ID_INDEX" -ne 0 ]; then
+    request_id="$(trim "$(csv_field "$line" "$REQUEST_ID_INDEX")")"
+  fi
+
+  if [ -z "$user_id" ]; then
+    continue
+  fi
+
+  if ! [[ "$user_id" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
+    echo "[WARN] Skip invalid user_id at line $line_no: $user_id" >&2
+    write_output_row "$user_id" "$request_id" "invalid_user_id" "Invalid user_id"
+    continue
+  fi
+
+  if [ -z "$request_id" ]; then
+    request_id="--latest"
+  fi
+
+  echo "[INFO] Approving device for user: $user_id"
+  if output="$("$SCRIPT_DIR/approve_device.sh" "$user_id" "$request_id" 2>&1)"; then
+    write_output_row "$user_id" "$request_id" "approved" "Approved successfully"
+  else
+    echo "[WARN] Failed to approve device for user: $user_id" >&2
+    write_output_row "$user_id" "$request_id" "failed" "$output"
+  fi
+done < "$INPUT_CSV"
+
+echo "[INFO] Batch approval completed: $OUTPUT_CSV"

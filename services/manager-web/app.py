@@ -46,6 +46,34 @@ def forbidden(message="Forbidden"):
     return render_template("error.html", message=message), 403
 
 
+def batch_path_from_form(value):
+    value = (value or "").strip()
+    if not value:
+        return None, "Path is required."
+
+    path = Path(value)
+    if not path.is_absolute():
+        path = PUBLIC_DIR / "batches" / path
+
+    try:
+        resolved = path.resolve()
+        batches_root = (PUBLIC_DIR / "batches").resolve()
+        resolved.relative_to(batches_root)
+    except ValueError:
+        return None, "Path must be under batches directory."
+
+    return resolved, ""
+
+
+def read_text_preview(path, max_chars=8000):
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    if len(text) > max_chars:
+        return text[:max_chars] + "\n... truncated ..."
+    return text
+
+
 def require_admin():
     actor = get_actor_user()
     if not actor or not is_admin_user(actor):
@@ -179,6 +207,58 @@ def admin_users():
     if denied:
         return denied
     return render_template("admin_users.html", users=list_active_users())
+
+
+@app.get("/admin/device-approvals")
+def admin_device_approvals():
+    denied = require_admin()
+    if denied:
+        return denied
+    return render_template("admin_device_approvals.html", result="", error="")
+
+
+@app.post("/admin/device-approvals")
+def run_admin_device_approvals():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    input_path, input_error = batch_path_from_form(request.form.get("input_csv"))
+    output_path, output_error = batch_path_from_form(request.form.get("output_csv"))
+
+    if input_error or output_error:
+        return render_template(
+            "admin_device_approvals.html",
+            result="",
+            error=input_error or output_error,
+        ), 400
+
+    if not input_path.is_file():
+        return render_template(
+            "admin_device_approvals.html",
+            result="",
+            error=f"Input CSV not found: {input_path}",
+        ), 400
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    script = MANAGER_DIR / "scripts" / "batch_approve_devices.sh"
+    process = subprocess.run(
+        [str(script), str(input_path), str(output_path)],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=300,
+        check=False,
+    )
+    command_output = (process.stdout + "\n" + process.stderr).strip()
+    result_csv = read_text_preview(output_path)
+    result = f"{command_output}\n\nResult CSV:\n{result_csv}".strip()
+
+    if process.returncode != 0:
+        return render_template("admin_device_approvals.html", result=result, error="Batch approval failed."), 500
+
+    return render_template("admin_device_approvals.html", result=result, error="")
 
 
 @app.post("/go")

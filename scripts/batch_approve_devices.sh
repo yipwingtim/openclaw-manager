@@ -120,6 +120,19 @@ while IFS= read -r line || [ -n "$line" ]; do
   fi
 
   echo "[INFO] Approving device for user: $user_id"
+  if [ "$request_id" = "--latest" ]; then
+    if preview_output="$("$SCRIPT_DIR/approve_device.sh" "$user_id" --list-only 2>&1)"; then
+      if ! echo "$preview_output" | grep -Eq '^Pending[[:space:]]*\([1-9][0-9]*\)|^Pending$'; then
+        write_output_row "$user_id" "$request_id" "no_pending" "No pending request"
+        continue
+      fi
+    else
+      echo "[WARN] Failed to preview device requests for user: $user_id" >&2
+      write_output_row "$user_id" "$request_id" "failed" "$preview_output"
+      continue
+    fi
+  fi
+
   if output="$("$SCRIPT_DIR/approve_device.sh" "$user_id" "$request_id" 2>&1)"; then
     write_output_row "$user_id" "$request_id" "approved" "Approved successfully"
   else

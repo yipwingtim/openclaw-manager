@@ -113,9 +113,9 @@ PY
     return 1
   fi
 
-  docker exec -i "$container_name" openclaw config set "models.providers.${model_provider_id}" "$provider_json" --strict-json >/dev/null
-  docker exec -i "$container_name" openclaw config set agents.defaults.model.primary "\"$primary_model\"" --strict-json >/dev/null
-  docker exec -i "$container_name" openclaw config validate >/dev/null
+  docker exec "$container_name" openclaw config set "models.providers.${model_provider_id}" "$provider_json" --strict-json >/dev/null
+  docker exec "$container_name" openclaw config set agents.defaults.model.primary "\"$primary_model\"" --strict-json >/dev/null
+  docker exec "$container_name" openclaw config validate >/dev/null
   docker restart "$container_name" >/dev/null
 }
 

@@ -317,7 +317,7 @@ def approve_latest(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    denied = require_admin()
+    denied = require_instance_access(user_id)
     if denied:
         return denied
 

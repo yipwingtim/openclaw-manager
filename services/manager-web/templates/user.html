@@ -60,9 +60,9 @@
 
       <section>
         <div class="actions">
-          {% if is_admin %}
+          {% if can_manage %}
             <form method="post" action="/users/{{ user_id }}/approve-latest">
-              <button type="submit">Approve Latest Device</button>
+              <button type="submit">{% if is_admin %}Approve Latest Device{% else %}Approve My Device{% endif %}</button>
             </form>
           {% endif %}
           <form method="post" action="/users/{{ user_id }}/refresh-devices">

@@ -39,7 +39,8 @@
           <label for="output_csv">Output CSV</label>
           <input id="output_csv" name="output_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_results.csv" required>
 
-          <button type="submit">Run Batch Approval</button>
+          <button type="submit" name="action" value="preview">Preview Pending Requests</button>
+          <button type="submit" name="action" value="approve">Run Batch Approval</button>
         </form>
         <p class="muted">Paths must be under /data/docker/openclaw-public/batches.</p>
       </section>

@@ -225,6 +225,7 @@ def run_admin_device_approvals():
 
     input_path, input_error = batch_path_from_form(request.form.get("input_csv"))
     output_path, output_error = batch_path_from_form(request.form.get("output_csv"))
+    action = request.form.get("action", "approve")
 
     if input_error or output_error:
         return render_template(
@@ -242,7 +243,11 @@ def run_admin_device_approvals():
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    script = MANAGER_DIR / "scripts" / "batch_approve_devices.sh"
+    if action == "preview":
+        script = MANAGER_DIR / "scripts" / "batch_preview_device_requests.sh"
+    else:
+        script = MANAGER_DIR / "scripts" / "batch_approve_devices.sh"
+
     process = subprocess.run(
         [str(script), str(input_path), str(output_path)],
         cwd=str(MANAGER_DIR),
@@ -256,7 +261,7 @@ def run_admin_device_approvals():
     result = f"{command_output}\n\nResult CSV:\n{result_csv}".strip()
 
     if process.returncode != 0:
-        return render_template("admin_device_approvals.html", result=result, error="Batch approval failed."), 500
+        return render_template("admin_device_approvals.html", result=result, error="Batch device operation failed."), 500
 
     return render_template("admin_device_approvals.html", result=result, error="")
 

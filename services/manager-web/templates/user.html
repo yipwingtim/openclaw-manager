@@ -40,13 +40,6 @@
       </header>
       <p class="muted">Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}</p>
 
-      {% if result %}
-        <section class="ok"><pre>{{ result }}</pre></section>
-      {% endif %}
-      {% if error %}
-        <section class="error"><pre>{{ error }}</pre></section>
-      {% endif %}
-
       <section>
         <dl>
           <dt>Status</dt>
@@ -106,6 +99,12 @@
 
       <section>
         <h2>Device Cache</h2>
+        {% if result %}
+          <div class="ok"><pre>{{ result }}</pre></div>
+        {% endif %}
+        {% if error %}
+          <div class="error"><pre>{{ error }}</pre></div>
+        {% endif %}
         <pre>{{ devices_cache }}</pre>
       </section>
 

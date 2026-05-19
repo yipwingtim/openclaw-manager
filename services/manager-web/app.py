@@ -198,7 +198,30 @@ def list_active_users():
 
 @app.get("/")
 def index():
-    return render_template("index.html", current_user=get_actor_user(), is_admin=is_admin_user())
+    actor = get_actor_user()
+    if actor and is_admin_user(actor):
+        return redirect(url_for("admin_users"))
+    if actor:
+        return redirect(url_for("my_instance"))
+    return render_template("index.html", current_user="", is_admin=False)
+
+
+@app.get("/me")
+def my_instance():
+    actor = get_actor_user()
+    if not actor:
+        return forbidden("Forbidden: missing authenticated user.")
+    if is_admin_user(actor):
+        return redirect(url_for("admin_users"))
+    return redirect(url_for("user_detail", user_id=actor))
+
+
+@app.get("/admin")
+def admin_home():
+    denied = require_admin()
+    if denied:
+        return denied
+    return redirect(url_for("admin_users"))
 
 
 @app.get("/admin/users")
@@ -298,6 +321,7 @@ def user_detail(user_id):
         current_user=current_user,
         is_admin=current_is_admin,
         can_manage=current_can_manage,
+        show_admin_links=current_is_admin,
         port=port,
         access_url=build_access_url(port),
         status=get_container_status(user_id),

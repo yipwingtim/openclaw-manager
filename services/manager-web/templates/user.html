@@ -1,117 +1,118 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ user_id }} - OpenClaw Manager</title>
-    <style>
-      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f6f7f9; color: #1f2933; }
-      main { max-width: 920px; margin: 32px auto; padding: 0 20px; }
-      header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-      h1 { font-size: 24px; margin: 0; }
-      section { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
-      h2 { font-size: 18px; margin: 0 0 12px; }
-      dl { display: grid; grid-template-columns: 140px 1fr; gap: 10px 16px; margin: 0; }
-      dt { color: #526070; }
-      dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
-      a { color: #1d4ed8; }
-      button, .link-button { display: inline-flex; align-items: center; height: 38px; border-radius: 6px; padding: 0 14px; font-weight: 600; text-decoration: none; }
-      button { border: 0; background: #2563eb; color: #fff; cursor: pointer; }
-      .link-button { background: #eef2ff; color: #1d4ed8; }
-      input[type="file"] { box-sizing: border-box; max-width: 100%; }
-      pre { white-space: pre-wrap; word-break: break-word; background: #101828; color: #e4e7ec; border-radius: 8px; padding: 14px; overflow: auto; max-height: 420px; }
-      .ok { background: #ecfdf3; border-color: #abefc6; color: #067647; }
-      .error { background: #fef3f2; border-color: #fecdca; color: #b42318; }
-      .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-      .file-list { width: 100%; border-collapse: collapse; margin-top: 14px; }
-      .file-list th, .file-list td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e4e7ec; vertical-align: top; }
-      .file-list th { color: #526070; font-size: 13px; background: #f8fafc; }
-      .muted { color: #526070; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>{{ user_id }}</h1>
-        <div class="actions">
-          <a class="link-button" href="/admin/users">All Users</a>
-          <a class="link-button" href="/">Switch User</a>
+{% extends "base.html" %}
+{% block title %}{{ user_id }} - OpenClaw Manager{% endblock %}
+{% block nav_right %}
+  Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}
+{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h3 mb-1 text-oc">{{ user_id }}</h1>
+      <div class="text-secondary">Instance dashboard</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      {% if show_admin_links %}
+        <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+      {% endif %}
+      <a class="btn btn-oc-outline" href="/">Switch User</a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-7">
+      <div class="card shadow-sm mb-3">
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-3 text-secondary">Status</dt>
+            <dd class="col-sm-9 fw-semibold">{{ status }}</dd>
+            <dt class="col-sm-3 text-secondary">Port</dt>
+            <dd class="col-sm-9 fw-semibold">{{ port or "Unknown" }}</dd>
+            <dt class="col-sm-3 text-secondary">Access URL</dt>
+            <dd class="col-sm-9 fw-semibold">
+              {% if access_url %}
+                <a href="{{ access_url }}" target="_blank" rel="noreferrer">{{ access_url }}</a>
+              {% else %}
+                Unknown
+              {% endif %}
+            </dd>
+          </dl>
         </div>
-      </header>
-      <p class="muted">Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}</p>
+      </div>
 
-      <section>
-        <dl>
-          <dt>Status</dt>
-          <dd>{{ status }}</dd>
-          <dt>Port</dt>
-          <dd>{{ port or "Unknown" }}</dd>
-          <dt>Access URL</dt>
-          <dd>{% if access_url %}<a href="{{ access_url }}" target="_blank" rel="noreferrer">{{ access_url }}</a>{% else %}Unknown{% endif %}</dd>
-        </dl>
-      </section>
-
-      <section>
-        <div class="actions">
-          {% if can_manage %}
-            <form method="post" action="/users/{{ user_id }}/approve-latest">
-              <button type="submit">{% if is_admin %}Approve Latest Device{% else %}Approve My Device{% endif %}</button>
+      <div class="card shadow-sm mb-3">
+        <div class="card-body">
+          <div class="d-flex gap-2 flex-wrap">
+            {% if can_manage %}
+              <form method="post" action="/users/{{ user_id }}/approve-latest">
+                <button type="submit" class="btn btn-oc">{% if is_admin %}Approve Latest Device{% else %}Approve My Device{% endif %}</button>
+              </form>
+            {% endif %}
+            <form method="post" action="/users/{{ user_id }}/refresh-devices">
+              <button type="submit" class="btn btn-oc-outline">Refresh Device Cache</button>
             </form>
-          {% endif %}
-          <form method="post" action="/users/{{ user_id }}/refresh-devices">
-            <button type="submit">Refresh Device Cache</button>
-          </form>
+          </div>
         </div>
-      </section>
+      </div>
 
       {% if can_manage %}
-        <section>
-          <h2>Files</h2>
-          <form method="post" action="/users/{{ user_id }}/upload" enctype="multipart/form-data">
-            <input type="file" name="file" required>
-            <button type="submit">Upload</button>
-          </form>
-          <p class="muted">Container path: {{ container_upload_dir }}. Max file size: {{ max_upload_mb }} MB.</p>
-          {% if uploaded_files %}
-            <table class="file-list">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Size</th>
-                  <th>Container Path</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for file in uploaded_files %}
-                  <tr>
-                    <td>{{ file.name }}</td>
-                    <td>{{ file.size }} bytes</td>
-                    <td>{{ file.container_path }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          {% else %}
-            <p class="muted">No uploaded files.</p>
-          {% endif %}
-        </section>
+        <div class="card shadow-sm mb-3">
+          <div class="card-body">
+            <h2 class="h5 text-oc mb-3">Files</h2>
+            <form method="post" action="/users/{{ user_id }}/upload" enctype="multipart/form-data" class="mb-3">
+              <div class="input-group">
+                <input class="form-control" type="file" name="file" required>
+                <button class="btn btn-oc" type="submit">Upload</button>
+              </div>
+            </form>
+            <div class="text-secondary mb-3">Container path: {{ container_upload_dir }}. Max file size: {{ max_upload_mb }} MB.</div>
+            {% if uploaded_files %}
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Size</th>
+                      <th>Container Path</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for file in uploaded_files %}
+                      <tr>
+                        <td>{{ file.name }}</td>
+                        <td>{{ file.size }} bytes</td>
+                        <td>{{ file.container_path }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="text-secondary">No uploaded files.</div>
+            {% endif %}
+          </div>
+        </div>
       {% endif %}
+    </div>
 
-      <section>
-        <h2>Device Cache</h2>
-        {% if result %}
-          <div class="ok"><pre>{{ result }}</pre></div>
-        {% endif %}
-        {% if error %}
-          <div class="error"><pre>{{ error }}</pre></div>
-        {% endif %}
-        <pre>{{ devices_cache }}</pre>
-      </section>
+    <div class="col-12 col-lg-5">
+      <div class="card shadow-sm mb-3">
+        <div class="card-body">
+          <h2 class="h5 text-oc mb-3">Device Cache</h2>
+          {% if result %}
+            <div class="alert alert-success">{{ result }}</div>
+          {% endif %}
+          {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+          {% endif %}
+          <pre class="codebox mb-0">{{ devices_cache }}</pre>
+        </div>
+      </div>
 
-      <section>
-        <h2>Recent Logs</h2>
-        <pre>{{ recent_logs }}</pre>
-      </section>
-    </main>
-  </body>
-</html>
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5 text-oc mb-3">Recent Logs</h2>
+          <pre class="codebox mb-0">{{ recent_logs }}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

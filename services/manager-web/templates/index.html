@@ -1,38 +1,24 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OpenClaw Manager</title>
-    <style>
-      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f6f7f9; color: #1f2933; }
-      main { max-width: 520px; margin: 64px auto; padding: 0 20px; }
-      section { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 24px; }
-      h1 { font-size: 24px; margin: 0 0 18px; }
-      label { display: block; font-weight: 600; margin-bottom: 8px; }
-      input { box-sizing: border-box; width: 100%; height: 40px; border: 1px solid #b8c0cc; border-radius: 6px; padding: 0 10px; font-size: 15px; }
-      button { margin-top: 14px; height: 40px; border: 0; border-radius: 6px; padding: 0 16px; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
-      a { color: #1d4ed8; }
-      .error { margin-bottom: 14px; color: #b42318; }
-      .nav { margin-top: 16px; }
-      .muted { margin-top: 12px; color: #526070; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <section>
-        <h1>OpenClaw Manager</h1>
-        {% if current_user %}
-          <div class="muted">Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}</div>
-        {% endif %}
-        {% if error %}<div class="error">{{ error }}</div>{% endif %}
-        <form method="post" action="/go">
-          <label for="user_id">User ID</label>
-          <input id="user_id" name="user_id" autocomplete="username" required>
-          <button type="submit">Open Instance</button>
-        </form>
-        <div class="nav"><a href="/admin/users">View All Users</a></div>
-      </section>
-    </main>
-  </body>
-</html>
+{% extends "base.html" %}
+{% block title %}OpenClaw Manager{% endblock %}
+{% block nav_right %}
+  {% if current_user %}
+    Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}
+  {% endif %}
+{% endblock %}
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-12 col-md-7 col-lg-6">
+      <div class="card shadow-sm">
+        <div class="card-body p-4">
+          <h1 class="h3 mb-3 text-oc">OpenClaw Manager</h1>
+          {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+          <p class="text-secondary mb-4">Please wait while your signed-in account is redirected to the right dashboard.</p>
+          <div class="d-flex gap-2">
+            <a class="btn btn-oc" href="/me">Open My Instance</a>
+            <a class="btn btn-oc-outline" href="/admin">Admin Panel</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

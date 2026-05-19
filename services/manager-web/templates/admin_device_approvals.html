@@ -1,55 +1,41 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Device Approvals - OpenClaw Manager</title>
-    <style>
-      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f6f7f9; color: #1f2933; }
-      main { max-width: 920px; margin: 32px auto; padding: 0 20px; }
-      header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-      h1 { font-size: 24px; margin: 0; }
-      section { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
-      label { display: block; font-weight: 600; margin: 12px 0 6px; }
-      input { box-sizing: border-box; width: 100%; height: 38px; border: 1px solid #b8c0cc; border-radius: 6px; padding: 0 10px; font-size: 14px; }
-      button, .link-button { display: inline-flex; align-items: center; height: 38px; border-radius: 6px; padding: 0 14px; font-weight: 600; text-decoration: none; }
-      button { margin-top: 14px; border: 0; background: #2563eb; color: #fff; cursor: pointer; }
-      .link-button { background: #eef2ff; color: #1d4ed8; }
-      pre { white-space: pre-wrap; word-break: break-word; background: #101828; color: #e4e7ec; border-radius: 8px; padding: 14px; overflow: auto; max-height: 520px; }
-      .error { background: #fef3f2; border-color: #fecdca; color: #b42318; }
-      .muted { color: #526070; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <h1>Device Approvals</h1>
-        <a class="link-button" href="/admin/users">All Users</a>
-      </header>
+{% extends "base.html" %}
+{% block title %}Device Approvals - OpenClaw Manager{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h3 mb-1 text-oc">Device Approvals</h1>
+      <div class="text-secondary">Admin batch control</div>
+    </div>
+    <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+  </div>
 
-      {% if error %}
-        <section class="error">{{ error }}</section>
-      {% endif %}
+  {% if error %}
+    <div class="alert soft-danger">{{ error }}</div>
+  {% endif %}
 
-      <section>
-        <form method="post" action="/admin/device-approvals">
-          <label for="input_csv">Input CSV</label>
-          <input id="input_csv" name="input_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_input.csv" required>
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <form method="post" action="/admin/device-approvals">
+        <label class="form-label" for="input_csv">Input CSV</label>
+        <input class="form-control mb-3" id="input_csv" name="input_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_input.csv" required>
 
-          <label for="output_csv">Output CSV</label>
-          <input id="output_csv" name="output_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_results.csv" required>
+        <label class="form-label" for="output_csv">Output CSV</label>
+        <input class="form-control mb-3" id="output_csv" name="output_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_results.csv" required>
 
-          <button type="submit" name="action" value="preview">Preview Pending Requests</button>
-          <button type="submit" name="action" value="approve">Run Batch Approval</button>
-        </form>
-        <p class="muted">Paths must be under /data/docker/openclaw-public/batches.</p>
-      </section>
+        <div class="d-flex gap-2">
+          <button class="btn btn-oc-outline" type="submit" name="action" value="preview">Preview Pending Requests</button>
+          <button class="btn btn-oc" type="submit" name="action" value="approve">Run Batch Approval</button>
+        </div>
+      </form>
+      <div class="text-secondary mt-3">Paths must be under /data/docker/openclaw-public/batches.</div>
+    </div>
+  </div>
 
-      {% if result %}
-        <section>
-          <pre>{{ result }}</pre>
-        </section>
-      {% endif %}
-    </main>
-  </body>
-</html>
+  {% if result %}
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <pre class="codebox mb-0">{{ result }}</pre>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

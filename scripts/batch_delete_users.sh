@@ -91,11 +91,14 @@ while IFS=, read -r raw_user_id _rest; do
   fi
 
   echo "[INFO] Deleting user: $user_id"
-  if output="$("$SCRIPT_DIR/delete_user.sh" "$user_id" --skip-nginx-reload 2>&1)"; then
-    write_output_row "$user_id" "deleted" "Moved to recycle bin"
-  else
+  output="$("$SCRIPT_DIR/delete_user.sh" "$user_id" --skip-nginx-reload 2>&1)" || true
+  if echo "$output" | grep -q '\[WARN\] User not found:'; then
+    write_output_row "$user_id" "skipped" "User already removed"
+  elif echo "$output" | grep -q '\[ERROR\]'; then
     echo "[ERROR] Failed to delete user: $user_id" >&2
     write_output_row "$user_id" "failed" "$output"
+  else
+    write_output_row "$user_id" "deleted" "Moved to recycle bin"
   fi
 done < "$INPUT_CSV"
 

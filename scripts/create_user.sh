@@ -20,6 +20,11 @@ source "$CONFIG_FILE"
 USER_ID="${1:-}"
 BASIC_AUTH_PASSWORD=""
 SKIP_NGINX_RELOAD=0
+SUCCESS=0
+USER_DIR_CREATED=0
+NGINX_CONF_CREATED=0
+PORT_MAPPING_CREATED=0
+HTPASSWD_FILE_CREATED=0
 
 shift || true
 
@@ -102,6 +107,56 @@ fail() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" | tee -a "$LOG_FILE" >&2
 }
 
+cleanup_on_exit() {
+  local exit_code="$1"
+
+  if [ "$exit_code" -eq 0 ] || [ "$SUCCESS" -eq 1 ]; then
+    return
+  fi
+
+  if [ -d "$USER_DIR" ]; then
+    cd "$USER_DIR" 2>/dev/null || true
+    docker compose down >/dev/null 2>&1 || true
+  fi
+
+  if [ "$PORT_MAPPING_CREATED" -eq 1 ] && [ -f "$NGINX_COMPOSE_FILE" ]; then
+    python3 - "$NGINX_COMPOSE_FILE" "$PORT" <<'PY' >/dev/null 2>&1 || true
+import sys
+from pathlib import Path
+
+compose_file = Path(sys.argv[1])
+port = sys.argv[2]
+
+text = compose_file.read_text(encoding="utf-8")
+lines = text.splitlines(keepends=True)
+patterns = {
+    f'      - "{port}:{port}"\n',
+    f"      - '{port}:{port}'\n",
+    f"      - {port}:{port}\n",
+}
+
+compose_file.write_text("".join(line for line in lines if line not in patterns), encoding="utf-8")
+PY
+  fi
+
+  if [ "$NGINX_CONF_CREATED" -eq 1 ] && [ -f "$NGINX_USER_CONF" ]; then
+    rm -f "$NGINX_USER_CONF"
+  fi
+
+  if [ -f "$NGINX_HTPASSWD_FILE" ]; then
+    htpasswd -D "$NGINX_HTPASSWD_FILE" "$USER_ID" >/dev/null 2>&1 || true
+    if [ "$HTPASSWD_FILE_CREATED" -eq 1 ] && [ ! -s "$NGINX_HTPASSWD_FILE" ]; then
+      rm -f "$NGINX_HTPASSWD_FILE"
+    fi
+  fi
+
+  if [ "$USER_DIR_CREATED" -eq 1 ] && [ -d "$USER_DIR" ]; then
+    rm -rf "$USER_DIR"
+  fi
+}
+
+trap 'cleanup_on_exit $?' EXIT
+
 # ===== 检查用户 =====
 if [ -d "$USER_DIR" ]; then
   fail "User $USER_ID already exists"
@@ -147,6 +202,7 @@ log "Alloc port $PORT for user $USER_ID"
 
 # ===== 创建用户目录 =====
 mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions,uploads}
+USER_DIR_CREATED=1
 
 CONFIG_FILE="$USER_DIR/config/openclaw.json"
 
@@ -166,6 +222,7 @@ cat > "$CONFIG_FILE" <<EOF
   }
 }
 EOF
+NGINX_CONF_CREATED=1
 
 # ===== 注入默认 skills =====
 if [ -d "$MANAGER_DIR/templates/skills" ]; then
@@ -293,6 +350,7 @@ compose_file.write_text("".join(out), encoding="utf-8")
 PY
 
   log "Added nginx port mapping: $PORT:$PORT"
+  PORT_MAPPING_CREATED=1
 fi
 
 # ===== 创建 / 更新 Basic Auth 用户 =====
@@ -311,6 +369,7 @@ fi
 mkdir -p "$(dirname "$NGINX_HTPASSWD_FILE")"
 
 if [ ! -f "$NGINX_HTPASSWD_FILE" ]; then
+  HTPASSWD_FILE_CREATED=1
   log "Creating Basic Auth user: $USER_ID"
   if [ -n "$BASIC_AUTH_PASSWORD" ]; then
     printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -ci "$NGINX_HTPASSWD_FILE" "$USER_ID"
@@ -442,3 +501,4 @@ else
 fi
 
 echo "=============================="
+SUCCESS=1

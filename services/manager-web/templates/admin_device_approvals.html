@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Device Approvals - OpenClaw Manager{% endblock %}
 {% block content %}
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <h1 class="h3 mb-1 text-oc">Device Approvals</h1>
-      <div class="text-secondary">Admin batch control</div>
+      <div class="page-kicker">Batch Control</div>
+      <h1 class="page-title">Device Approvals</h1>
+      <div class="page-subtitle">Preview pending devices and approve requests from a controlled CSV batch.</div>
     </div>
     <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
   </div>
@@ -13,29 +14,26 @@
     <div class="alert soft-danger">{{ error }}</div>
   {% endif %}
 
-  <div class="card shadow-sm mb-3">
-    <div class="card-body">
-      <form method="post" action="/admin/device-approvals">
-        <label class="form-label" for="input_csv">Input CSV</label>
-        <input class="form-control mb-3" id="input_csv" name="input_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_input.csv" required>
+  <div class="surface p-3 p-lg-4 mb-3">
+    <form method="post" action="/admin/device-approvals">
+      <label class="form-label" for="input_csv">Input CSV</label>
+      <input class="form-control mb-3" id="input_csv" name="input_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_input.csv" required>
 
-        <label class="form-label" for="output_csv">Output CSV</label>
-        <input class="form-control mb-3" id="output_csv" name="output_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_results.csv" required>
+      <label class="form-label" for="output_csv">Output CSV</label>
+      <input class="form-control mb-3" id="output_csv" name="output_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_results.csv" required>
 
-        <div class="d-flex gap-2">
-          <button class="btn btn-oc-outline" type="submit" name="action" value="preview">Preview Pending Requests</button>
-          <button class="btn btn-oc" type="submit" name="action" value="approve">Run Batch Approval</button>
-        </div>
-      </form>
-      <div class="text-secondary mt-3">Paths must be under /data/docker/openclaw-public/batches.</div>
-    </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-oc-outline" type="submit" name="action" value="preview">Preview Pending Requests</button>
+        <button class="btn btn-oc" type="submit" name="action" value="approve">Run Batch Approval</button>
+      </div>
+    </form>
+    <div class="muted-small mt-3">Paths must be under /data/docker/openclaw-public/batches.</div>
   </div>
 
   {% if result %}
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <pre class="codebox mb-0">{{ result }}</pre>
-      </div>
+    <div class="surface p-3 p-lg-4">
+      <div class="section-title mb-3">Batch Result</div>
+      <pre class="codebox mb-0">{{ result }}</pre>
     </div>
   {% endif %}
 {% endblock %}

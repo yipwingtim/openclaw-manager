@@ -7,16 +7,15 @@
 {% endblock %}
 {% block content %}
   <div class="row justify-content-center">
-    <div class="col-12 col-md-7 col-lg-6">
-      <div class="card shadow-sm">
-        <div class="card-body p-4">
-          <h1 class="h3 mb-3 text-oc">OpenClaw Manager</h1>
-          {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
-          <p class="text-secondary mb-4">Please wait while your signed-in account is redirected to the right dashboard.</p>
-          <div class="d-flex gap-2">
-            <a class="btn btn-oc" href="/me">Open My Instance</a>
-            <a class="btn btn-oc-outline" href="/admin">Admin Panel</a>
-          </div>
+    <div class="col-12 col-md-8 col-lg-6">
+      <div class="surface p-4 p-lg-5">
+        <div class="page-kicker">Workspace Router</div>
+        <h1 class="page-title mb-2">OpenClaw Manager</h1>
+        <p class="page-subtitle mb-4">Your authenticated account will be routed to the correct workspace or admin console.</p>
+        {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+        <div class="d-flex gap-2 flex-wrap">
+          <a class="btn btn-oc" href="/me">Open My Instance</a>
+          <a class="btn btn-oc-outline" href="/admin">Admin Panel</a>
         </div>
       </div>
     </div>

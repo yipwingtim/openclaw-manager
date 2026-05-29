@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Users - OpenClaw Manager{% endblock %}
 {% block content %}
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <h1 class="h3 mb-1 text-oc">OpenClaw Users</h1>
-      <div class="text-secondary">Administrator dashboard</div>
+      <div class="page-kicker">Administrator Console</div>
+      <h1 class="page-title">OpenClaw Users</h1>
+      <div class="page-subtitle">Review instance status, ports, and direct access links.</div>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
       <a class="btn btn-oc-outline" href="/admin/device-approvals">Device Approvals</a>
       <a class="btn btn-oc" href="/me">Open My Instance</a>
     </div>
   </div>
 
-  <div class="card shadow-sm">
-    <div class="card-body p-0">
+  <div class="surface">
       {% if users %}
         <div class="table-responsive">
           <table class="table table-hover mb-0 align-middle">
@@ -29,9 +29,17 @@
             <tbody>
               {% for user in users %}
                 <tr>
-                  <td>{{ user.user_id }}</td>
-                  <td class="text-secondary">{{ user.status }}</td>
-                  <td>{{ user.port or "Unknown" }}</td>
+                  <td class="fw-semibold">{{ user.user_id }}</td>
+                  <td>
+                    {% if user.status.startswith("Up") %}
+                      <span class="badge-status badge-running">{{ user.status }}</span>
+                    {% elif user.status == "STOPPED" %}
+                      <span class="badge-status badge-stopped">{{ user.status }}</span>
+                    {% else %}
+                      <span class="badge-status badge-neutral">{{ user.status }}</span>
+                    {% endif %}
+                  </td>
+                  <td class="fw-semibold">{{ user.port or "Unknown" }}</td>
                   <td>
                     {% if user.access_url %}
                       <a href="{{ user.access_url }}" target="_blank" rel="noreferrer">{{ user.access_url }}</a>
@@ -39,15 +47,14 @@
                       Unknown
                     {% endif %}
                   </td>
-                  <td><a href="/users/{{ user.user_id }}">View</a></td>
+                  <td><a class="btn btn-sm btn-oc-outline" href="/users/{{ user.user_id }}">View</a></td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       {% else %}
-        <div class="p-4 text-secondary">No active users found.</div>
+        <div class="p-4 muted-small">No active users found.</div>
       {% endif %}
-    </div>
   </div>
 {% endblock %}

@@ -255,6 +255,31 @@ server {
 
     client_max_body_size 10M;
 
+    location = /admin {
+        return 302 /admin/;
+    }
+
+    location /admin/ {
+        auth_basic "OpenClaw Login";
+        auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;
+
+        proxy_pass http://openclaw-manager-web:8080/instance-admin/;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-OpenClaw-User "$USER_ID";
+
+        proxy_read_timeout 300;
+        proxy_send_timeout 300;
+    }
+
     location / {
         auth_basic "OpenClaw Login";
         auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;

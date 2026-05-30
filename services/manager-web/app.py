@@ -1,9 +1,10 @@
 import os
 import re
 import subprocess
+from urllib.parse import urlencode
 from pathlib import Path
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, redirect, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
 
@@ -16,6 +17,10 @@ PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
 CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
+WORKSPACE_FILE_ROOTS = {
+    "workspace": ("OpenClaw Workspace", "workspace", "/home/node/.openclaw/workspace"),
+    "workspaces": ("Shared Workspaces", "workspaces", "/workspaces"),
+}
 ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "openclaw").split(",") if user.strip()}
 
 app = Flask(__name__)
@@ -35,6 +40,10 @@ def get_user_dir(user_id):
 
 def get_actor_user():
     return (request.headers.get("X-Remote-User") or request.headers.get("X-Forwarded-User") or "").strip()
+
+
+def get_instance_user():
+    return validate_user_id(request.headers.get("X-OpenClaw-User"))
 
 
 def is_admin_user(user_id=None):
@@ -114,6 +123,66 @@ def list_uploaded_files(user_id):
             }
         )
     return files
+
+
+def format_bytes(size):
+    units = ["B", "KB", "MB", "GB"]
+    value = float(size)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size} B"
+
+
+def list_markdown_files(user_id):
+    user_dir = get_user_dir(user_id)
+    files = []
+
+    for root_key, (label, relative_dir, container_dir) in WORKSPACE_FILE_ROOTS.items():
+        root = user_dir / relative_dir
+        if not root.is_dir():
+            continue
+
+        for path in sorted(root.rglob("*"), key=lambda item: str(item.relative_to(root))):
+            if not path.is_file() or path.suffix.lower() not in {".md", ".markdown"}:
+                continue
+            relative_path = path.relative_to(root).as_posix()
+            stat = path.stat()
+            files.append(
+                {
+                    "root": root_key,
+                    "root_label": label,
+                    "name": path.name,
+                    "relative_path": relative_path,
+                    "container_path": f"{container_dir}/{relative_path}",
+                    "size": format_bytes(stat.st_size),
+                    "mtime": stat.st_mtime,
+                }
+            )
+
+    return files
+
+
+def resolve_workspace_file(user_id, root_key, relative_path):
+    root_config = WORKSPACE_FILE_ROOTS.get(root_key)
+    if root_config is None:
+        return None
+
+    root = (get_user_dir(user_id) / root_config[1]).resolve()
+    target = (root / relative_path).resolve()
+
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None
+
+    if not target.is_file() or target.suffix.lower() not in {".md", ".markdown"}:
+        return None
+
+    return target
 
 
 def detect_port(user_id):
@@ -196,6 +265,127 @@ def list_active_users():
     return users
 
 
+def render_user_dashboard(user_id, instance_mode=False):
+    port = detect_port(user_id)
+    current_user = get_actor_user() or (user_id if instance_mode else "")
+    current_is_admin = False if instance_mode else is_admin_user(current_user)
+    current_can_manage = instance_mode or current_is_admin or current_user == user_id
+
+    if instance_mode:
+        approve_url = "/admin/approve-latest"
+        refresh_url = "/admin/refresh-devices"
+        upload_url = "/admin/upload"
+        download_endpoint = ""
+    else:
+        approve_url = url_for("approve_latest", user_id=user_id)
+        refresh_url = url_for("refresh_devices", user_id=user_id)
+        upload_url = url_for("upload_file", user_id=user_id)
+        download_endpoint = "download_workspace_file"
+
+    return render_template(
+        "user.html",
+        user_id=user_id,
+        current_user=current_user,
+        is_admin=current_is_admin,
+        can_manage=current_can_manage,
+        show_admin_links=(current_is_admin and not instance_mode),
+        instance_mode=instance_mode,
+        port=port,
+        access_url=build_access_url(port),
+        status=get_container_status(user_id),
+        devices_cache=read_devices_cache(user_id),
+        recent_logs=get_container_logs(user_id),
+        uploaded_files=list_uploaded_files(user_id),
+        markdown_files=list_markdown_files(user_id),
+        container_upload_dir=CONTAINER_UPLOAD_DIR,
+        max_upload_mb=MAX_UPLOAD_BYTES // 1024 // 1024,
+        approve_url=approve_url,
+        refresh_url=refresh_url,
+        upload_url=upload_url,
+        download_endpoint=download_endpoint,
+        result=request.args.get("result", ""),
+        error=request.args.get("error", ""),
+    )
+
+
+def redirect_to_user_dashboard(user_id, instance_mode=False, result="", error=""):
+    values = {}
+    if result:
+        values["result"] = result
+    if error:
+        values["error"] = error
+
+    if instance_mode:
+        query = urlencode(values)
+        return redirect("/admin/" + (f"?{query}" if query else ""))
+    return redirect(url_for("user_detail", user_id=user_id, **values))
+
+
+def approve_latest_for_user(user_id, instance_mode=False):
+    script = MANAGER_DIR / "scripts" / "approve_device.sh"
+    result = subprocess.run(
+        [str(script), user_id, "--latest"],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    if result.returncode != 0:
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=output[-1200:])
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=output[-1200:])
+
+
+def refresh_devices_for_user(user_id, instance_mode=False):
+    script = MANAGER_DIR / "scripts" / "approve_device.sh"
+    result = subprocess.run(
+        [str(script), user_id, "--list-only"],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    if result.returncode != 0:
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=output[-1200:])
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result="Device cache refreshed.")
+
+
+def upload_file_for_user(user_id, instance_mode=False):
+    uploaded = request.files.get("file")
+    if uploaded is None or uploaded.filename == "":
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="No file selected.")
+
+    filename = secure_filename(uploaded.filename)
+    if not filename:
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="Invalid filename.")
+
+    upload_dir = get_upload_dir(user_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    target = upload_dir / filename
+    if target.exists():
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=f"File already exists: {filename}")
+
+    uploaded.save(target)
+    os.chmod(target, 0o644)
+
+    return redirect_to_user_dashboard(
+        user_id,
+        instance_mode=instance_mode,
+        result=f"Uploaded {filename} to {CONTAINER_UPLOAD_DIR}/{filename}",
+    )
+
+
+def download_workspace_file_for_user(user_id, root_key, relative_path):
+    target = resolve_workspace_file(user_id, root_key, relative_path)
+    if target is None:
+        return render_template("error.html", message="File not found."), 404
+    return send_file(target, as_attachment=True, download_name=target.name)
+
+
 @app.get("/")
 def index():
     actor = get_actor_user()
@@ -230,6 +420,52 @@ def admin_users():
     if denied:
         return denied
     return render_template("admin_users.html", users=list_active_users())
+
+
+@app.get("/instance-admin")
+@app.get("/instance-admin/")
+def instance_admin():
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    return render_user_dashboard(user_id, instance_mode=True)
+
+
+@app.post("/instance-admin/approve-latest")
+def instance_approve_latest():
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return approve_latest_for_user(user_id, instance_mode=True)
+
+
+@app.post("/instance-admin/refresh-devices")
+def instance_refresh_devices():
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return refresh_devices_for_user(user_id, instance_mode=True)
+
+
+@app.post("/instance-admin/upload")
+def instance_upload_file():
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return upload_file_for_user(user_id, instance_mode=True)
+
+
+@app.get("/instance-admin/files/<root_key>/<path:relative_path>")
+def instance_download_workspace_file(root_key, relative_path):
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return download_workspace_file_for_user(user_id, root_key, relative_path)
 
 
 @app.get("/admin/device-approvals")
@@ -311,28 +547,7 @@ def user_detail(user_id):
     if denied:
         return denied
 
-    port = detect_port(user_id)
-    current_user = get_actor_user()
-    current_is_admin = is_admin_user(current_user)
-    current_can_manage = current_is_admin or current_user == user_id
-    return render_template(
-        "user.html",
-        user_id=user_id,
-        current_user=current_user,
-        is_admin=current_is_admin,
-        can_manage=current_can_manage,
-        show_admin_links=current_is_admin,
-        port=port,
-        access_url=build_access_url(port),
-        status=get_container_status(user_id),
-        devices_cache=read_devices_cache(user_id),
-        recent_logs=get_container_logs(user_id),
-        uploaded_files=list_uploaded_files(user_id),
-        container_upload_dir=CONTAINER_UPLOAD_DIR,
-        max_upload_mb=MAX_UPLOAD_BYTES // 1024 // 1024,
-        result=request.args.get("result", ""),
-        error=request.args.get("error", ""),
-    )
+    return render_user_dashboard(user_id)
 
 
 @app.post("/users/<user_id>/approve-latest")
@@ -349,19 +564,7 @@ def approve_latest(user_id):
     if not user_dir.is_dir():
         return render_template("error.html", message=f"User not found: {user_id}"), 404
 
-    script = MANAGER_DIR / "scripts" / "approve_device.sh"
-    result = subprocess.run(
-        [str(script), user_id, "--latest"],
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=60,
-        check=False,
-    )
-    output = (result.stdout + "\n" + result.stderr).strip()
-    if result.returncode != 0:
-        return redirect(url_for("user_detail", user_id=user_id, error=output[-1200:]))
-    return redirect(url_for("user_detail", user_id=user_id, result=output[-1200:]))
+    return approve_latest_for_user(user_id)
 
 
 @app.post("/users/<user_id>/refresh-devices")
@@ -378,19 +581,7 @@ def refresh_devices(user_id):
     if denied:
         return denied
 
-    script = MANAGER_DIR / "scripts" / "approve_device.sh"
-    result = subprocess.run(
-        [str(script), user_id, "--list-only"],
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=60,
-        check=False,
-    )
-    output = (result.stdout + "\n" + result.stderr).strip()
-    if result.returncode != 0:
-        return redirect(url_for("user_detail", user_id=user_id, error=output[-1200:]))
-    return redirect(url_for("user_detail", user_id=user_id, result="Device cache refreshed."))
+    return refresh_devices_for_user(user_id)
 
 
 @app.post("/users/<user_id>/upload")
@@ -407,31 +598,24 @@ def upload_file(user_id):
     if denied:
         return denied
 
-    uploaded = request.files.get("file")
-    if uploaded is None or uploaded.filename == "":
-        return redirect(url_for("user_detail", user_id=user_id, error="No file selected."))
+    return upload_file_for_user(user_id)
 
-    filename = secure_filename(uploaded.filename)
-    if not filename:
-        return redirect(url_for("user_detail", user_id=user_id, error="Invalid filename."))
 
-    upload_dir = get_upload_dir(user_id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
+@app.get("/users/<user_id>/files/<root_key>/<path:relative_path>")
+def download_workspace_file(user_id, root_key, relative_path):
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
 
-    target = upload_dir / filename
-    if target.exists():
-        return redirect(url_for("user_detail", user_id=user_id, error=f"File already exists: {filename}"))
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
-    uploaded.save(target)
-    os.chmod(target, 0o644)
+    denied = require_instance_access(user_id)
+    if denied:
+        return denied
 
-    return redirect(
-        url_for(
-            "user_detail",
-            user_id=user_id,
-            result=f"Uploaded {filename} to {CONTAINER_UPLOAD_DIR}/{filename}",
-        )
-    )
+    return download_workspace_file_for_user(user_id, root_key, relative_path)
 
 
 if __name__ == "__main__":

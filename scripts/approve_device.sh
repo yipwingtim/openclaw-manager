@@ -178,7 +178,7 @@ fi
 
 if [ "$TARGET_REQUEST_ID" = "--latest" ]; then
   log "Explicit --latest requested. Previewing latest pending request."
-  LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices approve --latest 2>&1)"
+  LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices approve --latest 2>&1 || true)"
   echo "$LATEST_OUTPUT"
 
   LATEST_REQUEST_ID="$(

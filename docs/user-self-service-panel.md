@@ -284,7 +284,7 @@ Enable instance-local /admin
 - 允许后缀可通过 `MANAGER_DOWNLOAD_EXTENSIONS` 配置
 - `/admin/files/<filename>` 只在文件名唯一时返回文件；如果重名，应使用页面中带目录信息的下载链接
 - 删除只允许删除顶层、允许后缀、非保护名单文件
-- 默认保护文件名包括 `souls.md`、`identity.md`、`memory.md`
+- 默认保护文件名包括 `AGENTS.md`、`SOUL.md`、`TOOLS.md`、`IDENTITY.md`、`USER.md`、`HEARTBEAT.md`、`BOOTSTRAP.md`、`MEMORY.md`
 - 保护文件名可通过 `MANAGER_PROTECTED_FILENAMES` 配置
 
 ## 8. 后续计划

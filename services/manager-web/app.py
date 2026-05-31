@@ -28,7 +28,7 @@ DOWNLOAD_EXTENSIONS = {
     for value in os.environ.get("MANAGER_DOWNLOAD_EXTENSIONS", DEFAULT_DOWNLOAD_EXTENSIONS).split(",")
     if value.strip()
 }
-DEFAULT_PROTECTED_FILENAMES = "souls.md,identity.md,memory.md"
+DEFAULT_PROTECTED_FILENAMES = "agents.md,soul.md,tools.md,identity.md,user.md,heartbeat.md,bootstrap.md,memory.md"
 PROTECTED_FILENAMES = {
     value.strip().lower()
     for value in os.environ.get("MANAGER_PROTECTED_FILENAMES", DEFAULT_PROTECTED_FILENAMES).split(",")

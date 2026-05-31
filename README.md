@@ -272,7 +272,7 @@ https://<服务器IP>:<PORT>/admin/
 
 该入口用于设备审批、上传文件、查看并下载工作区中的常见导出文件。
 下载列表只显示 `workspace`、`workspaces` 和 `uploads` 的顶层文件，避免展示 OpenClaw 运行过程中在子目录生成的大量内部文件。
-页面支持删除顶层用户生成文件，但 `souls.md`、`identity.md`、`memory.md` 等核心文件不会提供删除按钮。
+页面支持删除顶层用户生成文件，但 `AGENTS.md`、`SOUL.md`、`TOOLS.md`、`IDENTITY.md`、`USER.md`、`HEARTBEAT.md`、`BOOTSTRAP.md`、`MEMORY.md` 等核心文件不会提供删除按钮。
 
 如果文件名唯一，也可以使用实例端口内的直链下载：
 

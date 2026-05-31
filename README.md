@@ -37,6 +37,7 @@ OpenClaw Manager 提供一种“每用户一个实例”的部署模式，在不
 - 创建用户：create_user.sh
 - 删除用户（回收站）：delete_user.sh
 - 恢复用户：restore_user.sh
+- 升级指定实例版本：update_instance_version.sh
 - 用户列表：list_users.sh
 
 完整流程：
@@ -514,6 +515,33 @@ docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
 #### 4️⃣ 恢复用户
 
 ./scripts/restore_user.sh <user_id>
+
+---
+
+#### 5️⃣ 升级指定实例的 OpenClaw 版本
+
+升级前应先选择测试实例验证，不要直接批量升级业务实例。
+
+```bash
+./scripts/update_instance_version.sh <user_id> <version>
+```
+
+示例：
+
+```bash
+./scripts/update_instance_version.sh batchtest004 2026.5.26
+```
+
+脚本会：
+
+- 备份该实例的 `docker-compose.yml`
+- 只替换该实例的 OpenClaw 镜像 tag
+- 执行 `docker compose pull`
+- 重新创建该实例容器
+- 等待容器进入 `running` / `healthy`
+- 输出可直接执行的回滚命令
+
+升级过程中该实例会短暂不可用。用户数据目录不会删除。
 
 
 ### Device Pairing 管理

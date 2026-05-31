@@ -177,8 +177,22 @@ if [ "$TARGET_REQUEST_ID" = "--list-only" ]; then
 fi
 
 if [ "$TARGET_REQUEST_ID" = "--latest" ]; then
-  log "Explicit --latest requested. Approving latest pending request."
-  docker exec "$CONTAINER_NAME" openclaw devices approve --latest
+  log "Explicit --latest requested. Previewing latest pending request."
+  LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices approve --latest 2>&1)"
+  echo "$LATEST_OUTPUT"
+
+  LATEST_REQUEST_ID="$(
+    echo "$LATEST_OUTPUT" \
+      | sed -nE 's/.*Selected pending device request[[:space:]]+([A-Za-z0-9._-]+).*/\1/p' \
+      | head -n 1
+  )"
+
+  if [ -z "$LATEST_REQUEST_ID" ]; then
+    fail "Could not extract latest requestId from OpenClaw preview output."
+  fi
+
+  log "Approving latest requestId explicitly: $LATEST_REQUEST_ID"
+  docker exec "$CONTAINER_NAME" openclaw devices approve "$LATEST_REQUEST_ID"
   log "Approved latest request for user: $USER_ID"
   exit 0
 fi

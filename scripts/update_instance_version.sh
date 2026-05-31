@@ -40,6 +40,7 @@ CONTAINER_NAME="openclaw_${USER_ID}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="$USER_DIR/backups/version-upgrades/$TIMESTAMP"
 BACKUP_FILE="$BACKUP_DIR/docker-compose.yml"
+PERSISTENT_BACKUP_DIR="$BACKUP_DIR/persistent-data"
 
 if [ ! -d "$USER_DIR" ]; then
   echo "[ERROR] User directory not found: $USER_DIR" >&2
@@ -67,6 +68,13 @@ fi
 mkdir -p "$BACKUP_DIR"
 cp "$COMPOSE_FILE" "$BACKUP_FILE"
 
+for relative_path in config skills extensions; do
+  if [ -e "$USER_DIR/$relative_path" ]; then
+    mkdir -p "$PERSISTENT_BACKUP_DIR"
+    cp -a "$USER_DIR/$relative_path" "$PERSISTENT_BACKUP_DIR/"
+  fi
+done
+
 print_rollback() {
   echo ""
   echo "Rollback commands:"
@@ -74,12 +82,17 @@ print_rollback() {
   echo "  cd '$USER_DIR'"
   echo "  docker compose pull"
   echo "  docker compose up -d"
+  echo ""
+  echo "Persistent backup:"
+  echo "  $PERSISTENT_BACKUP_DIR"
+  echo "Restore persistent data only after reviewing differences."
 }
 
 echo "[INFO] User: $USER_ID"
 echo "[INFO] Current image: $CURRENT_IMAGE"
 echo "[INFO] Target image:  $TARGET_IMAGE"
 echo "[INFO] Backup: $BACKUP_FILE"
+echo "[INFO] Persistent backup: $PERSISTENT_BACKUP_DIR"
 
 python3 - "$COMPOSE_FILE" "$TARGET_IMAGE" <<'PY'
 import re
@@ -134,6 +147,10 @@ for _ in $(seq 1 30); do
     echo "Status: $STATUS"
     echo "Health: $HEALTH"
     echo "=============================="
+    echo ""
+    echo "Post-update checks:"
+    echo "  ./scripts/approve_device.sh '$USER_ID' --list-only"
+    echo "  ./scripts/set_model_provider.sh '$USER_ID'  # run if model provider config is missing"
     print_rollback
     exit 0
   fi

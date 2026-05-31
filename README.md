@@ -314,6 +314,8 @@ https://<服务器IP>:<PORT>/admin/
 ./scripts/approve_device.sh <user_id> --latest
 ```
 
+新版 OpenClaw CLI 中，`openclaw devices approve --latest` 只预览最新请求。管理脚本会提取该请求的 `requestId`，再显式执行审批。
+
 系统同时会定时刷新设备缓存：
 
 ```text
@@ -535,13 +537,18 @@ docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
 脚本会：
 
 - 备份该实例的 `docker-compose.yml`
+- 备份该实例的 `config`、`skills`、`extensions` 持久化目录
 - 只替换该实例的 OpenClaw 镜像 tag
 - 执行 `docker compose pull`
 - 重新创建该实例容器
 - 等待容器进入 `running` / `healthy`
-- 输出可直接执行的回滚命令
+- 输出可直接执行的 compose 回滚命令和持久化数据备份路径
 
-升级过程中该实例会短暂不可用。用户数据目录不会删除。
+升级过程中该实例会短暂不可用。用户数据目录不会删除。升级后应检查设备审批和模型 Provider 配置；如果模型配置缺失，重新执行：
+
+```bash
+./scripts/set_model_provider.sh <user_id>
+```
 
 
 ### Device Pairing 管理

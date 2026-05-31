@@ -28,6 +28,12 @@ DOWNLOAD_EXTENSIONS = {
     for value in os.environ.get("MANAGER_DOWNLOAD_EXTENSIONS", DEFAULT_DOWNLOAD_EXTENSIONS).split(",")
     if value.strip()
 }
+DEFAULT_PROTECTED_FILENAMES = "souls.md,identity.md,memory.md"
+PROTECTED_FILENAMES = {
+    value.strip().lower()
+    for value in os.environ.get("MANAGER_PROTECTED_FILENAMES", DEFAULT_PROTECTED_FILENAMES).split(",")
+    if value.strip()
+}
 ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "openclaw").split(",") if user.strip()}
 
 app = Flask(__name__)
@@ -148,6 +154,10 @@ def is_downloadable_file(path):
     return path.is_file() and path.suffix.lower() in DOWNLOAD_EXTENSIONS
 
 
+def is_protected_file(path):
+    return path.name.lower() in PROTECTED_FILENAMES
+
+
 def list_downloadable_files(user_id):
     user_dir = get_user_dir(user_id)
     files = []
@@ -157,7 +167,7 @@ def list_downloadable_files(user_id):
         if not root.is_dir():
             continue
 
-        for path in sorted(root.rglob("*"), key=lambda item: str(item.relative_to(root))):
+        for path in sorted(root.iterdir(), key=lambda item: item.name):
             if not is_downloadable_file(path):
                 continue
             relative_path = path.relative_to(root).as_posix()
@@ -171,6 +181,7 @@ def list_downloadable_files(user_id):
                     "container_path": f"{container_dir}/{relative_path}",
                     "size": format_bytes(stat.st_size),
                     "mtime": stat.st_mtime,
+                    "can_delete": not is_protected_file(path),
                 }
             )
 
@@ -205,12 +216,33 @@ def resolve_direct_download_file(user_id, filename):
     for _, relative_dir, _ in WORKSPACE_FILE_ROOTS.values():
         root = get_user_dir(user_id) / relative_dir
         if root.is_dir():
-            candidates.extend(path for path in root.rglob(safe_name) if is_downloadable_file(path))
+            candidate = root / safe_name
+            if is_downloadable_file(candidate):
+                candidates.append(candidate)
 
     if len(candidates) != 1:
         return None
 
     return candidates[0]
+
+
+def resolve_deletable_file(user_id, root_key, relative_path):
+    if "/" in relative_path or "\\" in relative_path:
+        return None
+
+    target = resolve_workspace_file(user_id, root_key, relative_path)
+    if target is None or is_protected_file(target):
+        return None
+
+    root_config = WORKSPACE_FILE_ROOTS.get(root_key)
+    if root_config is None:
+        return None
+
+    root = (get_user_dir(user_id) / root_config[1]).resolve()
+    if target.parent.resolve() != root:
+        return None
+
+    return target
 
 
 def detect_port(user_id):
@@ -304,11 +336,13 @@ def render_user_dashboard(user_id, instance_mode=False):
         refresh_url = "/admin/refresh-devices"
         upload_url = "/admin/upload"
         download_endpoint = ""
+        delete_endpoint = ""
     else:
         approve_url = url_for("approve_latest", user_id=user_id)
         refresh_url = url_for("refresh_devices", user_id=user_id)
         upload_url = url_for("upload_file", user_id=user_id)
         download_endpoint = "download_workspace_file"
+        delete_endpoint = "delete_workspace_file"
 
     return render_template(
         "user.html",
@@ -326,12 +360,14 @@ def render_user_dashboard(user_id, instance_mode=False):
         uploaded_files=list_uploaded_files(user_id),
         downloadable_files=list_downloadable_files(user_id),
         download_extensions=", ".join(sorted(DOWNLOAD_EXTENSIONS)),
+        protected_filenames=", ".join(sorted(PROTECTED_FILENAMES)),
         container_upload_dir=CONTAINER_UPLOAD_DIR,
         max_upload_mb=MAX_UPLOAD_BYTES // 1024 // 1024,
         approve_url=approve_url,
         refresh_url=refresh_url,
         upload_url=upload_url,
         download_endpoint=download_endpoint,
+        delete_endpoint=delete_endpoint,
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )
@@ -422,6 +458,20 @@ def download_direct_file_for_user(user_id, filename):
     return send_file(target, as_attachment=True, download_name=target.name)
 
 
+def delete_file_for_user(user_id, root_key, relative_path, instance_mode=False):
+    target = resolve_deletable_file(user_id, root_key, relative_path)
+    if target is None:
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            error="File cannot be deleted from this panel.",
+        )
+
+    filename = target.name
+    target.unlink()
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=f"Deleted {filename}.")
+
+
 @app.get("/")
 def index():
     actor = get_actor_user()
@@ -510,6 +560,14 @@ def instance_download_direct_file(filename):
     if not user_id:
         return forbidden("Forbidden: missing instance user header.")
     return download_direct_file_for_user(user_id, filename)
+
+
+@app.post("/instance-admin/files/<root_key>/<path:relative_path>/delete")
+def instance_delete_workspace_file(root_key, relative_path):
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return delete_file_for_user(user_id, root_key, relative_path, instance_mode=True)
 
 
 @app.get("/admin/device-approvals")
@@ -660,6 +718,23 @@ def download_workspace_file(user_id, root_key, relative_path):
         return denied
 
     return download_workspace_file_for_user(user_id, root_key, relative_path)
+
+
+@app.post("/users/<user_id>/files/<root_key>/<path:relative_path>/delete")
+def delete_workspace_file(user_id, root_key, relative_path):
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    denied = require_instance_access(user_id)
+    if denied:
+        return denied
+
+    return delete_file_for_user(user_id, root_key, relative_path)
 
 
 if __name__ == "__main__":

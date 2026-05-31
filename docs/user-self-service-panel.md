@@ -25,6 +25,7 @@
 - 审批最新 pending device request
 - 上传文件到实例 `uploads` 目录
 - 查看并下载用户工作区中的常见导出文件
+- 删除顶层用户生成文件或上传文件
 - 支持实例端口内的直链下载，例如 `/admin/files/report.pdf`
 
 审批动作背后调用：
@@ -278,9 +279,13 @@ Enable instance-local /admin
 
 - 上传文件写入 `/data/docker/openclaw-public/users/<user_id>/uploads`
 - 下载只允许读取用户目录下的 `workspace`、`workspaces` 和 `uploads`
+- 下载列表只显示这些目录的顶层文件，不递归展示 OpenClaw 运行过程中在子目录生成的内部文件
 - 默认允许常见导出文件后缀，例如 `.md`、`.pdf`、`.docx`、`.xlsx`、`.csv`、`.zip`
 - 允许后缀可通过 `MANAGER_DOWNLOAD_EXTENSIONS` 配置
 - `/admin/files/<filename>` 只在文件名唯一时返回文件；如果重名，应使用页面中带目录信息的下载链接
+- 删除只允许删除顶层、允许后缀、非保护名单文件
+- 默认保护文件名包括 `souls.md`、`identity.md`、`memory.md`
+- 保护文件名可通过 `MANAGER_PROTECTED_FILENAMES` 配置
 
 ## 8. 后续计划
 

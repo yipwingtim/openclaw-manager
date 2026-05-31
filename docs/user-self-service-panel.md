@@ -281,6 +281,9 @@ Enable instance-local /admin
 
 Set Basic Auth
   -> scripts/set_basic_auth.sh <true|false> <user_id> [user_id ...]
+
+Create Instance
+  -> scripts/create_user.sh <user_id> --basic-auth-enabled <true|false> [--password <password>]
 ```
 
 后续可以继续纳入：
@@ -289,6 +292,8 @@ Set Basic Auth
 - `view_logs`
 - `update_skill`
 - `get_access_info`
+
+`https://<PUBLIC_HOST>:30015/admin/create-user` 已支持管理员创建单个实例。该页面用于临时补开实例；批量培训名单仍建议使用 CSV 拆分后执行批量创建脚本。
 
 文件能力当前由 `manager-web` 直接处理：
 

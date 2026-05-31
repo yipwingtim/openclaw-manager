@@ -241,6 +241,14 @@ cd /data/docker/openclaw-manager
 ./scripts/create_user.sh <user_id>
 ```
 
+也可以在管理页面创建单个实例：
+
+```text
+https://<服务器IP>:30015/admin/create-user
+```
+
+该页面会调用同一个 `scripts/create_user.sh`，适合临时补开单个实例。批量创建仍建议使用 CSV 批处理脚本。
+
 如需关闭该实例的 Nginx Basic Auth：
 
 ```bash
@@ -586,6 +594,8 @@ docker exec openclaw-nginx nginx -s reload
 ```
 
 管理员也可以在 `https://<服务器IP>:30015/admin/users` 中直接切换。页面会先备份当前 Nginx 用户配置，执行 `nginx -t`，测试通过后才 reload；失败时自动恢复原配置。
+
+管理员也可以在 `https://<服务器IP>:30015/admin/create-user` 创建单个实例。表单支持选择是否启用 Basic Auth；启用时需要填写 Basic Auth 密码，关闭时不写密码即可。
 
 重新启用：
 

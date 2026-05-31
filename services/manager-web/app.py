@@ -530,6 +530,81 @@ def admin_users():
     )
 
 
+@app.get("/admin/create-user")
+def admin_create_user():
+    denied = require_admin()
+    if denied:
+        return denied
+    return render_template(
+        "admin_create_user.html",
+        user_id="",
+        basic_auth_enabled="true",
+        basic_auth_password="",
+        result="",
+        error="",
+    )
+
+
+@app.post("/admin/create-user")
+def run_admin_create_user():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    user_id_input = (request.form.get("user_id") or "").strip()
+    user_id = validate_user_id(user_id_input)
+    basic_auth_enabled = (request.form.get("basic_auth_enabled") or "true").strip().lower()
+    basic_auth_password = request.form.get("basic_auth_password") or ""
+
+    def render_create_form(result="", error="", status=200):
+        return (
+            render_template(
+                "admin_create_user.html",
+                user_id=user_id_input,
+                basic_auth_enabled=basic_auth_enabled,
+                basic_auth_password="",
+                result=result,
+                error=error,
+            ),
+            status,
+        )
+
+    if not user_id:
+        return render_create_form(error="Invalid user id. Use letters, numbers, dot, underscore, or hyphen.", status=400)
+
+    if basic_auth_enabled not in {"true", "false"}:
+        return render_create_form(error="Invalid Basic Auth state.", status=400)
+
+    if basic_auth_enabled == "true" and not basic_auth_password:
+        return render_create_form(error="Basic Auth password is required when Basic Auth is enabled.", status=400)
+
+    if get_user_dir(user_id).exists():
+        return render_create_form(error=f"User already exists: {user_id}", status=400)
+
+    command = [
+        str(MANAGER_DIR / "scripts" / "create_user.sh"),
+        user_id,
+        "--basic-auth-enabled",
+        basic_auth_enabled,
+    ]
+    if basic_auth_password:
+        command.extend(["--password", basic_auth_password])
+
+    process = subprocess.run(
+        command,
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=420,
+        check=False,
+    )
+    output = (process.stdout + "\n" + process.stderr).strip()
+    if process.returncode != 0:
+        return render_create_form(result=output, error="Create instance failed.", status=500)
+
+    return render_create_form(result=output, error="")
+
+
 @app.post("/admin/users/<user_id>/basic-auth")
 def admin_set_basic_auth(user_id):
     denied = require_admin()

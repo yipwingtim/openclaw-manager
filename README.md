@@ -252,6 +252,7 @@ cd /data/docker/openclaw-manager
 - 生成 docker-compose.yml
 - 创建 Nginx 配置
 - 配置 Basic Auth
+- 配置实例端口 `/admin/` 自助管理入口
 - 启动 openclaw_<user_id> 容器
 - 自动 reload Nginx
 
@@ -263,13 +264,40 @@ https://<服务器IP>:<PORT>
 
 访问 OpenClaw WebUI。
 
+实例自助管理入口：
+
+```text
+https://<服务器IP>:<PORT>/admin/
+```
+
+该入口用于设备审批、上传文件、查看并下载工作区中的常见导出文件。
+
+如果文件名唯一，也可以使用实例端口内的直链下载：
+
+```text
+https://<服务器IP>:<PORT>/admin/files/<filename>
+```
+
+例如：
+
+```text
+https://<服务器IP>:<PORT>/admin/files/report.pdf
+```
+
 ---
 
 ### 2️⃣ 首次登录与设备审批
 
-用户首次访问 WebUI 时，需要完成 Device Pairing。
+用户首次访问 WebUI 时，如果出现 Device Pairing，可以直接访问自己的实例自助管理入口：
 
-管理员可执行：
+```text
+https://<服务器IP>:<PORT>/admin/
+```
+
+在该页面中可刷新设备缓存并审批最新设备请求。
+
+管理员也可在服务器上执行：
+
 
 ```bash
 ./scripts/approve_device.sh <user_id>
@@ -291,11 +319,13 @@ https://<服务器IP>:<PORT>
 
 用于后续只读查询。
 
-如果已部署用户自助面板，用户也可以通过管理入口查看自己的实例并触发最新设备审批：
+如果使用全局管理员入口，也可以访问：
 
 ```text
 https://<服务器IP>:30015
 ```
+
+普通用户优先使用自己的实例端口 `/admin/`，避免在实例端口和 `30015` 之间切换。
 
 详细说明见：
 
@@ -451,7 +481,7 @@ Login Token:
 浏览器访问 https://<服务器IP或域名>:PORT
 输入 Nginx Basic Auth 用户名和密码
 输入 OpenClaw Login Token
-如果提示设备审批，管理员进入对应容器批准设备
+如果提示设备审批，访问 https://<服务器IP或域名>:PORT/admin/ 审批最新设备请求
 
 查看待审批设备:
 docker exec -it openclaw_<user_id> openclaw devices list
@@ -487,6 +517,7 @@ docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
 ### Device Pairing 管理
 - approve_device.sh
 - refresh_device_cache.sh
+- enable_instance_admin.sh
 
 ### Model Provider 管理
 - set_model_provider.sh

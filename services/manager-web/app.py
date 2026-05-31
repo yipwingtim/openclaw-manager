@@ -20,6 +20,13 @@ CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
 WORKSPACE_FILE_ROOTS = {
     "workspace": ("OpenClaw Workspace", "workspace", "/home/node/.openclaw/workspace"),
     "workspaces": ("Shared Workspaces", "workspaces", "/workspaces"),
+    "uploads": ("Uploaded Files", "uploads", CONTAINER_UPLOAD_DIR),
+}
+DEFAULT_DOWNLOAD_EXTENSIONS = ".md,.markdown,.txt,.pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.zip"
+DOWNLOAD_EXTENSIONS = {
+    value.strip().lower()
+    for value in os.environ.get("MANAGER_DOWNLOAD_EXTENSIONS", DEFAULT_DOWNLOAD_EXTENSIONS).split(",")
+    if value.strip()
 }
 ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "openclaw").split(",") if user.strip()}
 
@@ -137,7 +144,11 @@ def format_bytes(size):
     return f"{size} B"
 
 
-def list_markdown_files(user_id):
+def is_downloadable_file(path):
+    return path.is_file() and path.suffix.lower() in DOWNLOAD_EXTENSIONS
+
+
+def list_downloadable_files(user_id):
     user_dir = get_user_dir(user_id)
     files = []
 
@@ -147,7 +158,7 @@ def list_markdown_files(user_id):
             continue
 
         for path in sorted(root.rglob("*"), key=lambda item: str(item.relative_to(root))):
-            if not path.is_file() or path.suffix.lower() not in {".md", ".markdown"}:
+            if not is_downloadable_file(path):
                 continue
             relative_path = path.relative_to(root).as_posix()
             stat = path.stat()
@@ -179,10 +190,27 @@ def resolve_workspace_file(user_id, root_key, relative_path):
     except ValueError:
         return None
 
-    if not target.is_file() or target.suffix.lower() not in {".md", ".markdown"}:
+    if not is_downloadable_file(target):
         return None
 
     return target
+
+
+def resolve_direct_download_file(user_id, filename):
+    safe_name = secure_filename(filename)
+    if not safe_name or safe_name != filename:
+        return None
+
+    candidates = []
+    for _, relative_dir, _ in WORKSPACE_FILE_ROOTS.values():
+        root = get_user_dir(user_id) / relative_dir
+        if root.is_dir():
+            candidates.extend(path for path in root.rglob(safe_name) if is_downloadable_file(path))
+
+    if len(candidates) != 1:
+        return None
+
+    return candidates[0]
 
 
 def detect_port(user_id):
@@ -296,7 +324,8 @@ def render_user_dashboard(user_id, instance_mode=False):
         devices_cache=read_devices_cache(user_id),
         recent_logs=get_container_logs(user_id),
         uploaded_files=list_uploaded_files(user_id),
-        markdown_files=list_markdown_files(user_id),
+        downloadable_files=list_downloadable_files(user_id),
+        download_extensions=", ".join(sorted(DOWNLOAD_EXTENSIONS)),
         container_upload_dir=CONTAINER_UPLOAD_DIR,
         max_upload_mb=MAX_UPLOAD_BYTES // 1024 // 1024,
         approve_url=approve_url,
@@ -386,6 +415,13 @@ def download_workspace_file_for_user(user_id, root_key, relative_path):
     return send_file(target, as_attachment=True, download_name=target.name)
 
 
+def download_direct_file_for_user(user_id, filename):
+    target = resolve_direct_download_file(user_id, filename)
+    if target is None:
+        return render_template("error.html", message="File not found or filename is ambiguous."), 404
+    return send_file(target, as_attachment=True, download_name=target.name)
+
+
 @app.get("/")
 def index():
     actor = get_actor_user()
@@ -466,6 +502,14 @@ def instance_download_workspace_file(root_key, relative_path):
     if not user_id:
         return forbidden("Forbidden: missing instance user header.")
     return download_workspace_file_for_user(user_id, root_key, relative_path)
+
+
+@app.get("/instance-admin/files/<filename>")
+def instance_download_direct_file(filename):
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return download_direct_file_for_user(user_id, filename)
 
 
 @app.get("/admin/device-approvals")

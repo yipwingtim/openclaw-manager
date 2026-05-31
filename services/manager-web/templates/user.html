@@ -127,11 +127,14 @@
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
-              <div class="section-title">Markdown Downloads</div>
-              <div class="muted-small">Markdown files discovered in the user workspace directories.</div>
+              <div class="section-title">Downloadable Files</div>
+              <div class="muted-small">Files discovered in workspace, workspaces, and uploads. Allowed types: {{ download_extensions }}.</div>
+              {% if instance_mode %}
+                <div class="muted-small mt-1">Direct links can use <code>/admin/files/filename.ext</code> when the filename is unique.</div>
+              {% endif %}
             </div>
           </div>
-          {% if markdown_files %}
+          {% if downloadable_files %}
             <div class="table-responsive">
               <table class="table table-sm align-middle mb-0">
                 <thead>
@@ -144,7 +147,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {% for file in markdown_files %}
+                  {% for file in downloadable_files %}
                     <tr>
                       <td class="fw-semibold">{{ file.name }}</td>
                       <td>{{ file.root_label }}</td>
@@ -163,7 +166,7 @@
               </table>
             </div>
           {% else %}
-            <div class="muted-small">No Markdown files found yet.</div>
+            <div class="muted-small">No downloadable files found yet.</div>
           {% endif %}
         </div>
       {% endif %}

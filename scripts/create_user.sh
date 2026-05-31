@@ -7,6 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+LIB_NGINX_AUTH="$SCRIPT_DIR/lib_nginx_auth.sh"
 
 # ===== 读取统一配置 =====
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -15,10 +16,12 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 source "$CONFIG_FILE"
+source "$LIB_NGINX_AUTH"
 
 # ===== 参数 =====
 USER_ID="${1:-}"
 BASIC_AUTH_PASSWORD=""
+BASIC_AUTH_ENABLED="true"
 SKIP_NGINX_RELOAD=0
 SUCCESS=0
 USER_DIR_CREATED=0
@@ -38,20 +41,31 @@ while [ "$#" -gt 0 ]; do
       fi
       shift 2
       ;;
+    --basic-auth-enabled)
+      if [ "$#" -lt 2 ]; then
+        echo "[ERROR] --basic-auth-enabled requires true or false"
+        exit 1
+      fi
+      BASIC_AUTH_ENABLED="$(normalize_basic_auth_enabled "${2:-}")" || {
+        echo "[ERROR] --basic-auth-enabled must be true or false"
+        exit 1
+      }
+      shift 2
+      ;;
     --skip-nginx-reload)
       SKIP_NGINX_RELOAD=1
       shift
       ;;
     *)
       echo "[ERROR] Unknown argument: $1"
-      echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--skip-nginx-reload]"
+      echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--basic-auth-enabled true|false] [--skip-nginx-reload]"
       exit 1
       ;;
   esac
 done
 
 if [ -z "$USER_ID" ]; then
-  echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--skip-nginx-reload]"
+  echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--basic-auth-enabled true|false] [--skip-nginx-reload]"
   exit 1
 fi
 
@@ -244,6 +258,7 @@ sed -i "s#{{TZ}}#$TZ#g" "$TARGET_COMPOSE"
 mkdir -p "$NGINX_USERS_CONF_DIR"
 
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
+NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 
 cat > "$NGINX_USER_CONF" <<EOF
 server {
@@ -260,9 +275,7 @@ server {
     }
 
     location /admin/ {
-        auth_basic "OpenClaw Login";
-        auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;
-
+$NGINX_AUTH_BLOCK
         proxy_pass http://openclaw-manager-web:8080/instance-admin/;
 
         proxy_buffering off;
@@ -281,9 +294,7 @@ server {
     }
 
     location / {
-        auth_basic "OpenClaw Login";
-        auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;
-
+$NGINX_AUTH_BLOCK
         proxy_pass http://openclaw_${USER_ID}:18789;
 
         proxy_buffering off;
@@ -379,49 +390,53 @@ PY
 fi
 
 # ===== 创建 / 更新 Basic Auth 用户 =====
-if ! command -v htpasswd >/dev/null 2>&1; then
-  fail "htpasswd command not found. Please install apache2-utils first."
-  fail "Ubuntu/Debian: sudo apt update && sudo apt install -y apache2-utils"
-  exit 1
-fi
-
-if ! command -v setfacl >/dev/null 2>&1; then
-  fail "setfacl command not found. Please install acl first."
-  fail "Ubuntu/Debian: sudo apt update && sudo apt install -y acl"
-  exit 1
-fi
-
-mkdir -p "$(dirname "$NGINX_HTPASSWD_FILE")"
-
-if [ ! -f "$NGINX_HTPASSWD_FILE" ]; then
-  HTPASSWD_FILE_CREATED=1
-  log "Creating Basic Auth user: $USER_ID"
-  if [ -n "$BASIC_AUTH_PASSWORD" ]; then
-    printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -ci "$NGINX_HTPASSWD_FILE" "$USER_ID"
-  else
-    htpasswd -c "$NGINX_HTPASSWD_FILE" "$USER_ID"
-  fi
+if [ "$BASIC_AUTH_ENABLED" = "false" ]; then
+  log "Basic Auth disabled for user: $USER_ID"
 else
-  log "Creating / updating Basic Auth user: $USER_ID"
-  if [ -n "$BASIC_AUTH_PASSWORD" ]; then
-    printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -i "$NGINX_HTPASSWD_FILE" "$USER_ID"
-  else
-    htpasswd "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  if ! command -v htpasswd >/dev/null 2>&1; then
+    fail "htpasswd command not found. Please install apache2-utils first."
+    fail "Ubuntu/Debian: sudo apt update && sudo apt install -y apache2-utils"
+    exit 1
   fi
+
+  if ! command -v setfacl >/dev/null 2>&1; then
+    fail "setfacl command not found. Please install acl first."
+    fail "Ubuntu/Debian: sudo apt update && sudo apt install -y acl"
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "$NGINX_HTPASSWD_FILE")"
+
+  if [ ! -f "$NGINX_HTPASSWD_FILE" ]; then
+    HTPASSWD_FILE_CREATED=1
+    log "Creating Basic Auth user: $USER_ID"
+    if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -ci "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    else
+      htpasswd -c "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    fi
+  else
+    log "Creating / updating Basic Auth user: $USER_ID"
+    if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -i "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    else
+      htpasswd "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    fi
+  fi
+
+  # ===== 修复 nginx 容器读取 .htpasswd 的权限 =====
+  NGINX_UID=$(docker exec "$NGINX_CONTAINER_NAME" id -u nginx 2>/dev/null || true)
+
+  if [ -z "$NGINX_UID" ]; then
+    fail "Could not detect nginx user UID in container: $NGINX_CONTAINER_NAME"
+    exit 1
+  fi
+
+  log "Granting nginx container user UID $NGINX_UID read access to htpasswd file"
+
+  sudo setfacl -m "u:${NGINX_UID}:rx" "$(dirname "$NGINX_HTPASSWD_FILE")"
+  sudo setfacl -m "u:${NGINX_UID}:r" "$NGINX_HTPASSWD_FILE"
 fi
-
-# ===== 修复 nginx 容器读取 .htpasswd 的权限 =====
-NGINX_UID=$(docker exec "$NGINX_CONTAINER_NAME" id -u nginx 2>/dev/null || true)
-
-if [ -z "$NGINX_UID" ]; then
-  fail "Could not detect nginx user UID in container: $NGINX_CONTAINER_NAME"
-  exit 1
-fi
-
-log "Granting nginx container user UID $NGINX_UID read access to htpasswd file"
-
-sudo setfacl -m "u:${NGINX_UID}:rx" "$(dirname "$NGINX_HTPASSWD_FILE")"
-sudo setfacl -m "u:${NGINX_UID}:r" "$NGINX_HTPASSWD_FILE"
 
 # ===== 启动用户容器 =====
 cd "$USER_DIR"
@@ -511,11 +526,15 @@ echo "Access URL:"
 echo "👉 https://$PUBLIC_HOST:$PORT"
 echo ""
 echo "Basic Auth:"
-echo "👉 username: $USER_ID"
-if [ -n "$BASIC_AUTH_PASSWORD" ]; then
-  echo "👉 password: $BASIC_AUTH_PASSWORD"
+if [ "$BASIC_AUTH_ENABLED" = "false" ]; then
+  echo "👉 disabled"
 else
-  echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
+  echo "👉 username: $USER_ID"
+  if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+    echo "👉 password: $BASIC_AUTH_PASSWORD"
+  else
+    echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
+  fi
 fi
 
 echo "Login Token:"

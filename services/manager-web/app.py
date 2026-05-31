@@ -1,6 +1,8 @@
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -13,6 +15,7 @@ MANAGER_DIR = Path(os.environ.get("OPENCLAW_MANAGER_DIR", "/opt/openclaw-manager
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
 NGINX_USERS_CONF_DIR = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf"))
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
+NGINX_CONTAINER_NAME = os.environ.get("NGINX_CONTAINER_NAME", "openclaw-nginx")
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
@@ -258,6 +261,19 @@ def detect_port(user_id):
     return ""
 
 
+def is_basic_auth_enabled(user_id):
+    nginx_conf = NGINX_USERS_CONF_DIR / f"{user_id}.conf"
+    if not nginx_conf.is_file():
+        return None
+
+    text = nginx_conf.read_text(encoding="utf-8", errors="ignore")
+    if "auth_basic off;" in text:
+        return False
+    if 'auth_basic "OpenClaw Login";' in text:
+        return True
+    return None
+
+
 def get_container_status(user_id):
     container_name = f"openclaw_{user_id}"
     result = subprocess.run(
@@ -320,6 +336,7 @@ def list_active_users():
                 "status": get_container_status(user_id),
                 "port": port,
                 "access_url": build_access_url(port),
+                "basic_auth_enabled": is_basic_auth_enabled(user_id),
             }
         )
     return users
@@ -505,7 +522,86 @@ def admin_users():
     denied = require_admin()
     if denied:
         return denied
-    return render_template("admin_users.html", users=list_active_users())
+    return render_template(
+        "admin_users.html",
+        users=list_active_users(),
+        result=request.args.get("result", ""),
+        error=request.args.get("error", ""),
+    )
+
+
+@app.post("/admin/users/<user_id>/basic-auth")
+def admin_set_basic_auth(user_id):
+    denied = require_admin()
+    if denied:
+        return denied
+
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    enabled = request.form.get("enabled", "").strip().lower()
+    if enabled not in {"true", "false"}:
+        return redirect(url_for("admin_users", error="Invalid Basic Auth state."))
+
+    nginx_conf = NGINX_USERS_CONF_DIR / f"{user_id}.conf"
+    if not nginx_conf.is_file():
+        return redirect(url_for("admin_users", error=f"Nginx config not found: {user_id}"))
+
+    backup_fd, backup_name = tempfile.mkstemp(prefix=f"{user_id}.", suffix=".conf")
+    os.close(backup_fd)
+    backup_path = Path(backup_name)
+    shutil.copy2(nginx_conf, backup_path)
+
+    try:
+        update = subprocess.run(
+            [str(MANAGER_DIR / "scripts" / "set_basic_auth.sh"), enabled, user_id],
+            cwd=str(MANAGER_DIR),
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        update_output = (update.stdout + "\n" + update.stderr).strip()
+        if update.returncode != 0:
+            shutil.copy2(backup_path, nginx_conf)
+            return redirect(url_for("admin_users", error=update_output[-1200:]))
+
+        test = subprocess.run(
+            ["docker", "exec", NGINX_CONTAINER_NAME, "nginx", "-t"],
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        test_output = (test.stdout + "\n" + test.stderr).strip()
+        if test.returncode != 0:
+            shutil.copy2(backup_path, nginx_conf)
+            return redirect(url_for("admin_users", error=f"Nginx test failed. Restored config.\n{test_output[-1200:]}"))
+
+        reload_result = subprocess.run(
+            ["docker", "exec", NGINX_CONTAINER_NAME, "nginx", "-s", "reload"],
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        reload_output = (reload_result.stdout + "\n" + reload_result.stderr).strip()
+        if reload_result.returncode != 0:
+            shutil.copy2(backup_path, nginx_conf)
+            subprocess.run(
+                ["docker", "exec", NGINX_CONTAINER_NAME, "nginx", "-s", "reload"],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            return redirect(url_for("admin_users", error=f"Nginx reload failed. Restored config.\n{reload_output[-1200:]}"))
+
+        state = "enabled" if enabled == "true" else "disabled"
+        return redirect(url_for("admin_users", result=f"Basic Auth {state}: {user_id}"))
+    finally:
+        backup_path.unlink(missing_ok=True)
 
 
 @app.get("/instance-admin")

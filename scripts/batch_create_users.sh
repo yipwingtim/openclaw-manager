@@ -10,7 +10,7 @@ if [ "$#" -ne 2 ]; then
   echo "Usage: $0 <input.csv> <output.csv>"
   echo
   echo "Input CSV columns:"
-  echo "  user_id,basic_auth_password"
+  echo "  user_id,basic_auth_password[,basic_auth_enabled]"
   exit 1
 fi
 
@@ -27,7 +27,7 @@ FIRST_COLUMN="${HEADER%%,*}"
 
 if [ "$FIRST_COLUMN" != "user_id" ]; then
   echo "[ERROR] Invalid input CSV header. First column must be user_id." >&2
-  echo "[ERROR] Expected: user_id,basic_auth_password" >&2
+  echo "[ERROR] Expected: user_id,basic_auth_password[,basic_auth_enabled]" >&2
   echo "[ERROR] Actual: $HEADER" >&2
   exit 1
 fi
@@ -39,6 +39,7 @@ fi
 
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
+source "$SCRIPT_DIR/lib_nginx_auth.sh"
 
 BASE_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 PUBLIC_HOST="${PUBLIC_HOST:?Missing PUBLIC_HOST in config}"
@@ -104,8 +105,13 @@ detect_port() {
 write_output_row() {
   local user_id="$1"
   local password="$2"
-  local status="$3"
+  local basic_auth_enabled="$3"
+  local status="$4"
   local port token access_url container_name
+
+  if [ "$basic_auth_enabled" = "false" ]; then
+    password=""
+  fi
 
   port="$(detect_port "$user_id")"
   token="$(read_token "$user_id")"
@@ -123,19 +129,21 @@ write_output_row() {
     csv_escape "$access_url"; printf ","
     csv_escape "$port"; printf ","
     csv_escape "$container_name"; printf ","
+    csv_escape "$basic_auth_enabled"; printf ","
     csv_escape "$status"; printf "\n"
   } >> "$OUTPUT_CSV"
 }
 
-echo "user_id,basic_auth_username,basic_auth_password,openclaw_token,access_url,port,container_name,status" > "$OUTPUT_CSV"
+echo "user_id,basic_auth_username,basic_auth_password,openclaw_token,access_url,port,container_name,basic_auth_enabled,status" > "$OUTPUT_CSV"
 
 created_count=0
 line_no=0
-while IFS=, read -r raw_user_id raw_password _rest; do
+while IFS=, read -r raw_user_id raw_password raw_basic_auth_enabled _rest; do
   line_no=$((line_no + 1))
 
   raw_user_id="${raw_user_id//$'\r'/}"
   raw_password="${raw_password//$'\r'/}"
+  raw_basic_auth_enabled="${raw_basic_auth_enabled//$'\r'/}"
 
   if [ "$line_no" -eq 1 ] && [ "$raw_user_id" = "user_id" ]; then
     continue
@@ -143,6 +151,11 @@ while IFS=, read -r raw_user_id raw_password _rest; do
 
   user_id="$(printf '%s' "$raw_user_id" | xargs)"
   password="$(printf '%s' "${raw_password:-}" | xargs)"
+  basic_auth_enabled="$(normalize_basic_auth_enabled "${raw_basic_auth_enabled:-true}")" || {
+    echo "[WARN] Invalid basic_auth_enabled at line $line_no: ${raw_basic_auth_enabled:-}" >&2
+    write_output_row "$user_id" "$password" "${raw_basic_auth_enabled:-}" "invalid_basic_auth_enabled"
+    continue
+  }
 
   if [ -z "$user_id" ]; then
     continue
@@ -150,7 +163,7 @@ while IFS=, read -r raw_user_id raw_password _rest; do
 
   if ! [[ "$user_id" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
     echo "[WARN] Skip invalid user_id at line $line_no: $user_id" >&2
-    write_output_row "$user_id" "$password" "invalid_user_id"
+    write_output_row "$user_id" "$password" "$basic_auth_enabled" "invalid_user_id"
     continue
   fi
 
@@ -160,17 +173,17 @@ while IFS=, read -r raw_user_id raw_password _rest; do
 
   if [ -d "$USERS_DIR/$user_id" ]; then
     echo "[INFO] User exists, skip create: $user_id"
-    write_output_row "$user_id" "$password" "exists"
+    write_output_row "$user_id" "$password" "$basic_auth_enabled" "exists"
     continue
   fi
 
   echo "[INFO] Creating user: $user_id"
-  if "$SCRIPT_DIR/create_user.sh" "$user_id" --password "$password" --skip-nginx-reload; then
-    write_output_row "$user_id" "$password" "created"
+  if "$SCRIPT_DIR/create_user.sh" "$user_id" --password "$password" --basic-auth-enabled "$basic_auth_enabled" --skip-nginx-reload; then
+    write_output_row "$user_id" "$password" "$basic_auth_enabled" "created"
     created_count=$((created_count + 1))
   else
     echo "[ERROR] Failed to create user: $user_id" >&2
-    write_output_row "$user_id" "$password" "failed"
+    write_output_row "$user_id" "$password" "$basic_auth_enabled" "failed"
   fi
 
   if [ "$created_count" -gt 0 ] && [ "$PAUSE_EVERY" -gt 0 ] && [ $((created_count % PAUSE_EVERY)) -eq 0 ]; then

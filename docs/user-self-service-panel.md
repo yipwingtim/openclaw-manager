@@ -251,6 +251,18 @@ docker compose up -d
 
 实例端口 `/admin/` 依赖 Nginx 注入的 `X-OpenClaw-User` header 来绑定当前实例用户；全局 `30015` 管理入口仍依赖认证用户或管理员权限。
 
+Basic Auth 可按实例关闭。关闭后，该实例端口的 `/` 和 `/admin/` 都不再弹出 Nginx Basic Auth，但仍保留 OpenClaw Token 和 Device Approval。该模式只建议用于可信内网培训实例。
+
+已有实例切换示例：
+
+```bash
+./scripts/set_basic_auth.sh false <user_id>
+docker exec openclaw-nginx nginx -t
+docker exec openclaw-nginx nginx -s reload
+```
+
+管理员也可以在 `https://<PUBLIC_HOST>:30015/admin/users` 的用户列表中切换 Basic Auth。页面会先备份用户 Nginx 配置，测试配置有效后 reload Nginx；如果测试或 reload 失败，会恢复原配置。
+
 ## 7. 与现有脚本的关系
 
 当前实现不会替代现有脚本，而是把脚本能力包装成 Web 动作。
@@ -266,6 +278,9 @@ Refresh Device Cache
 
 Enable instance-local /admin
   -> scripts/enable_instance_admin.sh <user_id> [user_id ...]
+
+Set Basic Auth
+  -> scripts/set_basic_auth.sh <true|false> <user_id> [user_id ...]
 ```
 
 后续可以继续纳入：

@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+LIB_NGINX_AUTH="$SCRIPT_DIR/lib_nginx_auth.sh"
 
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "[ERROR] Config file not found: $CONFIG_FILE" >&2
@@ -12,6 +13,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 source "$CONFIG_FILE"
+source "$LIB_NGINX_AUTH"
 
 NGINX_USERS_CONF_DIR="${NGINX_USERS_CONF_DIR:?Missing NGINX_USERS_CONF_DIR in config}"
 NGINX_HTPASSWD_FILE_IN_CONTAINER="${NGINX_HTPASSWD_FILE_IN_CONTAINER:?Missing NGINX_HTPASSWD_FILE_IN_CONTAINER in config}"
@@ -39,13 +41,21 @@ for user_id in "$@"; do
     continue
   fi
 
-  python3 - "$nginx_conf" "$user_id" "$NGINX_HTPASSWD_FILE_IN_CONTAINER" <<'PY'
+  if grep -q 'auth_basic off;' "$nginx_conf"; then
+    basic_auth_enabled="false"
+  else
+    basic_auth_enabled="true"
+  fi
+
+  auth_block="$(render_nginx_auth_lines "$basic_auth_enabled" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+
+  python3 - "$nginx_conf" "$user_id" "$auth_block" <<'PY'
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
 user_id = sys.argv[2]
-htpasswd_path = sys.argv[3]
+auth_block = sys.argv[3]
 
 text = path.read_text(encoding="utf-8")
 marker = "    location / {\n"
@@ -55,9 +65,7 @@ admin_block = f"""    location = /admin {{
     }}
 
     location /admin/ {{
-        auth_basic "OpenClaw Login";
-        auth_basic_user_file {htpasswd_path};
-
+{auth_block}
         proxy_pass http://openclaw-manager-web:8080/instance-admin/;
 
         proxy_buffering off;

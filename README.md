@@ -71,6 +71,7 @@ userB → https://IP:30001 → nginx → openclaw_userB:18789
 
 1. Nginx Basic Auth  
    用户首先访问 `https://IP:PORT`，由 Nginx 弹出用户名 / 密码认证窗口。账号信息保存在 `.htpasswd` 文件中，由 `create_user.sh` 自动创建或更新。
+   Basic Auth 可按实例关闭，适用于可信内网培训场景。
 
 2. OpenClaw Token  
    Basic Auth 通过后，用户还需要输入对应实例的 OpenClaw Login Token。
@@ -239,6 +240,22 @@ cd /data/docker/openclaw-manager
 ```bash
 ./scripts/create_user.sh <user_id>
 ```
+
+如需关闭该实例的 Nginx Basic Auth：
+
+```bash
+./scripts/create_user.sh <user_id> --basic-auth-enabled false
+```
+
+批量创建 CSV 可增加第三列：
+
+```csv
+user_id,basic_auth_password,basic_auth_enabled
+training01,example-password,false
+training02,example-password,true
+```
+
+默认值为 `true`。
 
 示例：
 
@@ -465,6 +482,7 @@ cd /data/docker/openclaw-manager
 输出访问地址、Basic Auth 用户名和 OpenClaw Login Token
 
 创建过程中会提示设置该用户的 Nginx Basic Auth 密码。
+如果该实例创建时使用 `--basic-auth-enabled false`，则不会创建或要求输入 Basic Auth 密码。
 
 输出示例：
 
@@ -555,6 +573,27 @@ docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
 - approve_device.sh
 - refresh_device_cache.sh
 - enable_instance_admin.sh
+
+### Basic Auth 管理
+- set_basic_auth.sh
+
+已有实例可切换 Basic Auth：
+
+```bash
+./scripts/set_basic_auth.sh false <user_id>
+docker exec openclaw-nginx nginx -t
+docker exec openclaw-nginx nginx -s reload
+```
+
+管理员也可以在 `https://<服务器IP>:30015/admin/users` 中直接切换。页面会先备份当前 Nginx 用户配置，执行 `nginx -t`，测试通过后才 reload；失败时自动恢复原配置。
+
+重新启用：
+
+```bash
+./scripts/set_basic_auth.sh true <user_id>
+docker exec openclaw-nginx nginx -t
+docker exec openclaw-nginx nginx -s reload
+```
 
 ### Model Provider 管理
 - set_model_provider.sh

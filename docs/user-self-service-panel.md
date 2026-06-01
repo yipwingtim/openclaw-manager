@@ -284,6 +284,12 @@ Set Basic Auth
 
 Create Instance
   -> scripts/create_user.sh <user_id> --basic-auth-enabled <true|false> [--password <password>]
+
+Start / Stop / Restart Instance
+  -> docker compose up -d / stop / restart in the user directory
+
+Delete Instance
+  -> scripts/delete_user.sh <user_id>
 ```
 
 后续可以继续纳入：
@@ -294,6 +300,8 @@ Create Instance
 - `get_access_info`
 
 `https://<PUBLIC_HOST>:30015/admin/create-user` 已支持管理员创建单个实例。该页面用于临时补开实例；批量培训名单仍建议使用 CSV 拆分后执行批量创建脚本。
+
+`https://<PUBLIC_HOST>:30015/admin/users` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
 
 文件能力当前由 `manager-web` 直接处理：
 

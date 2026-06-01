@@ -32,7 +32,7 @@
                 <th>Port</th>
                 <th>Access URL</th>
                 <th>Basic Auth</th>
-                <th>Details</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -77,7 +77,27 @@
                       <span class="badge-status badge-neutral">Unknown</span>
                     {% endif %}
                   </td>
-                  <td><a class="btn btn-sm btn-oc-outline" href="/users/{{ user.user_id }}">View</a></td>
+                  <td>
+                    <div class="d-flex gap-2 flex-wrap">
+                      <a class="btn btn-sm btn-oc-outline" href="/users/{{ user.user_id }}">View</a>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                        <input type="hidden" name="action" value="start">
+                        <button class="btn btn-sm btn-oc-outline" type="submit">Start</button>
+                      </form>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                        <input type="hidden" name="action" value="stop">
+                        <button class="btn btn-sm btn-oc-outline" type="submit">Stop</button>
+                      </form>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                        <input type="hidden" name="action" value="restart">
+                        <button class="btn btn-sm btn-oc-outline" type="submit">Restart</button>
+                      </form>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle" onsubmit="return confirm('Delete {{ user.user_id }}? User data will be moved to recycle bin and Nginx port mapping will be removed.');">
+                        <input type="hidden" name="action" value="delete">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                      </form>
+                    </div>
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>

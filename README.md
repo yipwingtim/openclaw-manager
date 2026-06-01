@@ -597,6 +597,8 @@ docker exec openclaw-nginx nginx -s reload
 
 管理员也可以在 `https://<服务器IP>:30015/admin/create-user` 创建单个实例。表单支持选择是否启用 Basic Auth；启用时需要填写 Basic Auth 密码，关闭时不写密码即可。
 
+管理员也可以在 `https://<服务器IP>:30015/admin/users` 对单个实例执行 Start、Stop、Restart 和 Delete。Delete 会调用 `scripts/delete_user.sh`，用户目录会进入回收站，并移除对应 Nginx 配置和端口映射。
+
 重新启用：
 
 ```bash

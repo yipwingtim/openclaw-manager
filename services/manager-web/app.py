@@ -303,6 +303,39 @@ def get_container_logs(user_id, tail=120):
     return output or "No recent logs."
 
 
+def run_instance_lifecycle_action(user_id, action):
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return 1, f"User not found: {user_id}"
+
+    if action == "start":
+        command = ["docker", "compose", "up", "-d"]
+        timeout = 90
+    elif action == "stop":
+        command = ["docker", "compose", "stop"]
+        timeout = 60
+    elif action == "restart":
+        command = ["docker", "compose", "restart"]
+        timeout = 90
+    elif action == "delete":
+        command = [str(MANAGER_DIR / "scripts" / "delete_user.sh"), user_id]
+        timeout = 180
+        user_dir = MANAGER_DIR
+    else:
+        return 1, "Invalid lifecycle action."
+
+    result = subprocess.run(
+        command,
+        cwd=str(user_dir),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    return result.returncode, output
+
+
 def read_devices_cache(user_id):
     cache_file = get_user_dir(user_id) / "devices.txt"
     if not cache_file.is_file():
@@ -677,6 +710,29 @@ def admin_set_basic_auth(user_id):
         return redirect(url_for("admin_users", result=f"Basic Auth {state}: {user_id}"))
     finally:
         backup_path.unlink(missing_ok=True)
+
+
+@app.post("/admin/users/<user_id>/lifecycle")
+def admin_instance_lifecycle(user_id):
+    denied = require_admin()
+    if denied:
+        return denied
+
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    action = (request.form.get("action") or "").strip().lower()
+    if action not in {"start", "stop", "restart", "delete"}:
+        return redirect(url_for("admin_users", error="Invalid instance action."))
+
+    returncode, output = run_instance_lifecycle_action(user_id, action)
+    clipped_output = output[-1200:] if output else ""
+    label = action.capitalize()
+    if returncode != 0:
+        return redirect(url_for("admin_users", error=f"{label} failed: {user_id}\n{clipped_output}"))
+
+    return redirect(url_for("admin_users", result=f"{label} completed: {user_id}\n{clipped_output}"))
 
 
 @app.get("/instance-admin")

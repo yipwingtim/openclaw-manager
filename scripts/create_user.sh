@@ -102,6 +102,8 @@ done
 # ===== 派生路径 =====
 BASE_DIR="$OPENCLAW_PUBLIC_DIR"
 VERSION="$OPENCLAW_VERSION"
+HOST_MANAGER_UID="${HOST_MANAGER_UID:-$(stat -c %u "$BASE_DIR")}"
+HOST_MANAGER_GID="${HOST_MANAGER_GID:-$(stat -c %g "$BASE_DIR")}"
 
 USER_DIR="$BASE_DIR/users/$USER_ID"
 LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
@@ -121,12 +123,25 @@ fail() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" | tee -a "$LOG_FILE" >&2
 }
 
+restore_host_owner() {
+  if [ -n "${HOST_MANAGER_UID:-}" ] && [ -n "${HOST_MANAGER_GID:-}" ]; then
+    if [ -d "$USER_DIR" ]; then
+      chown -R "$HOST_MANAGER_UID:$HOST_MANAGER_GID" "$USER_DIR" 2>/dev/null || true
+    fi
+    if [ -n "${NGINX_USER_CONF:-}" ] && [ -f "$NGINX_USER_CONF" ]; then
+      chown "$HOST_MANAGER_UID:$HOST_MANAGER_GID" "$NGINX_USER_CONF" 2>/dev/null || true
+    fi
+  fi
+}
+
 cleanup_on_exit() {
   local exit_code="$1"
 
   if [ "$exit_code" -eq 0 ] || [ "$SUCCESS" -eq 1 ]; then
     return
   fi
+
+  restore_host_owner
 
   if [ -d "$USER_DIR" ]; then
     cd "$USER_DIR" 2>/dev/null || true
@@ -333,6 +348,8 @@ $NGINX_AUTH_BLOCK
 }
 EOF
 
+restore_host_owner
+
 log "Generated nginx config: $NGINX_USER_CONF"
 
 # ===== 更新 nginx docker-compose 端口映射 =====
@@ -532,6 +549,8 @@ if [ ! -f "$USERS_CSV" ]; then
 fi
 
 echo "$USER_ID,$PORT,$(date '+%Y-%m-%d %H:%M:%S'),active" >> "$USERS_CSV"
+
+restore_host_owner
 
 # ===== 输出 =====
 echo ""

@@ -21,6 +21,20 @@
     <div class="alert soft-danger">{{ error }}</div>
   {% endif %}
 
+  <div class="surface p-3 mb-3">
+    <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+      <div>
+        <div class="section-title">Instance Filter</div>
+        <div class="muted-small">Stopped instances are hidden by default.</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm {% if status_filter == 'running' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=running">Running</a>
+        <a class="btn btn-sm {% if status_filter == 'stopped' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=stopped">Stopped</a>
+        <a class="btn btn-sm {% if status_filter == 'all' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=all">All</a>
+      </div>
+    </div>
+  </div>
+
   <div class="surface">
       {% if users %}
         <div class="table-responsive">
@@ -104,7 +118,7 @@
           </table>
         </div>
       {% else %}
-        <div class="p-4 muted-small">No active users found.</div>
+        <div class="p-4 muted-small">No users match the current filter.</div>
       {% endif %}
   </div>
 {% endblock %}

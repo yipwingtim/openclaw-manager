@@ -350,10 +350,13 @@ def build_access_url(port):
     return f"https://{host}:{port}"
 
 
-def list_active_users():
+def list_active_users(status_filter="running"):
     users_dir = PUBLIC_DIR / "users"
     if not users_dir.is_dir():
         return []
+
+    if status_filter not in {"running", "stopped", "all"}:
+        status_filter = "running"
 
     users = []
     for user_dir in sorted(users_dir.iterdir(), key=lambda item: item.name):
@@ -363,10 +366,16 @@ def list_active_users():
         if not user_id:
             continue
         port = detect_port(user_id)
+        status = get_container_status(user_id)
+        is_stopped = status == "STOPPED"
+        if status_filter == "running" and is_stopped:
+            continue
+        if status_filter == "stopped" and not is_stopped:
+            continue
         users.append(
             {
                 "user_id": user_id,
-                "status": get_container_status(user_id),
+                "status": status,
                 "port": port,
                 "access_url": build_access_url(port),
                 "basic_auth_enabled": is_basic_auth_enabled(user_id),
@@ -555,9 +564,13 @@ def admin_users():
     denied = require_admin()
     if denied:
         return denied
+    status_filter = request.args.get("status", "running").strip().lower()
+    if status_filter not in {"running", "stopped", "all"}:
+        status_filter = "running"
     return render_template(
         "admin_users.html",
-        users=list_active_users(),
+        users=list_active_users(status_filter),
+        status_filter=status_filter,
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )

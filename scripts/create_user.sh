@@ -201,7 +201,24 @@ while true; do
     exit 1
   fi
 
-  if ss -tnl | awk '{print $4}' | grep -qE "(:|\.)${PORT}$"; then
+  if python3 - "$PORT" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+try:
+    sock.bind(("0.0.0.0", port))
+except OSError:
+    raise SystemExit(0)
+finally:
+    sock.close()
+
+raise SystemExit(1)
+PY
+  then
     log "Port $PORT is already in use, skip"
     PORT=$((PORT + 1))
     continue

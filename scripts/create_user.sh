@@ -105,7 +105,7 @@ VERSION="$OPENCLAW_VERSION"
 
 USER_DIR="$BASE_DIR/users/$USER_ID"
 LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
-TEMPLATE="$OPENCLAW_MANAGER_DIR/templates/docker-compose.tpl.yml"
+TEMPLATE="$MANAGER_DIR/templates/docker-compose.tpl.yml"
 
 # ===== 创建基础目录 =====
 mkdir -p "$BASE_DIR/users"

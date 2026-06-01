@@ -3,10 +3,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+import csv
+import io
 from urllib.parse import urlencode
 from pathlib import Path
 
-from flask import Flask, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, redirect, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
 
@@ -38,6 +40,7 @@ PROTECTED_FILENAMES = {
     if value.strip()
 }
 ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "openclaw").split(",") if user.strip()}
+LAST_CREATED_ACCOUNTS = {}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -97,6 +100,66 @@ def read_text_preview(path, max_chars=8000):
     if len(text) > max_chars:
         return text[:max_chars] + "\n... truncated ..."
     return text
+
+
+def parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password):
+    account = {
+        "user_id": user_id,
+        "basic_auth_username": user_id if basic_auth_enabled == "true" else "",
+        "basic_auth_password": basic_auth_password if basic_auth_enabled == "true" else "",
+        "openclaw_token": "",
+        "access_url": "",
+        "admin_url": "",
+        "port": "",
+        "container_name": f"openclaw_{user_id}",
+        "basic_auth_enabled": basic_auth_enabled,
+        "status": "created",
+    }
+
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("Port:"):
+            account["port"] = stripped.split(":", 1)[1].strip()
+        elif stripped == "Access URL:" and index + 1 < len(lines):
+            account["access_url"] = lines[index + 1].replace("👉", "").strip()
+        elif stripped.startswith("👉 https://"):
+            account["access_url"] = stripped.replace("👉", "").strip()
+        elif stripped.startswith("👉 username:"):
+            account["basic_auth_username"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("👉 password:"):
+            account["basic_auth_password"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("👉 ") and "Token not generated" not in stripped:
+            token = stripped.replace("👉", "").strip()
+            if re.fullmatch(r"[A-Za-z0-9._~+/=-]{16,}", token):
+                account["openclaw_token"] = token
+
+    if not account["access_url"] and account["port"]:
+        host = PUBLIC_HOST or request.host.split(":", 1)[0]
+        account["access_url"] = f"https://{host}:{account['port']}"
+    if account["access_url"]:
+        account["admin_url"] = account["access_url"].rstrip("/") + "/admin/"
+
+    return account
+
+
+def account_csv(account):
+    fields = [
+        "user_id",
+        "basic_auth_username",
+        "basic_auth_password",
+        "openclaw_token",
+        "access_url",
+        "port",
+        "container_name",
+        "basic_auth_enabled",
+        "status",
+    ]
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fields)
+    writer.writeheader()
+    writer.writerow({field: account.get(field, "") for field in fields})
+    return buffer.getvalue()
 
 
 def require_admin():
@@ -586,6 +649,8 @@ def admin_create_user():
         user_id="",
         basic_auth_enabled="true",
         basic_auth_password="",
+        account=None,
+        account_csv="",
         result="",
         error="",
     )
@@ -609,6 +674,8 @@ def run_admin_create_user():
                 user_id=user_id_input,
                 basic_auth_enabled=basic_auth_enabled,
                 basic_auth_password="",
+                account=None,
+                account_csv="",
                 result=result,
                 error=error,
             ),
@@ -648,7 +715,39 @@ def run_admin_create_user():
     if process.returncode != 0:
         return render_create_form(result=output, error="Create instance failed.", status=500)
 
-    return render_create_form(result=output, error="")
+    account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
+    LAST_CREATED_ACCOUNTS[user_id] = account
+    return render_template(
+        "admin_create_user.html",
+        user_id="",
+        basic_auth_enabled="true",
+        basic_auth_password="",
+        account=account,
+        account_csv=account_csv(account),
+        result=output,
+        error="",
+    )
+
+
+@app.get("/admin/create-user/<user_id>/account.csv")
+def download_created_account_csv(user_id):
+    denied = require_admin()
+    if denied:
+        return denied
+
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    account = LAST_CREATED_ACCOUNTS.get(user_id)
+    if account is None:
+        return render_template("error.html", message="Created account record not found. Create the instance again or use batch export."), 404
+
+    return Response(
+        account_csv(account),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={user_id}_account.csv"},
+    )
 
 
 @app.post("/admin/users/<user_id>/basic-auth")

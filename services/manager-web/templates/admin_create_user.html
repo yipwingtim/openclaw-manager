@@ -51,6 +51,40 @@
     </div>
   </div>
 
+  {% if account %}
+    <div class="surface p-3 p-lg-4 mb-3">
+      <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+        <div>
+          <div class="section-title">Account Details</div>
+          <div class="muted-small">Structured output for sharing with the user.</div>
+        </div>
+        <a class="btn btn-sm btn-oc-outline" href="/admin/create-user/{{ account.user_id }}/account.csv">Download CSV</a>
+      </div>
+
+      <div class="table-responsive mb-3">
+        <table class="table mb-0 align-middle">
+          <tbody>
+            <tr><th>User ID</th><td class="fw-semibold">{{ account.user_id }}</td></tr>
+            <tr><th>Access URL</th><td><a href="{{ account.access_url }}" target="_blank" rel="noreferrer">{{ account.access_url }}</a></td></tr>
+            <tr><th>Admin URL</th><td><a href="{{ account.admin_url }}" target="_blank" rel="noreferrer">{{ account.admin_url }}</a></td></tr>
+            <tr><th>Port</th><td>{{ account.port }}</td></tr>
+            <tr><th>Container</th><td>{{ account.container_name }}</td></tr>
+            <tr><th>Basic Auth</th><td>{{ account.basic_auth_enabled }}</td></tr>
+            <tr><th>Basic Auth Username</th><td>{{ account.basic_auth_username or "-" }}</td></tr>
+            <tr><th>Basic Auth Password</th><td>{{ account.basic_auth_password or "-" }}</td></tr>
+            <tr><th>OpenClaw Token</th><td>{{ account.openclaw_token or "Token not generated yet" }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+        <label class="form-label mb-0" for="account_csv">CSV Row</label>
+        <button class="btn btn-sm btn-oc-outline" type="button" onclick="navigator.clipboard.writeText(document.getElementById('account_csv').value)">Copy CSV</button>
+      </div>
+      <textarea class="form-control" id="account_csv" rows="4" readonly>{{ account_csv }}</textarea>
+    </div>
+  {% endif %}
+
   {% if result %}
     <div class="surface p-3 p-lg-4 mt-3">
       <div class="section-title mb-3">Create Result</div>

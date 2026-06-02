@@ -28,6 +28,8 @@ USER_DIR_CREATED=0
 NGINX_CONF_CREATED=0
 PORT_MAPPING_CREATED=0
 HTPASSWD_FILE_CREATED=0
+USERS_CSV_ROW_CREATED=0
+NGINX_COMPOSE_APPLIED=0
 
 shift || true
 
@@ -152,6 +154,24 @@ cleanup_on_exit() {
     docker compose down >/dev/null 2>&1 || true
   fi
 
+  if [ "$USERS_CSV_ROW_CREATED" -eq 1 ] && [ -f "$USERS_CSV" ]; then
+    python3 - "$USERS_CSV" "$USER_ID" "$PORT" <<'PY' >/dev/null 2>&1 || true
+import sys
+from pathlib import Path
+
+csv_file = Path(sys.argv[1])
+user_id = sys.argv[2]
+port = sys.argv[3]
+
+lines = csv_file.read_text(encoding="utf-8").splitlines(keepends=True)
+filtered = [
+    line for line in lines
+    if not line.startswith(f"{user_id},{port},") or not line.rstrip("\n").endswith(",active")
+]
+csv_file.write_text("".join(filtered), encoding="utf-8")
+PY
+  fi
+
   if [ "$PORT_MAPPING_CREATED" -eq 1 ] && [ -f "$NGINX_COMPOSE_FILE" ]; then
     python3 - "$NGINX_COMPOSE_FILE" "$PORT" <<'PY' >/dev/null 2>&1 || true
 import sys
@@ -185,6 +205,17 @@ PY
 
   if [ "$USER_DIR_CREATED" -eq 1 ] && [ -d "$USER_DIR" ]; then
     rm -rf "$USER_DIR"
+  fi
+
+  restore_host_owner
+
+  if [ "$NGINX_COMPOSE_APPLIED" -eq 1 ] && [ -d "$NGINX_COMPOSE_DIR" ]; then
+    (
+      cd "$NGINX_COMPOSE_DIR" 2>/dev/null && docker compose up -d >/dev/null 2>&1
+    ) || true
+
+    docker exec "$NGINX_CONTAINER_NAME" nginx -t >/dev/null 2>&1 && \
+      docker exec "$NGINX_CONTAINER_NAME" nginx -s reload >/dev/null 2>&1 || true
   fi
 }
 
@@ -272,7 +303,6 @@ cat > "$CONFIG_FILE" <<EOF
   }
 }
 EOF
-NGINX_CONF_CREATED=1
 
 # ===== 注入默认 skills =====
 if [ -d "$MANAGER_DIR/templates/skills" ]; then
@@ -351,6 +381,7 @@ $NGINX_AUTH_BLOCK
     }
 }
 EOF
+NGINX_CONF_CREATED=1
 
 restore_host_owner
 
@@ -481,7 +512,7 @@ cd "$USER_DIR"
 
 if ! docker compose up -d; then
   fail "Failed to start container for user $USER_ID"
-  fail "User directory is kept for troubleshooting: $USER_DIR"
+  fail "Rolling back generated files for user: $USER_ID"
   exit 1
 fi
 
@@ -493,6 +524,7 @@ else
 
   cd "$NGINX_COMPOSE_DIR"
 
+  NGINX_COMPOSE_APPLIED=1
   if ! docker compose up -d; then
     fail "Failed to update nginx container"
     exit 1
@@ -553,6 +585,7 @@ if [ ! -f "$USERS_CSV" ]; then
 fi
 
 echo "$USER_ID,$PORT,$(date '+%Y-%m-%d %H:%M:%S'),active" >> "$USERS_CSV"
+USERS_CSV_ROW_CREATED=1
 
 restore_host_owner
 

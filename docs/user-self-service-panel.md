@@ -27,6 +27,9 @@
 - 查看并下载用户工作区中的常见导出文件
 - 删除顶层用户生成文件或上传文件
 - 支持实例端口内的直链下载，例如 `/admin/files/report.pdf`
+- 提供实例端口内的中文操作说明页面 `/admin/help`
+- 管理员可在 `30015` 的 `/admin/create-user` 创建单个实例
+- 管理员可在 `30015` 的 `/admin/users` 启停、重启、删除实例，并切换 Basic Auth
 
 审批动作背后调用：
 
@@ -48,6 +51,12 @@ https://<PUBLIC_HOST>:<USER_PORT>/
 
 ```text
 https://<PUBLIC_HOST>:<USER_PORT>/admin/
+```
+
+中文说明页面：
+
+```text
+https://<PUBLIC_HOST>:<USER_PORT>/admin/help
 ```
 
 该入口由每个用户实例的 Nginx 配置代理到 `manager-web`：
@@ -300,8 +309,10 @@ Delete Instance
 - `get_access_info`
 
 `https://<PUBLIC_HOST>:30015/admin/create-user` 已支持管理员创建单个实例。该页面用于临时补开实例；批量培训名单仍建议使用 CSV 拆分后执行批量创建脚本。
+创建成功后页面会显示访问地址、Basic Auth 状态、OpenClaw Login Token，并支持复制或下载本次创建的 `accounts.csv`。该下载记录保存在 manager-web 进程内存中，manager-web 重启后需要从 `users.csv` 或实例配置中重新查询。
 
 `https://<PUBLIC_HOST>:30015/admin/users` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
+用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
 
 文件能力当前由 `manager-web` 直接处理：
 
@@ -314,6 +325,27 @@ Delete Instance
 - 删除只允许删除顶层、允许后缀、非保护名单文件
 - 默认保护文件名包括 `AGENTS.md`、`SOUL.md`、`TOOLS.md`、`IDENTITY.md`、`USER.md`、`HEARTBEAT.md`、`BOOTSTRAP.md`、`MEMORY.md`
 - 保护文件名可通过 `MANAGER_PROTECTED_FILENAMES` 配置
+
+实例升级相关脚本不直接暴露给普通用户，管理员在服务器执行：
+
+```bash
+./scripts/check_instance_upgrade.sh <user_id>
+./scripts/update_instance_version.sh <user_id> <version>
+./scripts/update_instance_version.sh <user_id> <version> --restore-model-provider
+```
+
+`update_instance_version.sh` 会在升级前后自动调用 `check_instance_upgrade.sh`。升级前检查失败会中止升级；升级后如果发现模型 Provider 可能缺失，可手动执行 `set_model_provider.sh`，也可使用 `--restore-model-provider` 自动尝试恢复。
+
+检查报告保存在：
+
+```text
+/data/docker/openclaw-public/users/<user_id>/backups/version-upgrades/<timestamp>/pre-check.txt
+/data/docker/openclaw-public/users/<user_id>/backups/version-upgrades/<timestamp>/post-check.txt
+```
+
+`manager-web` 通过 Web 页面调用管理脚本，并需要 Docker API 管理实例容器。容器内需要 Docker CLI、Docker Compose plugin、`/var/run/docker.sock`，并挂载 OpenClaw Manager 项目目录、OpenClaw public 数据目录、Nginx conf/auth/compose 目录。
+
+Web 创建实例时，`create_user.sh` 会在成功后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。
 
 ## 8. 后续计划
 

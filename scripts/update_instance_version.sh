@@ -41,6 +41,9 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="$USER_DIR/backups/version-upgrades/$TIMESTAMP"
 BACKUP_FILE="$BACKUP_DIR/docker-compose.yml"
 PERSISTENT_BACKUP_DIR="$BACKUP_DIR/persistent-data"
+PRE_CHECK_FILE="$BACKUP_DIR/pre-check.txt"
+POST_CHECK_FILE="$BACKUP_DIR/post-check.txt"
+CHECK_SCRIPT="$SCRIPT_DIR/check_instance_upgrade.sh"
 
 if [ ! -d "$USER_DIR" ]; then
   echo "[ERROR] User directory not found: $USER_DIR" >&2
@@ -87,6 +90,27 @@ print_rollback() {
   echo "  $PERSISTENT_BACKUP_DIR"
   echo "Restore persistent data only after reviewing differences."
 }
+
+if [ -x "$CHECK_SCRIPT" ]; then
+  echo "[INFO] Running pre-upgrade check: $PRE_CHECK_FILE"
+  set +e
+  "$CHECK_SCRIPT" "$USER_ID" > "$PRE_CHECK_FILE" 2>&1
+  PRE_CHECK_STATUS=$?
+  set -e
+
+  if [ "$PRE_CHECK_STATUS" -eq 2 ]; then
+    echo "[ERROR] Pre-upgrade check failed. Review: $PRE_CHECK_FILE" >&2
+    cat "$PRE_CHECK_FILE"
+    print_rollback
+    exit 1
+  elif [ "$PRE_CHECK_STATUS" -eq 1 ]; then
+    echo "[WARN] Pre-upgrade check has warnings. Review: $PRE_CHECK_FILE"
+  else
+    echo "[INFO] Pre-upgrade check passed: $PRE_CHECK_FILE"
+  fi
+else
+  echo "[WARN] Check script not found or not executable: $CHECK_SCRIPT"
+fi
 
 echo "[INFO] User: $USER_ID"
 echo "[INFO] Current image: $CURRENT_IMAGE"
@@ -138,6 +162,22 @@ for _ in $(seq 1 30); do
   HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
 
   if [ "$STATUS" = "running" ] && { [ "$HEALTH" = "healthy" ] || [ "$HEALTH" = "none" ]; }; then
+    if [ -x "$CHECK_SCRIPT" ]; then
+      echo "[INFO] Running post-upgrade check: $POST_CHECK_FILE"
+      set +e
+      "$CHECK_SCRIPT" "$USER_ID" > "$POST_CHECK_FILE" 2>&1
+      POST_CHECK_STATUS=$?
+      set -e
+
+      if [ "$POST_CHECK_STATUS" -eq 2 ]; then
+        echo "[ERROR] Post-upgrade check failed. Review: $POST_CHECK_FILE" >&2
+      elif [ "$POST_CHECK_STATUS" -eq 1 ]; then
+        echo "[WARN] Post-upgrade check has warnings. Review: $POST_CHECK_FILE"
+      else
+        echo "[INFO] Post-upgrade check passed: $POST_CHECK_FILE"
+      fi
+    fi
+
     echo ""
     echo "=============================="
     echo "UPDATE SUCCESS"
@@ -146,6 +186,8 @@ for _ in $(seq 1 30); do
     echo "Container: $CONTAINER_NAME"
     echo "Status: $STATUS"
     echo "Health: $HEALTH"
+    echo "Pre-check: $PRE_CHECK_FILE"
+    echo "Post-check: $POST_CHECK_FILE"
     echo "=============================="
     echo ""
     echo "Post-update checks:"

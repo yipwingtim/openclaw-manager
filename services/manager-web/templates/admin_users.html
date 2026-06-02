@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Users - OpenClaw Manager{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
+    <div>
+      <div class="page-kicker">Administrator Console</div>
+      <h1 class="page-title">OpenClaw Users</h1>
+      <div class="page-subtitle">Review instance status, ports, and direct access links.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-oc-outline" href="/admin/create-user">Create Instance</a>
+      <a class="btn btn-oc-outline" href="/admin/device-approvals">Device Approvals</a>
+      <a class="btn btn-oc" href="/me">Open My Instance</a>
+    </div>
+  </div>
+
+  {% if result %}
+    <div class="alert soft-success">{{ result }}</div>
+  {% endif %}
+  {% if error %}
+    <div class="alert soft-danger">{{ error }}</div>
+  {% endif %}
+
+  <div class="surface p-3 mb-3">
+    <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+      <div>
+        <div class="section-title">Instance Filter</div>
+        <div class="muted-small">Stopped instances are hidden by default.</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm {% if status_filter == 'running' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=running">Running</a>
+        <a class="btn btn-sm {% if status_filter == 'stopped' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=stopped">Stopped</a>
+        <a class="btn btn-sm {% if status_filter == 'all' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=all">All</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="surface">
+      {% if users %}
+        <div class="table-responsive">
+          <table class="table table-hover mb-0 align-middle">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Status</th>
+                <th>Port</th>
+                <th>Access URL</th>
+                <th>Basic Auth</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for user in users %}
+                <tr>
+                  <td class="fw-semibold">{{ user.user_id }}</td>
+                  <td>
+                    {% if user.status.startswith("Up") %}
+                      <span class="badge-status badge-running">{{ user.status }}</span>
+                    {% elif user.status == "STOPPED" %}
+                      <span class="badge-status badge-stopped">{{ user.status }}</span>
+                    {% else %}
+                      <span class="badge-status badge-neutral">{{ user.status }}</span>
+                    {% endif %}
+                  </td>
+                  <td class="fw-semibold">{{ user.port or "Unknown" }}</td>
+                  <td>
+                    {% if user.access_url %}
+                      <a href="{{ user.access_url }}" target="_blank" rel="noreferrer">{{ user.access_url }}</a>
+                    {% else %}
+                      Unknown
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if user.basic_auth_enabled == true %}
+                      <div class="d-flex align-items-center gap-2">
+                        <span class="badge-status badge-running">Enabled</span>
+                        <form method="post" action="/admin/users/{{ user.user_id }}/basic-auth">
+                          <input type="hidden" name="enabled" value="false">
+                          <button class="btn btn-sm btn-outline-danger" type="submit">Disable</button>
+                        </form>
+                      </div>
+                    {% elif user.basic_auth_enabled == false %}
+                      <div class="d-flex align-items-center gap-2">
+                        <span class="badge-status badge-stopped">Disabled</span>
+                        <form method="post" action="/admin/users/{{ user.user_id }}/basic-auth">
+                          <input type="hidden" name="enabled" value="true">
+                          <button class="btn btn-sm btn-oc-outline" type="submit">Enable</button>
+                        </form>
+                      </div>
+                    {% else %}
+                      <span class="badge-status badge-neutral">Unknown</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <div class="d-flex gap-2 flex-wrap">
+                      <a class="btn btn-sm btn-oc-outline" href="/users/{{ user.user_id }}">View</a>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                        <input type="hidden" name="action" value="start">
+                        <button class="btn btn-sm btn-oc-outline" type="submit">Start</button>
+                      </form>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                        <input type="hidden" name="action" value="stop">
+                        <button class="btn btn-sm btn-oc-outline" type="submit">Stop</button>
+                      </form>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                        <input type="hidden" name="action" value="restart">
+                        <button class="btn btn-sm btn-oc-outline" type="submit">Restart</button>
+                      </form>
+                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle" onsubmit="return confirm('Delete {{ user.user_id }}? User data will be moved to recycle bin and Nginx port mapping will be removed.');">
+                        <input type="hidden" name="action" value="delete">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="p-4 muted-small">No users match the current filter.</div>
+      {% endif %}
+  </div>
+{% endblock %}

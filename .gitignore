@@ -10,6 +10,10 @@ registry.db
 # logs
 *.log
 
+# Python
+__pycache__/
+*.pyc
+
 # system
 .DS_Store
 

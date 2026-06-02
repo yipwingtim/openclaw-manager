@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}{{ user_id }} - OpenClaw Manager{% endblock %}
+{% block nav_right %}
+  Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}
+{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
+    <div>
+      <div class="page-kicker">Instance Dashboard</div>
+      <h1 class="page-title">{{ user_id }}</h1>
+      <div class="page-subtitle">
+        {% if instance_mode %}
+          Instance-local admin panel for device approval, file upload, and workspace downloads.
+        {% else %}
+          Approve devices, upload files, and inspect the OpenClaw runtime.
+        {% endif %}
+      </div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      {% if instance_mode %}
+        <a class="btn btn-oc-outline" href="/admin/help">使用说明</a>
+      {% endif %}
+      {% if show_admin_links %}
+        <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+      {% endif %}
+      <a class="btn btn-oc-outline" href="/">Switch User</a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12">
+      <div class="row g-3">
+        <div class="col-12 col-md-4">
+          <div class="metric">
+            <div class="metric-label">Status</div>
+            <div class="metric-value">
+              {% if status.startswith("Up") %}
+                <span class="badge-status badge-running">{{ status }}</span>
+              {% elif status == "STOPPED" %}
+                <span class="badge-status badge-stopped">{{ status }}</span>
+              {% else %}
+                <span class="badge-status badge-neutral">{{ status }}</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="metric">
+            <div class="metric-label">Port</div>
+            <div class="metric-value">{{ port or "Unknown" }}</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-5">
+          <div class="metric">
+            <div class="metric-label">Access URL</div>
+            <div class="metric-value">
+              {% if access_url %}
+                <a href="{{ access_url }}" target="_blank" rel="noreferrer">{{ access_url }}</a>
+              {% else %}
+                Unknown
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+      <div class="surface p-3 p-lg-4 mb-3">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <div class="section-title">Device Approval</div>
+            <div class="muted-small">Refresh the device cache or approve the most recent request for this instance.</div>
+          </div>
+        </div>
+        <div class="action-panel">
+          <div class="d-flex gap-2 flex-wrap">
+            {% if can_manage %}
+              <form method="post" action="{{ approve_url }}">
+                <button type="submit" class="btn btn-oc">{% if is_admin %}Approve Latest Device{% else %}Approve My Device{% endif %}</button>
+              </form>
+            {% endif %}
+            <form method="post" action="{{ refresh_url }}">
+              <button type="submit" class="btn btn-oc-outline">Refresh Device Cache</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      {% if can_manage %}
+        <div class="surface p-3 p-lg-4 mb-3">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+            <div>
+              <div class="section-title">Files</div>
+              <div class="muted-small">Upload files into {{ container_upload_dir }}. Max file size: {{ max_upload_mb }} MB.</div>
+            </div>
+          </div>
+          <form method="post" action="{{ upload_url }}" enctype="multipart/form-data" class="mb-3">
+            <div class="input-group">
+              <input class="form-control" type="file" name="file" required>
+              <button class="btn btn-oc" type="submit">Upload</button>
+            </div>
+          </form>
+            {% if uploaded_files %}
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Size</th>
+                      <th>Container Path</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for file in uploaded_files %}
+                      <tr>
+                        <td>{{ file.name }}</td>
+                        <td>{{ file.size }} bytes</td>
+                        <td>{{ file.container_path }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="muted-small">No uploaded files.</div>
+            {% endif %}
+        </div>
+
+        <div class="surface p-3 p-lg-4 mb-3">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+            <div>
+              <div class="section-title">Downloadable Files</div>
+              <div class="muted-small">Top-level files in workspace, workspaces, and uploads. Allowed types: {{ download_extensions }}.</div>
+              <div class="muted-small mt-1">Protected files such as {{ protected_filenames }} are downloadable but cannot be deleted here.</div>
+              {% if instance_mode %}
+                <div class="muted-small mt-1">Direct links can use <code>/admin/files/filename.ext</code> when the filename is unique.</div>
+              {% endif %}
+            </div>
+          </div>
+          {% if downloadable_files %}
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Source</th>
+                    <th>Size</th>
+                    <th>Container Path</th>
+                    <th>Download</th>
+                    <th>Delete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for file in downloadable_files %}
+                    <tr>
+                      <td class="fw-semibold">{{ file.name }}</td>
+                      <td>{{ file.root_label }}</td>
+                      <td>{{ file.size }}</td>
+                      <td>{{ file.container_path }}</td>
+                      <td>
+                        {% if instance_mode %}
+                          <a class="btn btn-sm btn-oc-outline" href="/admin/files/{{ file.root }}/{{ file.relative_path }}">Download</a>
+                        {% else %}
+                          <a class="btn btn-sm btn-oc-outline" href="{{ url_for(download_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}">Download</a>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if file.can_delete %}
+                          {% if instance_mode %}
+                            <form method="post" action="/admin/files/{{ file.root }}/{{ file.relative_path }}/delete">
+                              <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                            </form>
+                          {% else %}
+                            <form method="post" action="{{ url_for(delete_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}">
+                              <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                            </form>
+                          {% endif %}
+                        {% else %}
+                          <span class="badge-status badge-neutral">Protected</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="muted-small">No downloadable files found yet.</div>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="col-12 col-lg-5">
+      <div class="surface p-3 p-lg-4 mb-3">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <div class="section-title">Device Cache</div>
+            <div class="muted-small">Cached device requests discovered from this instance.</div>
+          </div>
+        </div>
+          {% if result %}
+            <div class="alert soft-success">{{ result }}</div>
+          {% endif %}
+          {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+          {% endif %}
+          <pre class="codebox mb-0">{{ devices_cache }}</pre>
+      </div>
+
+      <div class="surface p-3 p-lg-4">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+          <div>
+            <div class="section-title">Recent Logs</div>
+            <div class="muted-small">Latest container output for quick troubleshooting.</div>
+          </div>
+        </div>
+        <pre class="codebox mb-0">{{ recent_logs }}</pre>
+      </div>
+    </div>
+  </div>
+{% endblock %}

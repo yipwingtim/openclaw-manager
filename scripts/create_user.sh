@@ -7,6 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+LIB_NGINX_AUTH="$SCRIPT_DIR/lib_nginx_auth.sh"
 
 # ===== 读取统一配置 =====
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -15,12 +16,58 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 source "$CONFIG_FILE"
+source "$LIB_NGINX_AUTH"
 
 # ===== 参数 =====
-USER_ID=$1
+USER_ID="${1:-}"
+BASIC_AUTH_PASSWORD=""
+BASIC_AUTH_ENABLED="true"
+SKIP_NGINX_RELOAD=0
+SUCCESS=0
+USER_DIR_CREATED=0
+NGINX_CONF_CREATED=0
+PORT_MAPPING_CREATED=0
+HTPASSWD_FILE_CREATED=0
+USERS_CSV_ROW_CREATED=0
+NGINX_COMPOSE_APPLIED=0
+
+shift || true
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --password)
+      BASIC_AUTH_PASSWORD="${2:-}"
+      if [ -z "$BASIC_AUTH_PASSWORD" ]; then
+        echo "[ERROR] --password requires a value"
+        exit 1
+      fi
+      shift 2
+      ;;
+    --basic-auth-enabled)
+      if [ "$#" -lt 2 ]; then
+        echo "[ERROR] --basic-auth-enabled requires true or false"
+        exit 1
+      fi
+      BASIC_AUTH_ENABLED="$(normalize_basic_auth_enabled "${2:-}")" || {
+        echo "[ERROR] --basic-auth-enabled must be true or false"
+        exit 1
+      }
+      shift 2
+      ;;
+    --skip-nginx-reload)
+      SKIP_NGINX_RELOAD=1
+      shift
+      ;;
+    *)
+      echo "[ERROR] Unknown argument: $1"
+      echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--basic-auth-enabled true|false] [--skip-nginx-reload]"
+      exit 1
+      ;;
+  esac
+done
 
 if [ -z "$USER_ID" ]; then
-  echo "Usage: $0 <user_id>"
+  echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--basic-auth-enabled true|false] [--skip-nginx-reload]"
   exit 1
 fi
 
@@ -57,10 +104,12 @@ done
 # ===== 派生路径 =====
 BASE_DIR="$OPENCLAW_PUBLIC_DIR"
 VERSION="$OPENCLAW_VERSION"
+HOST_MANAGER_UID="${HOST_MANAGER_UID:-$(stat -c %u "$BASE_DIR")}"
+HOST_MANAGER_GID="${HOST_MANAGER_GID:-$(stat -c %g "$BASE_DIR")}"
 
 USER_DIR="$BASE_DIR/users/$USER_ID"
 LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
-TEMPLATE="$OPENCLAW_MANAGER_DIR/templates/docker-compose.tpl.yml"
+TEMPLATE="$MANAGER_DIR/templates/docker-compose.tpl.yml"
 
 # ===== 创建基础目录 =====
 mkdir -p "$BASE_DIR/users"
@@ -75,6 +124,102 @@ log() {
 fail() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" | tee -a "$LOG_FILE" >&2
 }
+
+restore_host_owner() {
+  if [ -n "${HOST_MANAGER_UID:-}" ] && [ -n "${HOST_MANAGER_GID:-}" ]; then
+    if [ -d "$USER_DIR" ]; then
+      chown -R "$HOST_MANAGER_UID:$HOST_MANAGER_GID" "$USER_DIR" 2>/dev/null || true
+    fi
+    if [ -n "${NGINX_USER_CONF:-}" ] && [ -f "$NGINX_USER_CONF" ]; then
+      chown "$HOST_MANAGER_UID:$HOST_MANAGER_GID" "$NGINX_USER_CONF" 2>/dev/null || true
+    fi
+    if [ -n "${USERS_CSV:-}" ] && [ -f "$USERS_CSV" ]; then
+      chown "$HOST_MANAGER_UID:$HOST_MANAGER_GID" "$USERS_CSV" 2>/dev/null || true
+      chmod 660 "$USERS_CSV" 2>/dev/null || true
+    fi
+  fi
+}
+
+cleanup_on_exit() {
+  local exit_code="$1"
+
+  if [ "$exit_code" -eq 0 ] || [ "$SUCCESS" -eq 1 ]; then
+    return
+  fi
+
+  restore_host_owner
+
+  if [ -d "$USER_DIR" ]; then
+    cd "$USER_DIR" 2>/dev/null || true
+    docker compose down >/dev/null 2>&1 || true
+  fi
+
+  if [ "$USERS_CSV_ROW_CREATED" -eq 1 ] && [ -f "$USERS_CSV" ]; then
+    python3 - "$USERS_CSV" "$USER_ID" "$PORT" <<'PY' >/dev/null 2>&1 || true
+import sys
+from pathlib import Path
+
+csv_file = Path(sys.argv[1])
+user_id = sys.argv[2]
+port = sys.argv[3]
+
+lines = csv_file.read_text(encoding="utf-8").splitlines(keepends=True)
+filtered = [
+    line for line in lines
+    if not line.startswith(f"{user_id},{port},") or not line.rstrip("\n").endswith(",active")
+]
+csv_file.write_text("".join(filtered), encoding="utf-8")
+PY
+  fi
+
+  if [ "$PORT_MAPPING_CREATED" -eq 1 ] && [ -f "$NGINX_COMPOSE_FILE" ]; then
+    python3 - "$NGINX_COMPOSE_FILE" "$PORT" <<'PY' >/dev/null 2>&1 || true
+import sys
+from pathlib import Path
+
+compose_file = Path(sys.argv[1])
+port = sys.argv[2]
+
+text = compose_file.read_text(encoding="utf-8")
+lines = text.splitlines(keepends=True)
+patterns = {
+    f'      - "{port}:{port}"\n',
+    f"      - '{port}:{port}'\n",
+    f"      - {port}:{port}\n",
+}
+
+compose_file.write_text("".join(line for line in lines if line not in patterns), encoding="utf-8")
+PY
+  fi
+
+  if [ "$NGINX_CONF_CREATED" -eq 1 ] && [ -f "$NGINX_USER_CONF" ]; then
+    rm -f "$NGINX_USER_CONF"
+  fi
+
+  if [ -f "$NGINX_HTPASSWD_FILE" ]; then
+    htpasswd -D "$NGINX_HTPASSWD_FILE" "$USER_ID" >/dev/null 2>&1 || true
+    if [ "$HTPASSWD_FILE_CREATED" -eq 1 ] && [ ! -s "$NGINX_HTPASSWD_FILE" ]; then
+      rm -f "$NGINX_HTPASSWD_FILE"
+    fi
+  fi
+
+  if [ "$USER_DIR_CREATED" -eq 1 ] && [ -d "$USER_DIR" ]; then
+    rm -rf "$USER_DIR"
+  fi
+
+  restore_host_owner
+
+  if [ "$NGINX_COMPOSE_APPLIED" -eq 1 ] && [ -d "$NGINX_COMPOSE_DIR" ]; then
+    (
+      cd "$NGINX_COMPOSE_DIR" 2>/dev/null && docker compose up -d >/dev/null 2>&1
+    ) || true
+
+    docker exec "$NGINX_CONTAINER_NAME" nginx -t >/dev/null 2>&1 && \
+      docker exec "$NGINX_CONTAINER_NAME" nginx -s reload >/dev/null 2>&1 || true
+  fi
+}
+
+trap 'cleanup_on_exit $?' EXIT
 
 # ===== 检查用户 =====
 if [ -d "$USER_DIR" ]; then
@@ -106,7 +251,24 @@ while true; do
     exit 1
   fi
 
-  if ss -tnl | awk '{print $4}' | grep -qE "(:|\.)${PORT}$"; then
+  if python3 - "$PORT" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+try:
+    sock.bind(("0.0.0.0", port))
+except OSError:
+    raise SystemExit(0)
+finally:
+    sock.close()
+
+raise SystemExit(1)
+PY
+  then
     log "Port $PORT is already in use, skip"
     PORT=$((PORT + 1))
     continue
@@ -119,8 +281,16 @@ NEXT_PORT=$((PORT + 1))
 
 log "Alloc port $PORT for user $USER_ID"
 
+GATEWAY_TOKEN="$(python3 - <<'PY'
+import secrets
+
+print(secrets.token_hex(24))
+PY
+)"
+
 # ===== 创建用户目录 =====
-mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions}
+mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions,uploads}
+USER_DIR_CREATED=1
 
 CONFIG_FILE="$USER_DIR/config/openclaw.json"
 
@@ -130,6 +300,9 @@ cat > "$CONFIG_FILE" <<EOF
   "gateway": {
     "mode": "local",
     "bind": "lan",
+    "auth": {
+      "token": "$GATEWAY_TOKEN"
+    },
     "controlUi": {
       "allowedOrigins": [
         "http://localhost:$PORT",
@@ -156,11 +329,13 @@ sed -i "s#{{PORT}}#$PORT#g" "$TARGET_COMPOSE"
 sed -i "s#{{VERSION}}#$VERSION#g" "$TARGET_COMPOSE"
 sed -i "s#{{BASE_DIR}}#$BASE_DIR#g" "$TARGET_COMPOSE"
 sed -i "s#{{TZ}}#$TZ#g" "$TARGET_COMPOSE"
+sed -i "s#{{GATEWAY_TOKEN}}#$GATEWAY_TOKEN#g" "$TARGET_COMPOSE"
 
 # ===== 生成 nginx 用户配置 =====
 mkdir -p "$NGINX_USERS_CONF_DIR"
 
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
+NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 
 cat > "$NGINX_USER_CONF" <<EOF
 server {
@@ -172,10 +347,31 @@ server {
 
     client_max_body_size 10M;
 
-    location / {
-        auth_basic "OpenClaw Login";
-        auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;
+    location = /admin {
+        return 302 /admin/;
+    }
 
+    location /admin/ {
+$NGINX_AUTH_BLOCK
+        proxy_pass http://openclaw-manager-web:8080/instance-admin/;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-OpenClaw-User "$USER_ID";
+
+        proxy_read_timeout 300;
+        proxy_send_timeout 300;
+    }
+
+    location / {
+$NGINX_AUTH_BLOCK
         proxy_pass http://openclaw_${USER_ID}:18789;
 
         proxy_buffering off;
@@ -196,6 +392,9 @@ server {
     }
 }
 EOF
+NGINX_CONF_CREATED=1
+
+restore_host_owner
 
 log "Generated nginx config: $NGINX_USER_CONF"
 
@@ -267,75 +466,94 @@ compose_file.write_text("".join(out), encoding="utf-8")
 PY
 
   log "Added nginx port mapping: $PORT:$PORT"
+  PORT_MAPPING_CREATED=1
 fi
 
 # ===== 创建 / 更新 Basic Auth 用户 =====
-if ! command -v htpasswd >/dev/null 2>&1; then
-  fail "htpasswd command not found. Please install apache2-utils first."
-  fail "Ubuntu/Debian: sudo apt update && sudo apt install -y apache2-utils"
-  exit 1
-fi
-
-if ! command -v setfacl >/dev/null 2>&1; then
-  fail "setfacl command not found. Please install acl first."
-  fail "Ubuntu/Debian: sudo apt update && sudo apt install -y acl"
-  exit 1
-fi
-
-mkdir -p "$(dirname "$NGINX_HTPASSWD_FILE")"
-
-if [ ! -f "$NGINX_HTPASSWD_FILE" ]; then
-  log "Creating Basic Auth user: $USER_ID"
-  htpasswd -c "$NGINX_HTPASSWD_FILE" "$USER_ID"
+if [ "$BASIC_AUTH_ENABLED" = "false" ]; then
+  log "Basic Auth disabled for user: $USER_ID"
 else
-  log "Creating / updating Basic Auth user: $USER_ID"
-  htpasswd "$NGINX_HTPASSWD_FILE" "$USER_ID"
+  if ! command -v htpasswd >/dev/null 2>&1; then
+    fail "htpasswd command not found. Please install apache2-utils first."
+    fail "Ubuntu/Debian: sudo apt update && sudo apt install -y apache2-utils"
+    exit 1
+  fi
+
+  if ! command -v setfacl >/dev/null 2>&1; then
+    fail "setfacl command not found. Please install acl first."
+    fail "Ubuntu/Debian: sudo apt update && sudo apt install -y acl"
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "$NGINX_HTPASSWD_FILE")"
+
+  if [ ! -f "$NGINX_HTPASSWD_FILE" ]; then
+    HTPASSWD_FILE_CREATED=1
+    log "Creating Basic Auth user: $USER_ID"
+    if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -ci "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    else
+      htpasswd -c "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    fi
+  else
+    log "Creating / updating Basic Auth user: $USER_ID"
+    if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -i "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    else
+      htpasswd "$NGINX_HTPASSWD_FILE" "$USER_ID"
+    fi
+  fi
+
+  # ===== 修复 nginx 容器读取 .htpasswd 的权限 =====
+  NGINX_UID=$(docker exec "$NGINX_CONTAINER_NAME" id -u nginx 2>/dev/null || true)
+
+  if [ -z "$NGINX_UID" ]; then
+    fail "Could not detect nginx user UID in container: $NGINX_CONTAINER_NAME"
+    exit 1
+  fi
+
+  log "Granting nginx container user UID $NGINX_UID read access to htpasswd file"
+
+  sudo setfacl -m "u:${NGINX_UID}:rx" "$(dirname "$NGINX_HTPASSWD_FILE")"
+  sudo setfacl -m "u:${NGINX_UID}:r" "$NGINX_HTPASSWD_FILE"
 fi
-
-# ===== 修复 nginx 容器读取 .htpasswd 的权限 =====
-NGINX_UID=$(docker exec "$NGINX_CONTAINER_NAME" id -u nginx 2>/dev/null || true)
-
-if [ -z "$NGINX_UID" ]; then
-  fail "Could not detect nginx user UID in container: $NGINX_CONTAINER_NAME"
-  exit 1
-fi
-
-log "Granting nginx container user UID $NGINX_UID read access to htpasswd file"
-
-sudo setfacl -m "u:${NGINX_UID}:rx" "$(dirname "$NGINX_HTPASSWD_FILE")"
-sudo setfacl -m "u:${NGINX_UID}:r" "$NGINX_HTPASSWD_FILE"
 
 # ===== 启动用户容器 =====
 cd "$USER_DIR"
 
 if ! docker compose up -d; then
   fail "Failed to start container for user $USER_ID"
-  fail "User directory is kept for troubleshooting: $USER_DIR"
+  fail "Rolling back generated files for user: $USER_ID"
   exit 1
 fi
 
-# ===== 更新 nginx 容器并检查配置 =====
-log "Updating nginx container port mappings"
+if [ "$SKIP_NGINX_RELOAD" -eq 1 ]; then
+  log "Skip nginx update/reload; caller must reload nginx after batch operations"
+else
+  # ===== 更新 nginx 容器并检查配置 =====
+  log "Updating nginx container port mappings"
 
-cd "$NGINX_COMPOSE_DIR"
+  cd "$NGINX_COMPOSE_DIR"
 
-if ! docker compose up -d; then
-  fail "Failed to update nginx container"
-  exit 1
-fi
+  NGINX_COMPOSE_APPLIED=1
+  if ! docker compose up -d; then
+    fail "Failed to update nginx container"
+    exit 1
+  fi
 
-log "Testing nginx configuration"
+  log "Testing nginx configuration"
 
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
-  fail "Nginx configuration test failed"
-  exit 1
-fi
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
+    fail "Nginx configuration test failed"
+    exit 1
+  fi
 
-log "Reloading nginx"
+  log "Reloading nginx"
 
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
-  fail "Failed to reload nginx"
-  exit 1
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
+    fail "Failed to reload nginx"
+    exit 1
+  fi
 fi
 
 # ===== 成功后再提交端口 =====
@@ -378,6 +596,9 @@ if [ ! -f "$USERS_CSV" ]; then
 fi
 
 echo "$USER_ID,$PORT,$(date '+%Y-%m-%d %H:%M:%S'),active" >> "$USERS_CSV"
+USERS_CSV_ROW_CREATED=1
+
+restore_host_owner
 
 # ===== 输出 =====
 echo ""
@@ -389,8 +610,16 @@ echo "Access URL:"
 echo "👉 https://$PUBLIC_HOST:$PORT"
 echo ""
 echo "Basic Auth:"
-echo "👉 username: $USER_ID"
-echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
+if [ "$BASIC_AUTH_ENABLED" = "false" ]; then
+  echo "👉 disabled"
+else
+  echo "👉 username: $USER_ID"
+  if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+    echo "👉 password: $BASIC_AUTH_PASSWORD"
+  else
+    echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
+  fi
+fi
 
 echo "Login Token:"
 if [ -z "$TOKEN" ]; then
@@ -400,3 +629,4 @@ else
 fi
 
 echo "=============================="
+SUCCESS=1

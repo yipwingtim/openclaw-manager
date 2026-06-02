@@ -16,9 +16,26 @@ source "$CONFIG_FILE"
 
 # ===== 参数 =====
 USER_ID=$1
+SKIP_NGINX_RELOAD=0
+USER_DIR_EXISTS=0
+
+shift || true
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip-nginx-reload)
+      SKIP_NGINX_RELOAD=1
+      shift
+      ;;
+    *)
+      echo "Usage: $0 <user_id> [--skip-nginx-reload]"
+      exit 1
+      ;;
+  esac
+done
 
 if [ -z "$USER_ID" ]; then
-  echo "Usage: $0 <user_id>"
+  echo "Usage: $0 <user_id> [--skip-nginx-reload]"
   exit 1
 fi
 
@@ -44,8 +61,9 @@ DELETED_DIR="$BASE_DIR/deleted"
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
 
 if [ ! -d "$USER_DIR" ]; then
-  echo "[ERROR] User not found: $USER_ID"
-  exit 1
+  echo "[WARN] User not found: $USER_ID"
+else
+  USER_DIR_EXISTS=1
 fi
 
 # ===== 识别 nginx 端口 =====
@@ -58,7 +76,11 @@ if [ -f "$NGINX_USER_CONF" ]; then
 fi
 
 if [ -z "$PORT" ] && [ -f "$BASE_DIR/users.csv" ]; then
-  PORT=$(awk -F',' -v user="$USER_ID" '$1==user && $4=="active" {print $2}' "$BASE_DIR/users.csv" | tail -n1)
+  if [ -r "$BASE_DIR/users.csv" ]; then
+    PORT=$(awk -F',' -v user="$USER_ID" '$1==user && $4=="active" {print $2}' "$BASE_DIR/users.csv" | tail -n1)
+  else
+    PORT=$(sudo awk -F',' -v user="$USER_ID" '$1==user && $4=="active" {print $2}' "$BASE_DIR/users.csv" | tail -n1)
+  fi
 fi
 
 if [ -z "$PORT" ]; then
@@ -72,14 +94,22 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RECYCLE_DIR="$DELETED_DIR/${USER_ID}_$TIMESTAMP"
 
 echo "[INFO] Stopping OpenClaw container..."
-cd "$USER_DIR"
-docker compose down || true
+if [ "$USER_DIR_EXISTS" -eq 1 ]; then
+  cd "$USER_DIR"
+  docker compose down || true
+else
+  echo "[INFO] Skip container stop: user directory not found"
+fi
 
 # ===== 创建回收站目录 =====
 mkdir -p "$RECYCLE_DIR"
 
-echo "[INFO] Moving user data to recycle bin..."
-mv "$USER_DIR" "$RECYCLE_DIR/user"
+if [ "$USER_DIR_EXISTS" -eq 1 ]; then
+  echo "[INFO] Moving user data to recycle bin..."
+  mv "$USER_DIR" "$RECYCLE_DIR/user"
+else
+  echo "[INFO] Skip moving user data: directory already missing"
+fi
 
 # ===== 逻辑删除 nginx 用户配置 =====
 if [ -f "$NGINX_USER_CONF" ]; then
@@ -129,36 +159,49 @@ else
   echo "[WARN] Skip nginx compose port cleanup"
 fi
 
-# ===== 更新 nginx 容器并 reload =====
-echo "[INFO] Updating nginx container..."
-cd "$NGINX_COMPOSE_DIR"
+if [ "$SKIP_NGINX_RELOAD" -eq 1 ]; then
+  echo "[INFO] Skip nginx update/reload; caller must reload nginx after batch operations"
+else
+  # ===== 更新 nginx 容器并 reload =====
+  echo "[INFO] Updating nginx container..."
+  cd "$NGINX_COMPOSE_DIR"
 
-if ! docker compose up -d; then
-  echo "[ERROR] Failed to update nginx container"
-  exit 1
-fi
+  if ! docker compose up -d; then
+    echo "[ERROR] Failed to update nginx container"
+    exit 1
+  fi
 
-echo "[INFO] Testing nginx configuration..."
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
-  echo "[ERROR] Nginx configuration test failed"
-  exit 1
-fi
+  echo "[INFO] Testing nginx configuration..."
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
+    echo "[ERROR] Nginx configuration test failed"
+    exit 1
+  fi
 
-echo "[INFO] Reloading nginx..."
-if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
-  echo "[ERROR] Failed to reload nginx"
-  exit 1
+  echo "[INFO] Reloading nginx..."
+  if ! docker exec "$NGINX_CONTAINER_NAME" nginx -s reload; then
+    echo "[ERROR] Failed to reload nginx"
+    exit 1
+  fi
 fi
 
 # ===== 更新 users.csv 状态 =====
 if [ -f "$BASE_DIR/users.csv" ]; then
   TMP_FILE="$(mktemp)"
-  awk -F',' -v OFS=',' -v user="$USER_ID" '
-    NR==1 { print; next }
-    $1==user && $4=="active" { $4="deleted" }
-    { print }
-  ' "$BASE_DIR/users.csv" > "$TMP_FILE"
-  mv "$TMP_FILE" "$BASE_DIR/users.csv"
+  if [ -r "$BASE_DIR/users.csv" ] && [ -w "$BASE_DIR/users.csv" ]; then
+    awk -F',' -v OFS=',' -v user="$USER_ID" '
+      NR==1 { print; next }
+      $1==user && $4=="active" { $4="deleted" }
+      { print }
+    ' "$BASE_DIR/users.csv" > "$TMP_FILE"
+    mv "$TMP_FILE" "$BASE_DIR/users.csv"
+  else
+    sudo awk -F',' -v OFS=',' -v user="$USER_ID" '
+      NR==1 { print; next }
+      $1==user && $4=="active" { $4="deleted" }
+      { print }
+    ' "$BASE_DIR/users.csv" > "$TMP_FILE"
+    sudo mv "$TMP_FILE" "$BASE_DIR/users.csv"
+  fi
 fi
 
 echo ""

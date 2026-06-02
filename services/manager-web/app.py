@@ -861,6 +861,29 @@ def instance_admin():
     return render_user_dashboard(user_id, instance_mode=True)
 
 
+@app.get("/instance-admin/help")
+def instance_admin_help():
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    return render_template(
+        "instance_admin_help.html",
+        user_id=user_id,
+        current_user=user_id,
+        is_admin=False,
+        instance_mode=True,
+        upload_dir=CONTAINER_UPLOAD_DIR,
+        max_upload_mb=MAX_UPLOAD_BYTES // 1024 // 1024,
+        download_extensions=", ".join(sorted(DOWNLOAD_EXTENSIONS)),
+        protected_filenames=", ".join(sorted(PROTECTED_FILENAMES)),
+    )
+
+
 @app.post("/instance-admin/approve-latest")
 def instance_approve_latest():
     user_id = get_instance_user()

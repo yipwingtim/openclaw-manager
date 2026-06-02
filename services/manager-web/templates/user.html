@@ -17,6 +17,9 @@
       </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+      {% if instance_mode %}
+        <a class="btn btn-oc-outline" href="/admin/help">使用说明</a>
+      {% endif %}
       {% if show_admin_links %}
         <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
       {% endif %}

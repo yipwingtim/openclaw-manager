@@ -131,6 +131,10 @@ restore_host_owner() {
     if [ -n "${NGINX_USER_CONF:-}" ] && [ -f "$NGINX_USER_CONF" ]; then
       chown "$HOST_MANAGER_UID:$HOST_MANAGER_GID" "$NGINX_USER_CONF" 2>/dev/null || true
     fi
+    if [ -n "${USERS_CSV:-}" ] && [ -f "$USERS_CSV" ]; then
+      chown "$HOST_MANAGER_UID:$HOST_MANAGER_GID" "$USERS_CSV" 2>/dev/null || true
+      chmod 660 "$USERS_CSV" 2>/dev/null || true
+    fi
   fi
 }
 

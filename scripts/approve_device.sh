@@ -64,6 +64,10 @@ fail() {
   exit 1
 }
 
+approval_output_is_terminal() {
+  echo "$1" | grep -Eiq 'approved|success|no pending|already approved|already paired|not found'
+}
+
 if [ ! -d "$USER_DIR" ]; then
   fail "User not found: $USER_ID ($USER_DIR)"
 fi
@@ -188,7 +192,21 @@ if [ "$TARGET_REQUEST_ID" = "--latest" ]; then
   )"
 
   if [ -z "$LATEST_REQUEST_ID" ]; then
-    fail "Could not extract latest requestId from OpenClaw preview output."
+    if approval_output_is_terminal "$LATEST_OUTPUT"; then
+      log "Latest approval completed without explicit requestId."
+      exit 0
+    fi
+
+    warn "Could not extract latest requestId from OpenClaw output. Falling back to legacy --latest approval."
+    LEGACY_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices approve --latest 2>&1 || true)"
+    echo "$LEGACY_OUTPUT"
+
+    if approval_output_is_terminal "$LEGACY_OUTPUT"; then
+      log "Latest approval completed via legacy --latest flow."
+      exit 0
+    fi
+
+    fail "Could not approve latest device request."
   fi
 
   log "Approving latest requestId explicitly: $LATEST_REQUEST_ID"

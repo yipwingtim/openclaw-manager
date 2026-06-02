@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 INSTANCE_ID="${1:?请提供实例 ID，例如：xinxizhongxin}"
 CONTAINER_NAME="openclaw_${INSTANCE_ID}"
 
-ENV_FILE="config/model-providers.env"
+ENV_FILE="$MANAGER_DIR/config/model-providers.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "错误：未找到配置文件：$ENV_FILE"

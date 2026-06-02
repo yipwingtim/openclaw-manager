@@ -17,12 +17,29 @@ OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:?Missing OPENCLAW_PUBLIC_DIR in confi
 
 USER_ID="${1:-}"
 TARGET_VERSION="${2:-}"
+RESTORE_MODEL_PROVIDER=0
 
 if [ -z "$USER_ID" ] || [ -z "$TARGET_VERSION" ]; then
-  echo "Usage: $0 <user_id> <version>" >&2
-  echo "Example: $0 batchtest004 2026.5.26" >&2
+  echo "Usage: $0 <user_id> <version> [--restore-model-provider]" >&2
+  echo "Example: $0 batchtest004 2026.5.26 --restore-model-provider" >&2
   exit 1
 fi
+
+shift 2
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --restore-model-provider)
+      RESTORE_MODEL_PROVIDER=1
+      shift
+      ;;
+    *)
+      echo "[ERROR] Unknown argument: $1" >&2
+      echo "Usage: $0 <user_id> <version> [--restore-model-provider]" >&2
+      exit 1
+      ;;
+  esac
+done
 
 if ! [[ "$USER_ID" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
   echo "[ERROR] Invalid user_id: $USER_ID" >&2
@@ -43,7 +60,9 @@ BACKUP_FILE="$BACKUP_DIR/docker-compose.yml"
 PERSISTENT_BACKUP_DIR="$BACKUP_DIR/persistent-data"
 PRE_CHECK_FILE="$BACKUP_DIR/pre-check.txt"
 POST_CHECK_FILE="$BACKUP_DIR/post-check.txt"
+POST_RESTORE_CHECK_FILE="$BACKUP_DIR/post-restore-check.txt"
 CHECK_SCRIPT="$SCRIPT_DIR/check_instance_upgrade.sh"
+SET_MODEL_PROVIDER_SCRIPT="$SCRIPT_DIR/set_model_provider.sh"
 
 if [ ! -d "$USER_DIR" ]; then
   echo "[ERROR] User directory not found: $USER_DIR" >&2
@@ -89,6 +108,10 @@ print_rollback() {
   echo "Persistent backup:"
   echo "  $PERSISTENT_BACKUP_DIR"
   echo "Restore persistent data only after reviewing differences."
+}
+
+post_check_reports_missing_model_provider() {
+  [ -f "$POST_CHECK_FILE" ] && grep -Eiq 'Model providers missing|Primary model missing' "$POST_CHECK_FILE"
 }
 
 if [ -x "$CHECK_SCRIPT" ]; then
@@ -176,6 +199,34 @@ for _ in $(seq 1 30); do
       else
         echo "[INFO] Post-upgrade check passed: $POST_CHECK_FILE"
       fi
+
+      if post_check_reports_missing_model_provider; then
+        if [ "$RESTORE_MODEL_PROVIDER" -eq 1 ]; then
+          if [ -x "$SET_MODEL_PROVIDER_SCRIPT" ]; then
+            echo "[INFO] Model provider appears missing. Restoring via set_model_provider.sh..."
+            "$SET_MODEL_PROVIDER_SCRIPT" "$USER_ID"
+
+            echo "[INFO] Running post-restore check: $POST_RESTORE_CHECK_FILE"
+            set +e
+            "$CHECK_SCRIPT" "$USER_ID" > "$POST_RESTORE_CHECK_FILE" 2>&1
+            POST_RESTORE_CHECK_STATUS=$?
+            set -e
+
+            if [ "$POST_RESTORE_CHECK_STATUS" -eq 2 ]; then
+              echo "[ERROR] Post-restore check failed. Review: $POST_RESTORE_CHECK_FILE" >&2
+            elif [ "$POST_RESTORE_CHECK_STATUS" -eq 1 ]; then
+              echo "[WARN] Post-restore check has warnings. Review: $POST_RESTORE_CHECK_FILE"
+            else
+              echo "[INFO] Post-restore check passed: $POST_RESTORE_CHECK_FILE"
+            fi
+          else
+            echo "[ERROR] Model provider restore requested, but script is not executable: $SET_MODEL_PROVIDER_SCRIPT" >&2
+          fi
+        else
+          echo "[WARN] Model provider may be missing. Restore manually or rerun with --restore-model-provider:"
+          echo "  ./scripts/set_model_provider.sh '$USER_ID'"
+        fi
+      fi
     fi
 
     echo ""
@@ -188,6 +239,9 @@ for _ in $(seq 1 30); do
     echo "Health: $HEALTH"
     echo "Pre-check: $PRE_CHECK_FILE"
     echo "Post-check: $POST_CHECK_FILE"
+    if [ -f "$POST_RESTORE_CHECK_FILE" ]; then
+      echo "Post-restore check: $POST_RESTORE_CHECK_FILE"
+    fi
     echo "=============================="
     echo ""
     echo "Post-update checks:"

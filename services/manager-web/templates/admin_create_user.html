@@ -81,7 +81,7 @@
   <div class="row g-3">
     <div class="col-lg-5">
       <div class="surface p-3 p-lg-4">
-        <form method="post" action="/admin/create-user">
+        <form method="post" action="/admin/create-user" onsubmit="const button=this.querySelector('[data-create-submit]'); if (button) { button.disabled = true; button.textContent = 'Creating...'; }">
           <label class="form-label" for="user_id">User ID</label>
           <input class="form-control mb-3" id="user_id" name="user_id" value="{{ user_id }}" autocomplete="off" required>
 
@@ -94,7 +94,7 @@
           <label class="form-label" for="basic_auth_password">Basic Auth Password</label>
           <input class="form-control mb-3" id="basic_auth_password" name="basic_auth_password" type="password" autocomplete="new-password">
 
-          <button class="btn btn-oc" type="submit">Create Instance</button>
+          <button class="btn btn-oc" type="submit" data-create-submit>Create Instance</button>
         </form>
         <div class="muted-small mt-3">
           Password is required only when Basic Auth is enabled. The create script will allocate the next available port, start the instance, update Nginx, and print the access details.

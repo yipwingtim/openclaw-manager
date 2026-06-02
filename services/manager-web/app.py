@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import csv
 import io
+import threading
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -41,6 +42,8 @@ PROTECTED_FILENAMES = {
 }
 ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "openclaw").split(",") if user.strip()}
 LAST_CREATED_ACCOUNTS = {}
+CREATE_EVENTS = {}
+CREATE_EVENTS_LOCK = threading.Lock()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -682,6 +685,18 @@ def run_admin_create_user():
             status,
         )
 
+    def render_create_success(account, result=""):
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=account,
+            account_csv=account_csv(account),
+            result=result,
+            error="",
+        )
+
     if not user_id:
         return render_create_form(error="Invalid user id. Use letters, numbers, dot, underscore, or hyphen.", status=400)
 
@@ -692,7 +707,32 @@ def run_admin_create_user():
         return render_create_form(error="Basic Auth password is required when Basic Auth is enabled.", status=400)
 
     if get_user_dir(user_id).exists():
+        account = LAST_CREATED_ACCOUNTS.get(user_id)
+        if account is not None:
+            return render_create_success(account, result=f"Instance already created: {user_id}")
         return render_create_form(error=f"User already exists: {user_id}", status=400)
+
+    with CREATE_EVENTS_LOCK:
+        create_event = CREATE_EVENTS.get(user_id)
+        if create_event is None:
+            create_event = threading.Event()
+            CREATE_EVENTS[user_id] = create_event
+            owns_create = True
+        else:
+            owns_create = False
+
+    if not owns_create:
+        create_event.wait(timeout=430)
+        account = LAST_CREATED_ACCOUNTS.get(user_id)
+        if account is not None:
+            return render_create_success(account, result=f"Instance creation completed: {user_id}")
+        if get_user_dir(user_id).exists():
+            return render_create_form(
+                result=f"Instance directory now exists for {user_id}. Check /admin/users for details.",
+                error="Create request was already submitted.",
+                status=409,
+            )
+        return render_create_form(error=f"Create request is already running: {user_id}", status=409)
 
     command = [
         str(MANAGER_DIR / "scripts" / "create_user.sh"),
@@ -703,30 +743,27 @@ def run_admin_create_user():
     if basic_auth_password:
         command.extend(["--password", basic_auth_password])
 
-    process = subprocess.run(
-        command,
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=420,
-        check=False,
-    )
-    output = (process.stdout + "\n" + process.stderr).strip()
-    if process.returncode != 0:
-        return render_create_form(result=output, error="Create instance failed.", status=500)
+    try:
+        process = subprocess.run(
+            command,
+            cwd=str(MANAGER_DIR),
+            text=True,
+            capture_output=True,
+            timeout=420,
+            check=False,
+        )
+        output = (process.stdout + "\n" + process.stderr).strip()
+        if process.returncode != 0:
+            return render_create_form(result=output, error="Create instance failed.", status=500)
 
-    account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
-    LAST_CREATED_ACCOUNTS[user_id] = account
-    return render_template(
-        "admin_create_user.html",
-        user_id="",
-        basic_auth_enabled="true",
-        basic_auth_password="",
-        account=account,
-        account_csv=account_csv(account),
-        result=output,
-        error="",
-    )
+        account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
+        LAST_CREATED_ACCOUNTS[user_id] = account
+        return render_create_success(account, result=output)
+    finally:
+        create_event.set()
+        with CREATE_EVENTS_LOCK:
+            if CREATE_EVENTS.get(user_id) is create_event:
+                del CREATE_EVENTS[user_id]
 
 
 @app.get("/admin/create-user/<user_id>/account.csv")

@@ -281,6 +281,13 @@ NEXT_PORT=$((PORT + 1))
 
 log "Alloc port $PORT for user $USER_ID"
 
+GATEWAY_TOKEN="$(python3 - <<'PY'
+import secrets
+
+print(secrets.token_hex(24))
+PY
+)"
+
 # ===== 创建用户目录 =====
 mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions,uploads}
 USER_DIR_CREATED=1
@@ -293,6 +300,9 @@ cat > "$CONFIG_FILE" <<EOF
   "gateway": {
     "mode": "local",
     "bind": "lan",
+    "auth": {
+      "token": "$GATEWAY_TOKEN"
+    },
     "controlUi": {
       "allowedOrigins": [
         "http://localhost:$PORT",
@@ -319,6 +329,7 @@ sed -i "s#{{PORT}}#$PORT#g" "$TARGET_COMPOSE"
 sed -i "s#{{VERSION}}#$VERSION#g" "$TARGET_COMPOSE"
 sed -i "s#{{BASE_DIR}}#$BASE_DIR#g" "$TARGET_COMPOSE"
 sed -i "s#{{TZ}}#$TZ#g" "$TARGET_COMPOSE"
+sed -i "s#{{GATEWAY_TOKEN}}#$GATEWAY_TOKEN#g" "$TARGET_COMPOSE"
 
 # ===== 生成 nginx 用户配置 =====
 mkdir -p "$NGINX_USERS_CONF_DIR"

@@ -26,6 +26,7 @@ services:
 
     environment:
       - TZ={{TZ}}
+      - OPENCLAW_GATEWAY_TOKEN={{GATEWAY_TOKEN}}
 
     cap_drop:
       - ALL

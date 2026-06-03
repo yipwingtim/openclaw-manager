@@ -52,6 +52,29 @@
       .navbar-brand {
         font-weight: 760;
       }
+      .nav-admin {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        align-items: center;
+      }
+      .nav-admin a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 2rem;
+        padding: 0.28rem 0.62rem;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 0.42rem;
+        color: rgba(255, 255, 255, 0.82);
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 720;
+      }
+      .nav-admin a:hover {
+        border-color: rgba(255, 255, 255, 0.38);
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+      }
       .brand-mark {
         display: inline-grid;
         width: 1.8rem;
@@ -245,9 +268,13 @@
     <nav class="navbar navbar-dark navbar-oc">
       <div class="container-fluid px-3 px-lg-4">
         <span class="navbar-brand mb-0 h1"><span class="brand-mark">OC</span>OpenClaw Manager</span>
-        <span class="navbar-text text-white-50">
+        <div class="nav-admin">
+          <a href="/admin/users">Users</a>
+          <a href="/admin/create-user">Create</a>
+          <a href="/admin/device-approvals">Devices</a>
+          <a href="/admin/metadata">Metadata</a>
           {% block nav_right %}{% endblock %}
-        </span>
+        </div>
       </div>
     </nav>
     <main class="container page-shell py-4 py-lg-5">

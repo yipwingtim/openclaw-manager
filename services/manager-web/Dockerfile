@@ -11,6 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY metadata_store.py .
 COPY templates ./templates
 
 ENV FLASK_HOST=0.0.0.0

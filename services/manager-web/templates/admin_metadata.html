@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Metadata - OpenClaw Manager{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
+    <div>
+      <div class="page-kicker">Metadata Store</div>
+      <h1 class="page-title">SQLite Metadata</h1>
+      <div class="page-subtitle">Inspect persisted instance metadata and recent operation records.</div>
+    </div>
+    <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+  </div>
+
+  {% if error %}
+    <div class="alert soft-danger">{{ error }}</div>
+  {% endif %}
+
+  <div class="surface p-3 p-lg-4 mb-3">
+    <div class="section-title mb-2">Database</div>
+    <div class="muted-small">{{ db_file }}</div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <div class="metric">
+        <div class="metric-label">Instances</div>
+        <div class="metric-value">{{ counts.instances | default(0) }}</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="metric">
+        <div class="metric-label">Ports</div>
+        <div class="metric-value">{{ counts.ports | default(0) }}</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="metric">
+        <div class="metric-label">Credentials</div>
+        <div class="metric-value">{{ counts.instance_credentials | default(0) }}</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="metric">
+        <div class="metric-label">Operations</div>
+        <div class="metric-value">{{ counts.operation_records | default(0) }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="surface mb-3">
+    <div class="p-3 p-lg-4 border-bottom">
+      <div class="section-title">Recent Instances</div>
+      <div class="muted-small">Latest 20 records from the metadata database.</div>
+    </div>
+    {% if instances %}
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Status</th>
+              <th>Port</th>
+              <th>Version</th>
+              <th>Basic Auth</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for instance in instances %}
+              <tr>
+                <td class="fw-semibold">{{ instance.user_id }}</td>
+                <td><span class="badge-status badge-neutral">{{ instance.status }}</span></td>
+                <td>{{ instance.port or "-" }}</td>
+                <td>{{ instance.openclaw_version or "-" }}</td>
+                <td>{{ "Enabled" if instance.basic_auth_enabled else "Disabled" }}</td>
+                <td>{{ instance.updated_at }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="p-4 muted-small">No instance metadata yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="surface">
+    <div class="p-3 p-lg-4 border-bottom">
+      <div class="section-title">Recent Operations</div>
+      <div class="muted-small">Latest 20 operation records from SQLite.</div>
+    </div>
+    {% if operations %}
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Actor</th>
+              <th>Action</th>
+              <th>User</th>
+              <th>Status</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for operation in operations %}
+              <tr>
+                <td>{{ operation.created_at }}</td>
+                <td>{{ operation.actor or "-" }}</td>
+                <td>{{ operation.action }}</td>
+                <td>{{ operation.user_id or "-" }}</td>
+                <td><span class="badge-status badge-neutral">{{ operation.status }}</span></td>
+                <td>{{ operation.message or "-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="p-4 muted-small">No operation records yet.</div>
+    {% endif %}
+  </div>
+{% endblock %}

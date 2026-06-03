@@ -249,6 +249,17 @@ def list_operations(limit=100, conn=None):
         return [row_to_dict(row) for row in rows]
 
 
+def table_counts(conn=None):
+    tables = ["instances", "ports", "operation_records", "instance_credentials"]
+    owns_conn = conn is None
+    context = connect() if owns_conn else nullcontext(conn)
+    counts = {}
+    with context as active_conn:
+        for table in tables:
+            counts[table] = active_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    return counts
+
+
 class nullcontext:
     def __init__(self, value):
         self.value = value

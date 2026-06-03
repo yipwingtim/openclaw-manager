@@ -127,6 +127,8 @@ openclaw-manager/
 ## 📚 Documentation | 文档索引
 
 - [Agent Hosting Platform 架构规划](docs/architecture/agent-hosting-platform.md)
+- [Metadata Storage Plan 元数据存储规划](docs/architecture/metadata-storage-plan.md)
+- [Metadata Data Dictionary 元数据数据字典](docs/architecture/metadata-data-dictionary.md)
 - [User Self-Service Panel 用户自助面板](docs/user-self-service-panel.md)
 
 ---

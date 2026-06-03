@@ -114,6 +114,8 @@ now = utc_now()
 imported = 0
 skipped = 0
 ports = 0
+final_instances = 0
+final_ports = 0
 
 with sqlite3.connect(db_file) as conn:
     conn.execute("PRAGMA foreign_keys = ON")
@@ -206,9 +208,13 @@ with sqlite3.connect(db_file) as conn:
             ports += 1
 
     conn.commit()
+    final_instances = conn.execute("SELECT COUNT(*) FROM instances").fetchone()[0]
+    final_ports = conn.execute("SELECT COUNT(*) FROM ports").fetchone()[0]
 
 print(f"[INFO] Metadata database: {db_file}")
-print(f"[INFO] Imported instances: {imported}")
-print(f"[INFO] Imported ports: {ports}")
+print(f"[INFO] Processed rows: {imported}")
+print(f"[INFO] Upserted instances: {final_instances}")
+print(f"[INFO] Processed ports: {ports}")
+print(f"[INFO] Upserted ports: {final_ports}")
 print(f"[INFO] Skipped rows: {skipped}")
 PY

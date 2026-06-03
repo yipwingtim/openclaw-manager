@@ -44,6 +44,7 @@
                 <th>User</th>
                 <th>Status</th>
                 <th>Port</th>
+                <th>Version</th>
                 <th>Access URL</th>
                 <th>Basic Auth</th>
                 <th>Actions</th>
@@ -63,6 +64,13 @@
                     {% endif %}
                   </td>
                   <td class="fw-semibold">{{ user.port or "Unknown" }}</td>
+                  <td>
+                    {% if user.openclaw_version %}
+                      <span class="badge-status badge-neutral">{{ user.openclaw_version }}</span>
+                    {% else %}
+                      <span class="badge-status badge-neutral">Unknown</span>
+                    {% endif %}
+                  </td>
                   <td>
                     {% if user.access_url %}
                       <a href="{{ user.access_url }}" target="_blank" rel="noreferrer">{{ user.access_url }}</a>

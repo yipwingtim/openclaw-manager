@@ -340,6 +340,18 @@ def is_basic_auth_enabled(user_id):
     return None
 
 
+def detect_openclaw_version(user_id):
+    compose_file = get_user_dir(user_id) / "docker-compose.yml"
+    if not compose_file.is_file():
+        return ""
+
+    text = compose_file.read_text(encoding="utf-8", errors="ignore")
+    match = re.search(r"image:\s*ghcr\.io/openclaw/openclaw:([^\s]+)", text)
+    if not match:
+        return ""
+    return match.group(1).strip().strip('"').strip("'")
+
+
 def get_container_status(user_id):
     container_name = f"openclaw_{user_id}"
     result = subprocess.run(
@@ -443,6 +455,7 @@ def list_active_users(status_filter="running"):
                 "user_id": user_id,
                 "status": status,
                 "port": port,
+                "openclaw_version": detect_openclaw_version(user_id),
                 "access_url": build_access_url(port),
                 "basic_auth_enabled": is_basic_auth_enabled(user_id),
             }

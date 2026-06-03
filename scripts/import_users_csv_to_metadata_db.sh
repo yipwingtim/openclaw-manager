@@ -74,6 +74,41 @@ def detect_basic_auth_enabled(nginx_conf):
     return 1 if "auth_basic" in text and "auth_basic off" not in text else 0
 
 
+def iter_user_rows(path):
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+
+    if not rows:
+        return
+
+    first = [value.strip() for value in rows[0]]
+    has_header = {"user_id", "port", "created_at"}.issubset(set(first))
+
+    if has_header:
+        header = first
+        for values in rows[1:]:
+            if not values or not any(value.strip() for value in values):
+                continue
+            row = {header[index]: values[index].strip() if index < len(values) else "" for index in range(len(header))}
+            yield {
+                "user_id": row.get("user_id", ""),
+                "port": row.get("port", ""),
+                "created_at": row.get("created_at", ""),
+                "status": row.get("status", "active"),
+            }
+        return
+
+    for values in rows:
+        if not values or not any(value.strip() for value in values):
+            continue
+        yield {
+            "user_id": values[0].strip() if len(values) > 0 else "",
+            "port": values[1].strip() if len(values) > 1 else "",
+            "created_at": values[2].strip() if len(values) > 2 else "",
+            "status": values[3].strip() if len(values) > 3 else "active",
+        }
+
+
 schema = schema_file.read_text(encoding="utf-8")
 now = utc_now()
 imported = 0
@@ -84,34 +119,28 @@ with sqlite3.connect(db_file) as conn:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(schema)
 
-    with users_csv.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        required = {"user_id", "port", "created_at", "status"}
-        if not required.issubset(set(reader.fieldnames or [])):
-            raise SystemExit(f"[ERROR] users.csv header must include: {', '.join(sorted(required))}")
+    for row in iter_user_rows(users_csv):
+        user_id = (row.get("user_id") or "").strip()
+        if not user_id:
+            skipped += 1
+            continue
 
-        for row in reader:
-            user_id = (row.get("user_id") or "").strip()
-            if not user_id:
-                skipped += 1
-                continue
+        port_text = (row.get("port") or "").strip()
+        try:
+            port = int(port_text) if port_text else None
+        except ValueError:
+            port = None
 
-            port_text = (row.get("port") or "").strip()
-            try:
-                port = int(port_text) if port_text else None
-            except ValueError:
-                port = None
+        status = normalize_status(row.get("status"))
+        created_at = (row.get("created_at") or "").strip() or now
+        user_dir = public_dir / "users" / user_id
+        compose_file = user_dir / "docker-compose.yml"
+        nginx_conf = nginx_conf_dir / f"{user_id}.conf"
+        access_url = f"https://{public_host}:{port}" if public_host and port else ""
+        admin_url = f"{access_url}/admin/" if access_url else ""
 
-            status = normalize_status(row.get("status"))
-            created_at = (row.get("created_at") or "").strip() or now
-            user_dir = public_dir / "users" / user_id
-            compose_file = user_dir / "docker-compose.yml"
-            nginx_conf = nginx_conf_dir / f"{user_id}.conf"
-            access_url = f"https://{public_host}:{port}" if public_host and port else ""
-            admin_url = f"{access_url}/admin/" if access_url else ""
-
-            conn.execute(
-                """
+        conn.execute(
+            """
                 INSERT INTO instances (
                     user_id,
                     product,
@@ -141,8 +170,8 @@ with sqlite3.connect(db_file) as conn:
                     nginx_conf_path = excluded.nginx_conf_path,
                     updated_at = excluded.updated_at,
                     deleted_at = excluded.deleted_at
-                """,
-                (
+            """,
+            (
                     user_id,
                     port,
                     status,
@@ -156,14 +185,14 @@ with sqlite3.connect(db_file) as conn:
                     created_at,
                     now,
                     now if status == "deleted" else None,
-                ),
-            )
-            imported += 1
+            ),
+        )
+        imported += 1
 
-            if port is not None:
-                port_status = "released" if status == "deleted" else "allocated"
-                conn.execute(
-                    """
+        if port is not None:
+            port_status = "released" if status == "deleted" else "allocated"
+            conn.execute(
+                """
                     INSERT INTO ports (port, user_id, status, created_at, released_at)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(port) DO UPDATE SET
@@ -171,10 +200,10 @@ with sqlite3.connect(db_file) as conn:
                         status = excluded.status,
                         created_at = excluded.created_at,
                         released_at = excluded.released_at
-                    """,
-                    (port, user_id, port_status, created_at, now if port_status == "released" else None),
-                )
-                ports += 1
+                """,
+                (port, user_id, port_status, created_at, now if port_status == "released" else None),
+            )
+            ports += 1
 
     conn.commit()
 

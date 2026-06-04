@@ -336,6 +336,7 @@ mkdir -p "$NGINX_USERS_CONF_DIR"
 
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
 NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+NGINX_ADMIN_AUTH_BLOCK="$(render_nginx_auth_lines "true" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 
 cat > "$NGINX_USER_CONF" <<EOF
 server {
@@ -352,7 +353,7 @@ server {
     }
 
     location /admin/ {
-$NGINX_AUTH_BLOCK
+$NGINX_ADMIN_AUTH_BLOCK
         proxy_pass http://openclaw-manager-web:8080/instance-admin/;
 
         proxy_buffering off;

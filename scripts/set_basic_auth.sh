@@ -71,14 +71,28 @@ if enabled == "true":
 else:
     replacement = "        auth_basic off;"
 
+location_match = re.search(
+    r'(?ms)^    location / \{\n(?P<body>.*?)(?=^    \})^    \}',
+    text,
+)
+if not location_match:
+    raise SystemExit(f"[ERROR] Could not find root location block in {path}")
+
+body = location_match.group("body")
 patterns = [
     r'        auth_basic "OpenClaw Login";\n        auth_basic_user_file [^;]+;',
     r'        auth_basic off;',
 ]
 
-updated = text
+updated_body = body
 for pattern in patterns:
-    updated = re.sub(pattern, replacement, updated)
+    updated_body = re.sub(pattern, replacement, updated_body, count=1)
+
+if updated_body == body:
+    print(f"[INFO] Basic Auth already set to {enabled}: {path}")
+    raise SystemExit(0)
+
+updated = text[: location_match.start("body")] + updated_body + text[location_match.end("body"):]
 
 if updated == text:
     print(f"[INFO] Basic Auth already set to {enabled}: {path}")

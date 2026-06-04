@@ -41,13 +41,7 @@ for user_id in "$@"; do
     continue
   fi
 
-  if grep -q 'auth_basic off;' "$nginx_conf"; then
-    basic_auth_enabled="false"
-  else
-    basic_auth_enabled="true"
-  fi
-
-  auth_block="$(render_nginx_auth_lines "$basic_auth_enabled" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+  auth_block="$(render_nginx_auth_lines "true" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 
   python3 - "$nginx_conf" "$user_id" "$auth_block" <<'PY'
 import sys

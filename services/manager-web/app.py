@@ -204,6 +204,75 @@ def persist_created_instance_metadata(account):
     return ""
 
 
+def persist_lifecycle_metadata(user_id, action, output=""):
+    status_by_action = {
+        "start": "active",
+        "stop": "stopped",
+        "restart": "active",
+        "delete": "deleted",
+    }
+    status = status_by_action.get(action)
+    if status is None:
+        return ""
+
+    try:
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        existing = metadata_store.get_instance(user_id) or {}
+
+        port_text = detect_port(user_id) or existing.get("port") or ""
+        try:
+            port = int(port_text) if port_text else None
+        except (TypeError, ValueError):
+            port = None
+
+        access_url = existing.get("access_url") or build_access_url(port_text)
+        admin_url = existing.get("admin_url") or (access_url.rstrip("/") + "/admin/" if access_url else "")
+        deleted_at = metadata_store.utc_now() if action == "delete" else existing.get("deleted_at")
+        detected_basic_auth_enabled = is_basic_auth_enabled(user_id)
+        if detected_basic_auth_enabled is None:
+            basic_auth_enabled = existing.get("basic_auth_enabled", 1) != 0
+        else:
+            basic_auth_enabled = detected_basic_auth_enabled
+
+        with metadata_store.connect() as conn:
+            metadata_store.upsert_instance(
+                user_id=user_id,
+                product=existing.get("product") or "openclaw",
+                port=port,
+                status=status,
+                openclaw_version=existing.get("openclaw_version") or detect_openclaw_version(user_id),
+                basic_auth_enabled=basic_auth_enabled,
+                container_name=existing.get("container_name") or f"openclaw_{user_id}",
+                access_url=access_url,
+                admin_url=admin_url,
+                data_path=existing.get("data_path") or str(get_user_dir(user_id)),
+                nginx_conf_path=existing.get("nginx_conf_path") or str(NGINX_USERS_CONF_DIR / f"{user_id}.conf"),
+                deleted_at=deleted_at,
+                conn=conn,
+            )
+            if port is not None:
+                metadata_store.record_port(
+                    port,
+                    user_id=None if action == "delete" else user_id,
+                    status="released" if action == "delete" else "allocated",
+                    conn=conn,
+                )
+            metadata_store.record_operation(
+                action=f"{action}_instance",
+                status="success",
+                actor=get_actor_user() or None,
+                user_id=user_id,
+                message=(output or "")[-800:] or None,
+                finished_at=metadata_store.utc_now(),
+                conn=conn,
+            )
+    except Exception as exc:
+        app.logger.warning("Could not persist lifecycle metadata for %s %s: %s", user_id, action, exc)
+        return f"\n[WARN] Metadata persistence failed: {exc}"
+
+    return ""
+
+
 def account_csv(account):
     fields = [
         "user_id",
@@ -992,6 +1061,8 @@ def admin_instance_lifecycle(user_id):
     if returncode != 0:
         return redirect(url_for("admin_users", error=f"{label} failed: {user_id}\n{clipped_output}"))
 
+    output += persist_lifecycle_metadata(user_id, action, output)
+    clipped_output = output[-1200:] if output else ""
     return redirect(url_for("admin_users", result=f"{label} completed: {user_id}\n{clipped_output}"))
 
 

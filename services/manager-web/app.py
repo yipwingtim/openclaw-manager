@@ -12,6 +12,8 @@ from pathlib import Path
 from flask import Flask, Response, redirect, render_template, request, send_file, url_for
 from werkzeug.utils import secure_filename
 
+import metadata_store
+
 
 APP_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = Path(os.environ.get("OPENCLAW_MANAGER_DIR", "/opt/openclaw-manager"))
@@ -144,6 +146,62 @@ def parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_pas
         account["admin_url"] = account["access_url"].rstrip("/") + "/admin/"
 
     return account
+
+
+def persist_created_instance_metadata(account):
+    user_id = account.get("user_id", "")
+    if not user_id:
+        return ""
+
+    port_text = account.get("port") or ""
+    try:
+        port = int(port_text) if port_text else None
+    except ValueError:
+        port = None
+
+    try:
+        access_url = account.get("access_url") or build_access_url(port_text)
+        admin_url = account.get("admin_url") or (access_url.rstrip("/") + "/admin/" if access_url else "")
+        openclaw_version = detect_openclaw_version(user_id)
+
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        with metadata_store.connect() as conn:
+            metadata_store.upsert_instance(
+                user_id=user_id,
+                product="openclaw",
+                port=port,
+                status="active",
+                openclaw_version=openclaw_version,
+                basic_auth_enabled=account.get("basic_auth_enabled") == "true",
+                container_name=account.get("container_name") or f"openclaw_{user_id}",
+                access_url=access_url,
+                admin_url=admin_url,
+                data_path=str(get_user_dir(user_id)),
+                nginx_conf_path=str(NGINX_USERS_CONF_DIR / f"{user_id}.conf"),
+                conn=conn,
+            )
+            metadata_store.upsert_credentials(
+                user_id=user_id,
+                basic_auth_username=account.get("basic_auth_username") or None,
+                openclaw_token=account.get("openclaw_token") or None,
+                conn=conn,
+            )
+            if port is not None:
+                metadata_store.record_port(port, user_id=user_id, status="allocated", conn=conn)
+            metadata_store.record_operation(
+                action="create_instance",
+                status="success",
+                actor=get_actor_user() or None,
+                user_id=user_id,
+                message=f"port={port_text or 'unknown'} version={openclaw_version or 'unknown'}",
+                finished_at=metadata_store.utc_now(),
+                conn=conn,
+            )
+    except Exception as exc:
+        app.logger.warning("Could not persist metadata for %s: %s", user_id, exc)
+        return f"\n[WARN] Metadata persistence failed: {exc}"
+
+    return ""
 
 
 def account_csv(account):
@@ -340,6 +398,18 @@ def is_basic_auth_enabled(user_id):
     return None
 
 
+def detect_openclaw_version(user_id):
+    compose_file = get_user_dir(user_id) / "docker-compose.yml"
+    if not compose_file.is_file():
+        return ""
+
+    text = compose_file.read_text(encoding="utf-8", errors="ignore")
+    match = re.search(r"image:\s*ghcr\.io/openclaw/openclaw:([^\s]+)", text)
+    if not match:
+        return ""
+    return match.group(1).strip().strip('"').strip("'")
+
+
 def get_container_status(user_id):
     container_name = f"openclaw_{user_id}"
     result = subprocess.run(
@@ -443,6 +513,7 @@ def list_active_users(status_filter="running"):
                 "user_id": user_id,
                 "status": status,
                 "port": port,
+                "openclaw_version": detect_openclaw_version(user_id),
                 "access_url": build_access_url(port),
                 "basic_auth_enabled": is_basic_auth_enabled(user_id),
             }
@@ -652,6 +723,35 @@ def admin_users():
     )
 
 
+@app.get("/admin/metadata")
+def admin_metadata():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    error = ""
+    counts = {}
+    instances = []
+    operations = []
+    db_file = str(metadata_store.DB_FILE)
+    try:
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        counts = metadata_store.table_counts()
+        instances = metadata_store.list_instances()[:20]
+        operations = metadata_store.list_operations(limit=20)
+    except Exception as exc:
+        error = f"Could not read metadata database: {exc}"
+
+    return render_template(
+        "admin_metadata.html",
+        db_file=db_file,
+        counts=counts,
+        instances=instances,
+        operations=operations,
+        error=error,
+    )
+
+
 @app.get("/admin/create-user")
 def admin_create_user():
     denied = require_admin()
@@ -768,6 +868,7 @@ def run_admin_create_user():
 
         account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
         LAST_CREATED_ACCOUNTS[user_id] = account
+        output += persist_created_instance_metadata(account)
         return render_create_success(account, result=output)
     finally:
         create_event.set()

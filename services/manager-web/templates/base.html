@@ -44,14 +44,6 @@
       a:hover {
         color: var(--oc-red-dark);
       }
-      .navbar-oc {
-        background: rgba(23, 32, 42, 0.96);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        box-shadow: 0 10px 30px rgba(23, 32, 42, 0.14);
-      }
-      .navbar-brand {
-        font-weight: 760;
-      }
       .brand-mark {
         display: inline-grid;
         width: 1.8rem;
@@ -64,6 +56,67 @@
         color: #fff;
         font-size: 0.82rem;
         font-weight: 800;
+      }
+      .app-layout {
+        display: grid;
+        grid-template-columns: 15.5rem minmax(0, 1fr);
+        min-height: 100vh;
+      }
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        padding: 1rem;
+        background: rgba(23, 32, 42, 0.98);
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 10px 0 30px rgba(23, 32, 42, 0.10);
+      }
+      .sidebar-brand {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1.25rem;
+        color: #fff;
+        font-size: 1.02rem;
+        font-weight: 780;
+      }
+      .sidebar-section {
+        margin: 1rem 0 0.45rem;
+        color: rgba(255, 255, 255, 0.44);
+        font-size: 0.72rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+      .sidebar-nav {
+        display: grid;
+        gap: 0.35rem;
+      }
+      .sidebar-nav a {
+        display: flex;
+        align-items: center;
+        min-height: 2.35rem;
+        padding: 0.45rem 0.65rem;
+        border: 1px solid transparent;
+        border-radius: 0.48rem;
+        color: rgba(255, 255, 255, 0.78);
+        text-decoration: none;
+        font-size: 0.92rem;
+        font-weight: 720;
+      }
+      .sidebar-nav a:hover {
+        border-color: rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+      }
+      .sidebar-footer {
+        position: absolute;
+        right: 1rem;
+        bottom: 1rem;
+        left: 1rem;
+        color: rgba(255, 255, 255, 0.48);
+        font-size: 0.78rem;
+      }
+      .content-shell {
+        min-width: 0;
       }
       .page-shell {
         max-width: 1240px;
@@ -216,6 +269,11 @@
         color: var(--oc-green);
         border: 1px solid #b8dccc;
       }
+      .soft-warning {
+        background: var(--oc-amber-soft);
+        color: var(--oc-amber);
+        border: 1px solid #edd18d;
+      }
       .action-panel {
         border: 1px solid var(--oc-line);
         border-radius: 0.55rem;
@@ -231,6 +289,32 @@
         color: var(--oc-muted);
         font-size: 0.88rem;
       }
+      @media (max-width: 860px) {
+        .app-layout {
+          display: block;
+        }
+        .sidebar {
+          position: static;
+          height: auto;
+          padding: 0.85rem;
+        }
+        .sidebar-brand {
+          margin-bottom: 0.75rem;
+        }
+        .sidebar-section,
+        .sidebar-footer {
+          display: none;
+        }
+        .sidebar-nav {
+          display: flex;
+          gap: 0.4rem;
+          overflow-x: auto;
+          padding-bottom: 0.1rem;
+        }
+        .sidebar-nav a {
+          flex: 0 0 auto;
+        }
+      }
       @media (max-width: 575.98px) {
         .page-title {
           font-size: 1.55rem;
@@ -242,16 +326,24 @@
     </style>
   </head>
   <body>
-    <nav class="navbar navbar-dark navbar-oc">
-      <div class="container-fluid px-3 px-lg-4">
-        <span class="navbar-brand mb-0 h1"><span class="brand-mark">OC</span>OpenClaw Manager</span>
-        <span class="navbar-text text-white-50">
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="sidebar-brand"><span class="brand-mark">OC</span>OpenClaw Manager</div>
+        <div class="sidebar-section">Operations</div>
+        <div class="sidebar-nav">
+          <a href="/admin/users">Users</a>
+          <a href="/admin/create-user">Create Instance</a>
+          <a href="/admin/device-approvals">Device Approvals</a>
+          <a href="/admin/metadata">Metadata</a>
           {% block nav_right %}{% endblock %}
-        </span>
+        </div>
+        <div class="sidebar-footer">Instance control plane</div>
+      </aside>
+      <div class="content-shell">
+        <main class="container page-shell py-4 py-lg-5">
+          {% block content %}{% endblock %}
+        </main>
       </div>
-    </nav>
-    <main class="container page-shell py-4 py-lg-5">
-      {% block content %}{% endblock %}
-    </main>
+    </div>
   </body>
 </html>

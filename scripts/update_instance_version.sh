@@ -247,6 +247,10 @@ for _ in $(seq 1 30); do
     echo "Post-update checks:"
     echo "  ./scripts/approve_device.sh '$USER_ID' --list-only"
     echo "  ./scripts/set_model_provider.sh '$USER_ID'  # run if model provider config is missing"
+    python3 "$SCRIPT_DIR/metadata_cli.py" update-version \
+      --user-id "$USER_ID" \
+      --openclaw-version "$TARGET_VERSION" \
+      || echo "[WARN] Metadata update failed for version update: $USER_ID"
     print_rollback
     exit 0
   fi

@@ -102,6 +102,12 @@ path.write_text(updated, encoding="utf-8")
 PY
 
   echo "[INFO] Set Basic Auth $BASIC_AUTH_ENABLED for: $user_id"
+  if [ "${OPENCLAW_SKIP_METADATA_WRITE:-0}" != "1" ]; then
+    python3 "$SCRIPT_DIR/metadata_cli.py" set-basic-auth \
+      --user-id "$user_id" \
+      --enabled "$BASIC_AUTH_ENABLED" \
+      || echo "[WARN] Metadata update failed for Basic Auth: $user_id"
+  fi
 done
 
 echo "[INFO] Run nginx test and reload after reviewing changes:"

@@ -1017,7 +1017,6 @@ def run_admin_create_user():
 
         account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
         LAST_CREATED_ACCOUNTS[user_id] = account
-        output += persist_created_instance_metadata(account)
         return render_create_success(account, result=output)
     finally:
         create_event.set()
@@ -1074,6 +1073,7 @@ def admin_set_basic_auth(user_id):
         update = subprocess.run(
             [str(MANAGER_DIR / "scripts" / "set_basic_auth.sh"), enabled, user_id],
             cwd=str(MANAGER_DIR),
+            env={**os.environ, "OPENCLAW_SKIP_METADATA_WRITE": "1"},
             text=True,
             capture_output=True,
             timeout=30,

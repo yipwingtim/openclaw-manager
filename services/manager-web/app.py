@@ -511,6 +511,16 @@ def redirect_to_user_dashboard(user_id, instance_mode=False, result="", error=""
     return redirect(url_for("user_detail", user_id=user_id, **values))
 
 
+def summarize_approval_output(output):
+    if "No pending device request found" in output:
+        return "No pending device request found."
+    if re.search(r"\bApproved\b|\bapproved\b", output):
+        return "Approved latest device request."
+    if "Device cache updated" in output:
+        return "Device approval command completed."
+    return output[-800:]
+
+
 def approve_latest_for_user(user_id, instance_mode=False):
     script = MANAGER_DIR / "scripts" / "approve_device.sh"
     result = subprocess.run(
@@ -523,8 +533,8 @@ def approve_latest_for_user(user_id, instance_mode=False):
     )
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=output[-1200:])
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=output[-1200:])
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=summarize_approval_output(output))
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=summarize_approval_output(output))
 
 
 def refresh_devices_for_user(user_id, instance_mode=False):

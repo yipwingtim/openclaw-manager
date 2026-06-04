@@ -19,6 +19,17 @@
     <div class="muted-small">{{ db_file }}</div>
   </div>
 
+  {% if not error and (counts.instances | default(0)) == 0 and (counts.operation_records | default(0)) == 0 %}
+    <div class="alert soft-warning mb-3">
+      <div class="section-title">Metadata database is empty</div>
+      <div class="muted-small mb-2">
+        Existing instances are still recorded in users.csv and runtime files. Bootstrap SQLite from users.csv before using this page as a source of truth.
+      </div>
+      <pre class="codebox mb-0">cd /data/docker/openclaw-manager
+./scripts/import_users_csv_to_metadata_db.sh</pre>
+    </div>
+  {% endif %}
+
   <div class="row g-3 mb-3">
     <div class="col-md-3">
       <div class="metric">

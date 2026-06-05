@@ -51,6 +51,15 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 
+@app.context_processor
+def inject_actor_context():
+    actor = get_actor_user()
+    return {
+        "current_user": actor,
+        "is_admin": is_admin_user(actor) if actor else False,
+    }
+
+
 def validate_user_id(user_id):
     user_id = (user_id or "").strip()
     if not USER_ID_RE.fullmatch(user_id):
@@ -268,6 +277,73 @@ def persist_lifecycle_metadata(user_id, action, output=""):
             )
     except Exception as exc:
         app.logger.warning("Could not persist lifecycle metadata for %s %s: %s", user_id, action, exc)
+        return f"\n[WARN] Metadata persistence failed: {exc}"
+
+    return ""
+
+
+def persist_basic_auth_metadata(user_id, enabled, output=""):
+    try:
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        existing = metadata_store.get_instance(user_id) or {}
+
+        port_text = detect_port(user_id) or existing.get("port") or ""
+        try:
+            port = int(port_text) if port_text else None
+        except (TypeError, ValueError):
+            port = None
+
+        access_url = existing.get("access_url") or build_access_url(port_text)
+        admin_url = existing.get("admin_url") or (access_url.rstrip("/") + "/admin/" if access_url else "")
+
+        with metadata_store.connect() as conn:
+            instance_status = existing.get("status")
+            if not instance_status:
+                instance_status = "stopped" if get_container_status(user_id) == "STOPPED" else "active"
+            metadata_store.upsert_instance(
+                user_id=user_id,
+                product=existing.get("product") or "openclaw",
+                port=port,
+                status=instance_status,
+                openclaw_version=existing.get("openclaw_version") or detect_openclaw_version(user_id),
+                basic_auth_enabled=enabled,
+                container_name=existing.get("container_name") or f"openclaw_{user_id}",
+                access_url=access_url,
+                admin_url=admin_url,
+                data_path=existing.get("data_path") or str(get_user_dir(user_id)),
+                nginx_conf_path=existing.get("nginx_conf_path") or str(NGINX_USERS_CONF_DIR / f"{user_id}.conf"),
+                deleted_at=existing.get("deleted_at"),
+                conn=conn,
+            )
+            metadata_store.record_operation(
+                action="set_basic_auth",
+                status="success",
+                actor=get_actor_user() or None,
+                user_id=user_id,
+                message=f"enabled={str(enabled).lower()} {(output or '')[-700:]}".strip(),
+                finished_at=metadata_store.utc_now(),
+                conn=conn,
+            )
+    except Exception as exc:
+        app.logger.warning("Could not persist Basic Auth metadata for %s: %s", user_id, exc)
+        return f"\n[WARN] Metadata persistence failed: {exc}"
+
+    return ""
+
+
+def persist_operation_metadata(action, user_id=None, status="success", message=None, actor=None):
+    try:
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        metadata_store.record_operation(
+            action=action,
+            status=status,
+            actor=actor or get_actor_user() or None,
+            user_id=user_id,
+            message=message,
+            finished_at=metadata_store.utc_now(),
+        )
+    except Exception as exc:
+        app.logger.warning("Could not persist operation metadata for %s %s: %s", action, user_id, exc)
         return f"\n[WARN] Metadata persistence failed: {exc}"
 
     return ""
@@ -674,7 +750,10 @@ def approve_latest_for_user(user_id, instance_mode=False):
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:
         return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=summarize_approval_output(output))
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=summarize_approval_output(output))
+    summary = summarize_approval_output(output)
+    operation_status = "skipped" if summary == "No pending device request found." else "success"
+    summary += persist_operation_metadata("approve_device", user_id=user_id, status=operation_status, message=summary)
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=summary)
 
 
 def refresh_devices_for_user(user_id, instance_mode=False):
@@ -690,7 +769,9 @@ def refresh_devices_for_user(user_id, instance_mode=False):
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:
         return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=output[-1200:])
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result="Device cache refreshed.")
+    message = "Device cache refreshed."
+    message += persist_operation_metadata("refresh_devices", user_id=user_id, message=message)
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message)
 
 
 def upload_file_for_user(user_id, instance_mode=False):
@@ -712,10 +793,12 @@ def upload_file_for_user(user_id, instance_mode=False):
     uploaded.save(target)
     os.chmod(target, 0o644)
 
+    message = f"Uploaded {filename} to {CONTAINER_UPLOAD_DIR}/{filename}"
+    message += persist_operation_metadata("upload_file", user_id=user_id, message=message)
     return redirect_to_user_dashboard(
         user_id,
         instance_mode=instance_mode,
-        result=f"Uploaded {filename} to {CONTAINER_UPLOAD_DIR}/{filename}",
+        result=message,
     )
 
 
@@ -744,7 +827,13 @@ def delete_file_for_user(user_id, root_key, relative_path, instance_mode=False):
 
     filename = target.name
     target.unlink()
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=f"Deleted {filename}.")
+    message = f"Deleted {filename}."
+    message += persist_operation_metadata(
+        "delete_file",
+        user_id=user_id,
+        message=f"Deleted {root_key}/{relative_path}",
+    )
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message)
 
 
 @app.get("/")
@@ -937,7 +1026,6 @@ def run_admin_create_user():
 
         account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
         LAST_CREATED_ACCOUNTS[user_id] = account
-        output += persist_created_instance_metadata(account)
         return render_create_success(account, result=output)
     finally:
         create_event.set()
@@ -994,6 +1082,7 @@ def admin_set_basic_auth(user_id):
         update = subprocess.run(
             [str(MANAGER_DIR / "scripts" / "set_basic_auth.sh"), enabled, user_id],
             cwd=str(MANAGER_DIR),
+            env={**os.environ, "OPENCLAW_SKIP_METADATA_WRITE": "1"},
             text=True,
             capture_output=True,
             timeout=30,
@@ -1036,7 +1125,8 @@ def admin_set_basic_auth(user_id):
             return redirect(url_for("admin_users", error=f"Nginx reload failed. Restored config.\n{reload_output[-1200:]}"))
 
         state = "enabled" if enabled == "true" else "disabled"
-        return redirect(url_for("admin_users", result=f"Basic Auth {state}: {user_id}"))
+        metadata_warning = persist_basic_auth_metadata(user_id, enabled == "true", update_output)
+        return redirect(url_for("admin_users", result=f"Basic Auth {state}: {user_id}{metadata_warning}"))
     finally:
         backup_path.unlink(missing_ok=True)
 
@@ -1205,6 +1295,10 @@ def run_admin_device_approvals():
     if process.returncode != 0:
         return render_template("admin_device_approvals.html", result=result, error="Batch device operation failed."), 500
 
+    result += persist_operation_metadata(
+        "batch_device_approvals",
+        message=f"action={action} input={input_path.name} output={output_path.name} {command_output[-500:]}".strip(),
+    )
     return render_template("admin_device_approvals.html", result=result, error="")
 
 

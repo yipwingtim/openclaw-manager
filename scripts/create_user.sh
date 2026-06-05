@@ -601,6 +601,15 @@ USERS_CSV_ROW_CREATED=1
 
 restore_host_owner
 
+python3 "$SCRIPT_DIR/metadata_cli.py" create-instance \
+  --user-id "$USER_ID" \
+  --port "$PORT" \
+  --openclaw-version "$VERSION" \
+  --basic-auth-enabled "$BASIC_AUTH_ENABLED" \
+  --openclaw-token "$TOKEN" \
+  --message "created from create_user.sh" \
+  || echo "[WARN] Metadata update failed for created user: $USER_ID"
+
 # ===== 输出 =====
 echo ""
 echo "=============================="

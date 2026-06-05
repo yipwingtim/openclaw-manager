@@ -2,6 +2,8 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 USER_ID=$1
 
 if [ -z "$USER_ID" ]; then
@@ -38,6 +40,13 @@ mv "$TARGET" "$USERS_DIR/$USER_ID"
 echo "[INFO] Starting container..."
 cd "$USERS_DIR/$USER_ID"
 docker compose up -d
+
+python3 "$SCRIPT_DIR/metadata_cli.py" set-instance-status \
+  --user-id "$USER_ID" \
+  --status active \
+  --action restore_instance \
+  --message "restored from restore_user.sh backup=$TARGET" \
+  || echo "[WARN] Metadata update failed for restored user: $USER_ID"
 
 echo ""
 echo "=============================="

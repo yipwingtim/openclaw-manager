@@ -204,6 +204,19 @@ if [ -f "$BASE_DIR/users.csv" ]; then
   fi
 fi
 
+metadata_args=(
+  "$SCRIPT_DIR/metadata_cli.py"
+  set-instance-status
+  --user-id "$USER_ID"
+  --status deleted
+  --action delete_instance
+  --message "deleted from delete_user.sh recycle=$RECYCLE_DIR"
+)
+if [ -n "$PORT" ]; then
+  metadata_args+=(--port "$PORT")
+fi
+python3 "${metadata_args[@]}" || echo "[WARN] Metadata update failed for deleted user: $USER_ID"
+
 echo ""
 echo "=============================="
 echo "DELETED"

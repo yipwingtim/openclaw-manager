@@ -51,6 +51,15 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 
+@app.context_processor
+def inject_actor_context():
+    actor = get_actor_user()
+    return {
+        "current_user": actor,
+        "is_admin": is_admin_user(actor) if actor else False,
+    }
+
+
 def validate_user_id(user_id):
     user_id = (user_id or "").strip()
     if not USER_ID_RE.fullmatch(user_id):

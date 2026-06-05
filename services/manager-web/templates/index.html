@@ -15,7 +15,9 @@
         {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
         <div class="d-flex gap-2 flex-wrap">
           <a class="btn btn-oc" href="/me">Open My Instance</a>
-          <a class="btn btn-oc-outline" href="/admin">Admin Panel</a>
+          {% if is_admin %}
+            <a class="btn btn-oc-outline" href="/admin">Admin Panel</a>
+          {% endif %}
         </div>
       </div>
     </div>

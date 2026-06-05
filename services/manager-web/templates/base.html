@@ -331,10 +331,12 @@
         <div class="sidebar-brand"><span class="brand-mark">OC</span>OpenClaw Manager</div>
         <div class="sidebar-section">Operations</div>
         <div class="sidebar-nav">
-          <a href="/admin/users">Users</a>
-          <a href="/admin/create-user">Create Instance</a>
-          <a href="/admin/device-approvals">Device Approvals</a>
-          <a href="/admin/metadata">Metadata</a>
+          {% if is_admin %}
+            <a href="/admin/users">Users</a>
+            <a href="/admin/create-user">Create Instance</a>
+            <a href="/admin/device-approvals">Device Approvals</a>
+            <a href="/admin/metadata">Metadata</a>
+          {% endif %}
           {% block nav_right %}{% endblock %}
         </div>
         <div class="sidebar-footer">Instance control plane</div>

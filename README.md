@@ -6,208 +6,303 @@ A lightweight multi-user OpenClaw instance management platform.
 
 ---
 
-## 🚀 Overview | 项目简介
+## Platform Support | 平台支持
 
-OpenClaw Manager 提供一种“每用户一个实例”的部署模式，在不修改 OpenClaw 源码的前提下，实现：
+OpenClaw Manager is currently developed and tested on Ubuntu-based Linux environments with Docker Engine and the Docker Compose plugin.
 
-- 多用户隔离
-- 自动化部署
-- 生命周期管理（创建 / 删除 / 恢复）
-- 运维可控
+OpenClaw Manager 目前主要面向 Ubuntu 系 Linux 环境开发和测试，依赖 Docker Engine 与 Docker Compose plugin。
 
-适用于：
+Other Linux distributions may work, but they are not officially validated yet. Some scripts assume Ubuntu/Debian-style packages and tools such as `apt`, `apache2-utils`, `acl`, `setfacl`, and standard GNU utilities.
 
-- 高校 / 数据中心
-- 内部 AI 平台
-- 私有化部署环境
+其他 Linux 发行版可能可以运行，但目前尚未正式验证。部分脚本默认使用 Ubuntu/Debian 风格的软件包和工具，例如 `apt`、`apache2-utils`、`acl`、`setfacl` 以及标准 GNU 工具。
 
 ---
 
-## ✨ Features | 功能特点
+## Overview | 项目简介
 
-### 🧩 实例隔离
+OpenClaw Manager provides a "one OpenClaw instance per user" deployment model without requiring changes to the upstream OpenClaw codebase.
 
-- 每用户独立 OpenClaw 容器
-- 无共享状态，避免权限污染
+OpenClaw Manager 提供一种“每用户一个 OpenClaw 实例”的部署模式，不需要修改 OpenClaw 上游源码。
 
----
+It is designed for user-level isolation, automated provisioning, lifecycle management, and controlled operations in private or internal platforms.
 
-### ⚙️ 用户生命周期管理
+它面向多用户隔离、自动化开通、生命周期管理和私有化平台运维控制。
 
-- 创建用户：create_user.sh
-- 删除用户（回收站）：delete_user.sh
-- 恢复用户：restore_user.sh
-- 升级指定实例版本：update_instance_version.sh，升级前后自动执行实例检查
-- 用户列表：list_users.sh
-- 管理页面创建、启停、删除、Basic Auth 开关
+Typical environments | 适用场景：
 
-完整流程：
-
-创建 → 使用 → 删除（回收）→ 恢复
+- universities and data centers / 高校和数据中心
+- internal AI platforms / 内部 AI 平台
+- private deployments / 私有化部署环境
+- training, labs, and multi-user trials / 培训、实验室和多用户试用场景
 
 ---
 
-### 🌐 端口访问模型（核心设计）
+## Features | 功能特点
 
-每个用户仍然绑定一个独立访问端口，但端口不再由 OpenClaw 容器直接发布，而是由 Nginx 统一对外发布并反向代理到对应用户容器。
+### Instance Isolation | 实例隔离
 
-示例：
+- Each user gets an independent OpenClaw container.
+- 每个用户拥有独立的 OpenClaw 容器。
+- Runtime state, workspace files, and configuration are isolated per user.
+- 运行状态、工作区文件和配置按用户隔离，避免权限和状态污染。
 
+---
+
+### Lifecycle Management | 生命周期管理
+
+- Create instances with `scripts/create_user.sh`.
+- 使用 `scripts/create_user.sh` 创建实例。
+- Delete instances into a recycle-bin style directory with `scripts/delete_user.sh`.
+- 使用 `scripts/delete_user.sh` 回收删除实例数据。
+- Restore deleted instances with `scripts/restore_user.sh`.
+- 使用 `scripts/restore_user.sh` 恢复已删除实例。
+- Upgrade a single instance with `scripts/update_instance_version.sh`.
+- 使用 `scripts/update_instance_version.sh` 升级指定实例版本，并在升级前后执行检查。
+- Manage instances from the web admin UI: create, start, stop, restart, delete, and toggle Basic Auth.
+- 可通过 Web 管理页面创建、启停、重启、删除实例，并切换 Basic Auth。
+
+Typical flow | 典型流程：
+
+```text
+Create -> Use -> Delete to recycle bin -> Restore
+创建 -> 使用 -> 删除到回收站 -> 恢复
+```
+
+---
+
+### Port-Based Access Model | 端口访问模型
+
+Each user is assigned a dedicated HTTPS port. The OpenClaw container does not publish that port directly; Nginx owns the public port and proxies traffic to the matching user container.
+
+每个用户绑定一个独立 HTTPS 访问端口。OpenClaw 容器不直接发布宿主机端口，而是由 Nginx 统一对外监听并反向代理到对应用户容器。
+
+Example | 示例：
+
+```text
 userA → https://IP:30000 → nginx → openclaw_userA:18789  
 userB → https://IP:30001 → nginx → openclaw_userB:18789
+```
 
-特点：
+Design properties | 设计特点：
 
-- 不使用子路径，避免 WebSocket 和 basePath 适配问题
-- 不依赖域名，适合内网和数据中心环境
-- 用户容器只 expose 18789，不直接暴露到宿主机
-- 对外入口统一由 Nginx 提供 HTTPS、Basic Auth 和反向代理
-- 每个用户实例仍保持独立容器、独立配置和独立工作区
+- No subpath routing, which avoids WebSocket and basePath compatibility issues.
+- 不使用子路径，避免 WebSocket 和 basePath 适配问题。
+- No domain dependency; IP-plus-port access works well in intranet and data-center environments.
+- 不依赖域名，适合内网和数据中心环境。
+- User containers expose only `18789` inside the Docker network.
+- 用户容器只在 Docker 网络内暴露 `18789`。
+- Nginx centralizes HTTPS, Basic Auth, and reverse proxy configuration.
+- 对外入口统一由 Nginx 提供 HTTPS、Basic Auth 和反向代理。
 
 ---
 
-### 🔐 安全机制
+### Security Model | 安全机制
 
-当前采用三层访问控制：
+OpenClaw Manager uses three layers of access control.
+
+OpenClaw Manager 当前采用三层访问控制。
 
 1. Nginx Basic Auth  
-   用户首先访问 `https://IP:PORT`，由 Nginx 弹出用户名 / 密码认证窗口。账号信息保存在 `.htpasswd` 文件中，由 `create_user.sh` 自动创建或更新。
-   Basic Auth 可按实例关闭，适用于可信内网培训场景。
+   Users first access `https://IP:PORT` and authenticate through the browser Basic Auth prompt. Credentials are stored in `.htpasswd` and maintained by the management scripts.
+   用户首先访问 `https://IP:PORT`，由浏览器弹出 Basic Auth 认证窗口。账号信息保存在 `.htpasswd` 中，并由管理脚本维护。
+
+   Basic Auth for the main OpenClaw route `/` can be disabled per instance for trusted internal training environments.
+   实例主页 `/` 的 Basic Auth 可按实例关闭，适用于可信内网培训场景。
+
+   The instance-local `/admin/` route remains protected by Basic Auth.
+   实例端口内的 `/admin/` 管理入口始终保留 Basic Auth 保护。
 
 2. OpenClaw Token  
-   Basic Auth 通过后，用户还需要输入对应实例的 OpenClaw Login Token。
+   After Basic Auth, users still need the OpenClaw login token for that instance.
+   Basic Auth 通过后，用户仍需输入对应实例的 OpenClaw Login Token。
 
 3. OpenClaw Device Approval  
-   新浏览器或新设备首次访问 Control UI 时，OpenClaw 可能要求管理员批准设备。用户可进入自己实例端口的 `/admin/` 页面审批最新设备请求，也可由管理员在服务器执行：
+   New browsers or devices may require approval before accessing the OpenClaw Control UI. Users can approve the latest request from their instance-local `/admin/` page, or an administrator can run:
+   新浏览器或新设备首次访问 OpenClaw Control UI 时，可能需要审批。用户可进入自己实例端口的 `/admin/` 页面审批最新设备请求，管理员也可以执行：
 
-   `./scripts/approve_device.sh <user_id> --latest`
+   ```bash
+   ./scripts/approve_device.sh <user_id> --latest
+   ```
 
-说明：
+Notes | 说明：
 
-- Basic Auth 用于外层入口保护
-- OpenClaw Token 用于实例登录认证
-- Device Approval 用于首次设备配对确认
-- `.htpasswd` 文件由宿主机脚本维护，并通过 ACL 授权给 nginx 容器内用户只读访问
+- Basic Auth protects the outer Nginx entry point.
+- Basic Auth 用于保护 Nginx 外层入口。
+- OpenClaw Token authenticates the OpenClaw application session.
+- OpenClaw Token 用于 OpenClaw 应用登录认证。
+- Device Approval confirms first-time device pairing.
+- Device Approval 用于首次设备配对确认。
+- `.htpasswd` is maintained on the host and granted read-only access to the Nginx container user through ACL.
+- `.htpasswd` 文件由宿主机维护，并通过 ACL 授权给 Nginx 容器内用户只读访问。
 
 ---
 
-### ♻️ 安全删除机制
+### Safe Delete | 安全删除
 
-删除用户不会直接删除数据：
+Deleting an instance moves its data into a recycle-bin directory instead of permanently removing it.
 
+删除实例不会直接删除数据，而是移动到回收站目录。
+
+```text
 users/testuser  
 → deleted/testuser_时间戳  
+```
 
-支持恢复。
+The instance can be restored later.
+
+后续可恢复该实例。
 
 ---
 
 ## 📁 Project Structure | 项目结构
 
+```text
 openclaw-manager/
-├── config/                 # 管理器配置文件
+├── config/                 # manager configuration / 管理器配置
 │   └── openclaw-manager.env
-├── templates/              # docker-compose 模板
+├── db/                     # SQLite schema / SQLite 表结构
+│   └── schema.sql
+├── templates/              # docker-compose templates / docker-compose 模板
 │   └── docker-compose.tpl.yml
-├── scripts/                # 用户管理脚本
-│   ├── create_user.sh      # 创建用户实例、生成 nginx 配置、创建 Basic Auth 用户
-│   ├── delete_user.sh      # 删除用户实例、回收数据、释放 nginx 端口
-│   ├── restore_user.sh     # 恢复用户实例
-│   ├── list_users.sh       # 查看用户列表
+├── scripts/                # management scripts / 管理脚本
+│   ├── create_user.sh      # create an instance / 创建实例
+│   ├── delete_user.sh      # recycle an instance / 回收实例
+│   ├── restore_user.sh     # restore an instance / 恢复实例
+│   ├── metadata_cli.py     # SQLite metadata helper / SQLite 元数据写入入口
+│   ├── list_users.sh       # list users / 查看用户列表
 │   └── update_allowed_origins.sh
-├── services/               # 扩展服务（如 pdf-extract）
+├── services/               # manager-web and services / Web 管理端和扩展服务
 ├── docs/
 ├── README.md
 └── .gitignore
-说明：Nginx 的运行时配置不放在项目目录内，而是由脚本生成到 `/data/docker/nginx/`，包括用户反代配置、端口映射、证书、日志和 Basic Auth 密码文件。
+```
 
+Nginx runtime configuration is generated outside this repository under `/data/docker/nginx/`, including user reverse-proxy configs, port mappings, certificates, logs, and the Basic Auth password file.
+
+Nginx 运行时配置不放在项目目录内，而是由脚本生成到 `/data/docker/nginx/`，包括用户反代配置、端口映射、证书、日志和 Basic Auth 密码文件。
 
 ---
 
 ## 📚 Documentation | 文档索引
 
-- [Agent Hosting Platform 架构规划](docs/architecture/agent-hosting-platform.md)
-- [Metadata Storage Plan 元数据存储规划](docs/architecture/metadata-storage-plan.md)
-- [Metadata Data Dictionary 元数据数据字典](docs/architecture/metadata-data-dictionary.md)
-- [User Self-Service Panel 用户自助面板](docs/user-self-service-panel.md)
+- [Agent Hosting Platform Architecture / 架构规划](docs/architecture/agent-hosting-platform.md)
+- [Metadata Storage Plan / 元数据存储规划](docs/architecture/metadata-storage-plan.md)
+- [Metadata Data Dictionary / 元数据数据字典](docs/architecture/metadata-data-dictionary.md)
+- [User Self-Service Panel / 用户自助面板](docs/user-self-service-panel.md)
 
 ---
 
 ## 📁 Runtime Structure | 运行时目录（重要）
 
-运行时数据主要分为三部分：
+Runtime data is split across OpenClaw public data, Nginx runtime config, and OpenClaw Manager configuration.
 
-### 1. OpenClaw 用户运行数据
+运行时数据主要分为 OpenClaw 公共数据、Nginx 运行配置和 OpenClaw Manager 配置。
 
-路径：
+### 1. OpenClaw Public Data | OpenClaw 用户运行数据
+
+Path | 路径：
 
 ```text
 /data/docker/openclaw-public/
-结构如下：
+```
+
+Structure | 结构：
+
+```text
 /data/docker/openclaw-public/
-├── users/                  # 用户实例目录
+├── users/                  # active instance directories / 运行中实例目录
 │   ├── userA/
 │   └── userB/
-├── deleted/                # 删除用户后的回收站
-├── ports.txt               # 端口分配指针
-├── users.csv               # 用户与端口记录
-└── logs/                   # 脚本运行日志
-说明：
-
-users/：运行中的用户实例
-deleted/：已删除但可恢复的用户数据
-ports.txt：端口分配起点或当前指针
-users.csv：用户、端口、创建时间、状态等记录
-logs/：创建、删除等脚本日志
+├── deleted/                # recycle bin / 已删除实例回收站
+├── ports.txt               # port allocation pointer / 端口分配指针
+├── users.csv               # legacy user-port records / 旧版用户端口记录
+├── manager.db              # SQLite metadata database / SQLite 元数据数据库
+└── logs/                   # script logs / 脚本运行日志
 ```
-### 2. Nginx 运行配置
 
-路径：
-```
+Notes | 说明：
+
+- `users/` stores active user instance directories.
+- `users/` 保存运行中的用户实例目录。
+- `deleted/` stores deleted but restorable instance data.
+- `deleted/` 保存已删除但可恢复的实例数据。
+- `users.csv` and `ports.txt` remain runtime sources during the metadata migration period.
+- 在元数据迁移阶段，`users.csv` 和 `ports.txt` 仍保留为运行来源。
+- `manager.db` stores structured metadata for visibility, double-write tracking, and future migration.
+- `manager.db` 保存结构化元数据，用于可视化、双写记录和后续迁移。
+
+### 2. Nginx Runtime Config | Nginx 运行配置
+
+Path | 路径：
+
+```text
 /data/docker/nginx/
-结构如下：
+```
+
+Structure | 结构：
+
+```text
 /data/docker/nginx/
 ├── compose/
-│   └── docker-compose.yml      # Nginx 容器 compose 文件，维护对外端口映射
+│   └── docker-compose.yml      # public port mappings / 对外端口映射
 ├── conf/
-│   ├── openclaw.conf           # 默认 / 主入口配置
-│   ├── userA.conf              # 用户 A 的 Nginx 反代配置
-│   └── userB.conf              # 用户 B 的 Nginx 反代配置
-├── certs/                      # HTTPS 证书
+│   ├── openclaw.conf           # default entry config / 默认入口配置
+│   ├── userA.conf              # user reverse proxy config / 用户反代配置
+│   └── userB.conf
+├── certs/                      # HTTPS certificates / HTTPS 证书
 ├── auth/
-│   └── .htpasswd               # Basic Auth 用户密码文件
-└── logs/                       # Nginx 日志
-说明：
-
-每个用户对应一个独立的 Nginx 配置文件，例如 userA.conf
-每个用户配置文件监听一个独立 HTTPS 端口
-Nginx 将请求反向代理到 openclaw_<user_id>:18789
-.htpasswd 由 create_user.sh 创建或更新
-.htpasswd 通过 ACL 授权给 nginx 容器内用户只读访问
+│   └── .htpasswd               # Basic Auth password file / Basic Auth 密码文件
+└── logs/                       # Nginx logs / Nginx 日志
 ```
 
-### 3. OpenClaw Manager 配置
-```
-路径：
+Notes | 说明：
+
+- Each user has one Nginx config file, such as `userA.conf`.
+- 每个用户对应一个独立的 Nginx 配置文件，例如 `userA.conf`。
+- Each user config listens on one dedicated HTTPS port.
+- 每个用户配置文件监听一个独立 HTTPS 端口。
+- Nginx proxies requests to `openclaw_<user_id>:18789`.
+- Nginx 将请求反向代理到 `openclaw_<user_id>:18789`。
+- `.htpasswd` is created or updated by `create_user.sh`.
+- `.htpasswd` 由 `create_user.sh` 创建或更新。
+
+### 3. OpenClaw Manager Config | OpenClaw Manager 配置
+
+Path | 路径：
+
+```text
 /data/docker/openclaw-manager/config/openclaw-manager.env
-该文件集中管理部署路径和 Nginx 相关路径，例如：
+```
+
+This file centralizes deployment paths and Nginx-related paths.
+
+该文件集中管理部署路径和 Nginx 相关路径。
+
+Example | 示例：
+
+```env
 OPENCLAW_PUBLIC_DIR=/data/docker/openclaw-public
 NGINX_COMPOSE_DIR=/data/docker/nginx/compose
 NGINX_COMPOSE_FILE=/data/docker/nginx/compose/docker-compose.yml
 NGINX_USERS_CONF_DIR=/data/docker/nginx/conf
 NGINX_HTPASSWD_FILE=/data/docker/nginx/auth/.htpasswd
 NGINX_CONTAINER_NAME=openclaw-nginx
-
-说明：
-
-修改部署路径时，优先修改该配置文件
-脚本应尽量从该配置文件读取路径，避免硬编码
-不应将包含敏感信息的配置文件、证书、.htpasswd 提交到公开仓库
 ```
+
+Notes | 说明：
+
+- Update this config first when deployment paths change.
+- 修改部署路径时，优先修改该配置文件。
+- Scripts should read paths from this file whenever possible.
+- 脚本应尽量从该配置文件读取路径，避免硬编码。
+- Do not commit secrets, certificates, `.htpasswd`, or production config files to a public repository.
+- 不应将敏感信息、证书、`.htpasswd` 或生产配置文件提交到公开仓库。
+
 ---
 
 ## 🧠 Architecture | 架构说明
 
+```text
 User Browser
 ↓
 https://IP:PORT
@@ -217,15 +312,20 @@ Nginx HTTPS + Basic Auth
 openclaw_<user_id>:18789
 ↓
 OpenClaw Gateway / Control UI
+```
 
-设计原则：
+Design principles | 设计原则：
 
-- 不使用子路径，避免 WebSocket 和 basePath 适配问题
-- 不依赖子域名，适合内网 IP 或单域名多端口访问
-- 使用端口隔离，每个用户对应一个独立访问端口
-- 用户容器不直接发布宿主机端口，只通过 Docker 内部网络暴露 18789
-- 对外入口统一由 Nginx 管理，便于集中配置 HTTPS、Basic Auth 和反向代理
-- 保持 OpenClaw 原生运行方式，尽量不修改 OpenClaw 源码
+- Avoid subpath routing to reduce WebSocket and basePath compatibility issues.
+- 不使用子路径，避免 WebSocket 和 basePath 适配问题。
+- Avoid subdomain dependency; IP-plus-port access is supported.
+- 不依赖子域名，适合内网 IP 或单域名多端口访问。
+- Use port isolation, with one public HTTPS port per user.
+- 使用端口隔离，每个用户对应一个独立访问端口。
+- Keep user containers private to the Docker network.
+- 用户容器不直接发布宿主机端口，只通过 Docker 内部网络暴露。
+- Keep OpenClaw itself close to its native runtime model.
+- 保持 OpenClaw 原生运行方式，尽量不修改 OpenClaw 源码。
 
 ---
 ## 🏗 Standard Provisioning Flow | 标准实例开通流程

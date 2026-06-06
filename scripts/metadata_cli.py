@@ -169,7 +169,8 @@ def create_instance(args):
         )
         metadata_store.upsert_credentials(
             user_id=args.user_id,
-            basic_auth_username=args.user_id if args.basic_auth_enabled else None,
+            basic_auth_username=args.user_id if args.basic_auth_password_ref else None,
+            basic_auth_password_ref=args.basic_auth_password_ref,
             openclaw_token=args.openclaw_token,
             conn=conn,
         )
@@ -219,9 +220,17 @@ def set_instance_status(args):
 def set_basic_auth(args):
     initialize_metadata()
     with metadata_store.connect() as conn:
+        existing_credentials = metadata_store.get_credentials(args.user_id, conn=conn) or {}
         upsert_instance(
             user_id=args.user_id,
             basic_auth_enabled=args.enabled,
+            conn=conn,
+        )
+        metadata_store.upsert_credentials(
+            user_id=args.user_id,
+            basic_auth_username=existing_credentials.get("basic_auth_username") or args.user_id,
+            basic_auth_password_ref=args.basic_auth_password_ref or existing_credentials.get("basic_auth_password_ref"),
+            openclaw_token=existing_credentials.get("openclaw_token"),
             conn=conn,
         )
         metadata_store.record_operation(
@@ -272,6 +281,7 @@ def build_parser():
     create.add_argument("--port", type=int)
     create.add_argument("--openclaw-version")
     create.add_argument("--basic-auth-enabled", type=bool_arg, default=True)
+    create.add_argument("--basic-auth-password-ref")
     create.add_argument("--openclaw-token")
     create.add_argument("--actor")
     create.add_argument("--message")
@@ -290,6 +300,7 @@ def build_parser():
     auth = subparsers.add_parser("set-basic-auth")
     auth.add_argument("--user-id", required=True)
     auth.add_argument("--enabled", required=True, type=bool_arg)
+    auth.add_argument("--basic-auth-password-ref")
     auth.add_argument("--actor")
     auth.set_defaults(func=set_basic_auth)
 

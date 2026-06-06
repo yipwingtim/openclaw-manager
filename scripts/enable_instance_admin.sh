@@ -17,6 +17,7 @@ source "$LIB_NGINX_AUTH"
 
 NGINX_USERS_CONF_DIR="${NGINX_USERS_CONF_DIR:?Missing NGINX_USERS_CONF_DIR in config}"
 NGINX_HTPASSWD_FILE_IN_CONTAINER="${NGINX_HTPASSWD_FILE_IN_CONTAINER:?Missing NGINX_HTPASSWD_FILE_IN_CONTAINER in config}"
+NGINX_HTPASSWD_FILE="${NGINX_HTPASSWD_FILE:?Missing NGINX_HTPASSWD_FILE in config}"
 
 if [ "$#" -lt 1 ]; then
   echo "Usage: $0 <user_id> [user_id ...]" >&2
@@ -41,7 +42,19 @@ for user_id in "$@"; do
     continue
   fi
 
-  auth_block="$(render_nginx_auth_lines "true" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+  user_htpasswd_file="$(nginx_user_htpasswd_file "$user_id" "$NGINX_HTPASSWD_FILE")"
+  user_htpasswd_file_in_container="$(nginx_user_htpasswd_file_in_container "$user_id" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+
+  if [ ! -f "$user_htpasswd_file" ] || ! awk -F: -v user="$user_id" '$1 == user { found=1 } END { exit !found }' "$user_htpasswd_file"; then
+    echo "[ERROR] Basic Auth credentials not found for: $user_id" >&2
+    echo "[ERROR] Create or update the password before enabling instance admin:" >&2
+    echo "  htpasswd '$user_htpasswd_file' '$user_id'" >&2
+    exit 1
+  fi
+
+  ensure_nginx_htpasswd_permissions "$user_htpasswd_file"
+
+  auth_block="$(render_nginx_auth_lines "true" "$user_htpasswd_file_in_container")"
 
   python3 - "$nginx_conf" "$user_id" "$auth_block" <<'PY'
 import sys

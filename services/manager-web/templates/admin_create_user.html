@@ -97,7 +97,7 @@
           <button class="btn btn-oc" type="submit" data-create-submit>Create Instance</button>
         </form>
         <div class="muted-small mt-3">
-          Password is required only when Basic Auth is enabled. The create script will allocate the next available port, start the instance, update Nginx, and print the access details.
+          Password is always required for the instance-local /admin/ page. The Basic Auth switch only controls the main workspace URL. The create script will allocate the next available port, start the instance, update Nginx, and print the access details.
         </div>
       </div>
     </div>
@@ -109,7 +109,7 @@
         <ul class="muted-small mb-0">
           <li>Use one instance per submission; batch creation still belongs in the CSV scripts.</li>
           <li>Check the command output for port, token, and Nginx reload status.</li>
-          <li>If Basic Auth is disabled, OpenClaw token and device approval still apply.</li>
+          <li>If Basic Auth is disabled, only the main workspace URL skips Basic Auth; the instance-local /admin/ page remains protected.</li>
         </ul>
       </div>
     </div>

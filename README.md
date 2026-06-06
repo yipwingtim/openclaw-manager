@@ -760,6 +760,8 @@ docker exec openclaw-nginx nginx -s reload
 - OpenClaw Manager 项目目录挂载到 `OPENCLAW_MANAGER_DIR`
 - OpenClaw public 数据目录挂载
 - Nginx conf、auth 和 compose 目录挂载
+- Nginx auth root should stay read-only, while `auth/users` must be writable so Web-created instances can create per-instance htpasswd files.
+- Nginx auth 根目录建议保持只读，`auth/users` 必须可写，以便 Web 创建实例时生成每实例 htpasswd 文件。
 
 Web 创建实例时，脚本会在创建完成后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。
 

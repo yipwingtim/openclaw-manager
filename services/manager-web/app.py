@@ -54,9 +54,11 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 @app.context_processor
 def inject_actor_context():
     actor = get_actor_user()
+    actor_is_admin = is_admin_user(actor) if actor else False
     return {
         "current_user": actor,
-        "is_admin": is_admin_user(actor) if actor else False,
+        "is_admin": actor_is_admin,
+        "show_global_admin_nav": actor_is_admin,
     }
 
 
@@ -692,6 +694,7 @@ def render_user_dashboard(user_id, instance_mode=False):
         is_admin=current_is_admin,
         can_manage=current_can_manage,
         show_admin_links=(current_is_admin and not instance_mode),
+        show_global_admin_nav=(current_is_admin and not instance_mode),
         instance_mode=instance_mode,
         port=port,
         access_url=build_access_url(port),

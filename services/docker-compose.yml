@@ -17,6 +17,7 @@ services:
       - ${NGINX_COMPOSE_DIR:-/data/docker/nginx/compose}:${NGINX_COMPOSE_DIR:-/data/docker/nginx/compose}
       - ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}:${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
       - ${NGINX_AUTH_DIR:-/data/docker/nginx/auth}:${NGINX_AUTH_DIR:-/data/docker/nginx/auth}:ro
+      - ${NGINX_AUTH_USERS_DIR:-/data/docker/nginx/auth/users}:${NGINX_AUTH_USERS_DIR:-/data/docker/nginx/auth/users}
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - agent-net

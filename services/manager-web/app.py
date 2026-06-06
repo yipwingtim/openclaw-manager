@@ -860,6 +860,7 @@ def my_instance():
 
 
 @app.get("/admin")
+@app.get("/admin/")
 def admin_home():
     denied = require_admin()
     if denied:

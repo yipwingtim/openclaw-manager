@@ -44,16 +44,21 @@ for user_id in "$@"; do
     exit 1
   fi
 
+  user_htpasswd_file="$(nginx_user_htpasswd_file "$user_id" "$NGINX_HTPASSWD_FILE")"
+  user_htpasswd_file_in_container="$(nginx_user_htpasswd_file_in_container "$user_id" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+  user_htpasswd_ref="$(nginx_user_htpasswd_ref "$user_id" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+
   if [ "$BASIC_AUTH_ENABLED" = "true" ]; then
-    if [ ! -f "$NGINX_HTPASSWD_FILE" ] || ! awk -F: -v user="$user_id" '$1 == user { found=1 } END { exit !found }' "$NGINX_HTPASSWD_FILE"; then
+    if [ ! -f "$user_htpasswd_file" ] || ! awk -F: -v user="$user_id" '$1 == user { found=1 } END { exit !found }' "$user_htpasswd_file"; then
       echo "[ERROR] Basic Auth credentials not found for: $user_id" >&2
       echo "[ERROR] Create or update the password before enabling Basic Auth:" >&2
-      echo "  htpasswd '$NGINX_HTPASSWD_FILE' '$user_id'" >&2
+      echo "  htpasswd '$user_htpasswd_file' '$user_id'" >&2
       exit 1
     fi
+    ensure_nginx_htpasswd_permissions "$user_htpasswd_file"
   fi
 
-  python3 - "$nginx_conf" "$BASIC_AUTH_ENABLED" "$NGINX_HTPASSWD_FILE_IN_CONTAINER" <<'PY'
+  python3 - "$nginx_conf" "$BASIC_AUTH_ENABLED" "$user_htpasswd_file_in_container" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -106,6 +111,7 @@ PY
     python3 "$SCRIPT_DIR/metadata_cli.py" set-basic-auth \
       --user-id "$user_id" \
       --enabled "$BASIC_AUTH_ENABLED" \
+      --basic-auth-password-ref "$user_htpasswd_ref" \
       || echo "[WARN] Metadata update failed for Basic Auth: $user_id"
   fi
 done

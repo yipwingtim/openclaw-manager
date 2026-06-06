@@ -121,8 +121,8 @@ def read_text_preview(path, max_chars=8000):
 def parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password):
     account = {
         "user_id": user_id,
-        "basic_auth_username": user_id if basic_auth_enabled == "true" else "",
-        "basic_auth_password": basic_auth_password if basic_auth_enabled == "true" else "",
+        "basic_auth_username": user_id,
+        "basic_auth_password": basic_auth_password,
         "openclaw_token": "",
         "access_url": "",
         "admin_url": "",
@@ -975,8 +975,8 @@ def run_admin_create_user():
     if basic_auth_enabled not in {"true", "false"}:
         return render_create_form(error="Invalid Basic Auth state.", status=400)
 
-    if basic_auth_enabled == "true" and not basic_auth_password:
-        return render_create_form(error="Basic Auth password is required when Basic Auth is enabled.", status=400)
+    if not basic_auth_password:
+        return render_create_form(error="Basic Auth password is required for the instance admin page.", status=400)
 
     if get_user_dir(user_id).exists():
         account = LAST_CREATED_ACCOUNTS.get(user_id)

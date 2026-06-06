@@ -34,3 +34,32 @@ EOF
 EOF
   fi
 }
+
+nginx_user_htpasswd_file() {
+  local user_id="$1"
+  local htpasswd_file="$2"
+
+  printf '%s/users/%s/.htpasswd' "$(dirname "$htpasswd_file")" "$user_id"
+}
+
+nginx_user_htpasswd_file_in_container() {
+  local user_id="$1"
+  local htpasswd_file_in_container="$2"
+
+  printf '%s/users/%s/.htpasswd' "$(dirname "$htpasswd_file_in_container")" "$user_id"
+}
+
+nginx_user_htpasswd_ref() {
+  local user_id="$1"
+  local htpasswd_file_in_container="$2"
+
+  printf 'nginx-auth:%s' "$(nginx_user_htpasswd_file_in_container "$user_id" "$htpasswd_file_in_container")"
+}
+
+ensure_nginx_htpasswd_permissions() {
+  local htpasswd_file="$1"
+
+  chmod 755 "$(dirname "$(dirname "$htpasswd_file")")" 2>/dev/null || true
+  chmod 755 "$(dirname "$htpasswd_file")" 2>/dev/null || true
+  chmod 644 "$htpasswd_file"
+}

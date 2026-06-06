@@ -251,7 +251,9 @@ Structure | 结构：
 │   └── userB.conf
 ├── certs/                      # HTTPS certificates / HTTPS 证书
 ├── auth/
-│   └── .htpasswd               # Basic Auth password file / Basic Auth 密码文件
+│   ├── .htpasswd               # manager/global Basic Auth file / 管理端或全局 Basic Auth 文件
+│   └── users/
+│       └── userA/.htpasswd     # per-instance Basic Auth file / 单实例 Basic Auth 文件
 └── logs/                       # Nginx logs / Nginx 日志
 ```
 
@@ -263,8 +265,10 @@ Notes | 说明：
 - 每个用户配置文件监听一个独立 HTTPS 端口。
 - Nginx proxies requests to `openclaw_<user_id>:18789`.
 - Nginx 将请求反向代理到 `openclaw_<user_id>:18789`。
-- `.htpasswd` is created or updated by `create_user.sh`.
-- `.htpasswd` 由 `create_user.sh` 创建或更新。
+- Instance-local `/admin/` uses per-instance Basic Auth files under `auth/users/<user_id>/.htpasswd`.
+- 实例端口 `/admin/` 使用 `auth/users/<user_id>/.htpasswd` 中的独立 Basic Auth 文件。
+- The main workspace URL may disable Basic Auth, but the instance-local `/admin/` page remains protected.
+- 主工作区 URL 可以关闭 Basic Auth，但实例端口 `/admin/` 页面仍保持认证保护。
 
 ### 3. OpenClaw Manager Config | OpenClaw Manager 配置
 
@@ -286,6 +290,7 @@ NGINX_COMPOSE_DIR=/data/docker/nginx/compose
 NGINX_COMPOSE_FILE=/data/docker/nginx/compose/docker-compose.yml
 NGINX_USERS_CONF_DIR=/data/docker/nginx/conf
 NGINX_HTPASSWD_FILE=/data/docker/nginx/auth/.htpasswd
+NGINX_HTPASSWD_FILE_IN_CONTAINER=/etc/nginx/auth/.htpasswd
 NGINX_CONTAINER_NAME=openclaw-nginx
 ```
 

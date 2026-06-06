@@ -109,10 +109,6 @@ write_output_row() {
   local status="$4"
   local port token access_url container_name
 
-  if [ "$basic_auth_enabled" = "false" ]; then
-    password=""
-  fi
-
   port="$(detect_port "$user_id")"
   token="$(read_token "$user_id")"
   container_name="openclaw_${user_id}"

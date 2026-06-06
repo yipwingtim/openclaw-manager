@@ -27,7 +27,7 @@ SUCCESS=0
 USER_DIR_CREATED=0
 NGINX_CONF_CREATED=0
 PORT_MAPPING_CREATED=0
-HTPASSWD_FILE_CREATED=0
+USER_HTPASSWD_FILE_CREATED=0
 USERS_CSV_ROW_CREATED=0
 NGINX_COMPOSE_APPLIED=0
 
@@ -196,11 +196,9 @@ PY
     rm -f "$NGINX_USER_CONF"
   fi
 
-  if [ -f "$NGINX_HTPASSWD_FILE" ]; then
-    htpasswd -D "$NGINX_HTPASSWD_FILE" "$USER_ID" >/dev/null 2>&1 || true
-    if [ "$HTPASSWD_FILE_CREATED" -eq 1 ] && [ ! -s "$NGINX_HTPASSWD_FILE" ]; then
-      rm -f "$NGINX_HTPASSWD_FILE"
-    fi
+  if [ "$USER_HTPASSWD_FILE_CREATED" -eq 1 ] && [ -n "${NGINX_USER_HTPASSWD_FILE:-}" ]; then
+    rm -f "$NGINX_USER_HTPASSWD_FILE"
+    rmdir "$(dirname "$NGINX_USER_HTPASSWD_FILE")" >/dev/null 2>&1 || true
   fi
 
   if [ "$USER_DIR_CREATED" -eq 1 ] && [ -d "$USER_DIR" ]; then
@@ -335,8 +333,11 @@ sed -i "s#{{GATEWAY_TOKEN}}#$GATEWAY_TOKEN#g" "$TARGET_COMPOSE"
 mkdir -p "$NGINX_USERS_CONF_DIR"
 
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
-NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
-NGINX_ADMIN_AUTH_BLOCK="$(render_nginx_auth_lines "true" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+NGINX_USER_HTPASSWD_FILE="$(nginx_user_htpasswd_file "$USER_ID" "$NGINX_HTPASSWD_FILE")"
+NGINX_USER_HTPASSWD_FILE_IN_CONTAINER="$(nginx_user_htpasswd_file_in_container "$USER_ID" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+NGINX_USER_HTPASSWD_REF="$(nginx_user_htpasswd_ref "$USER_ID" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
+NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
+NGINX_ADMIN_AUTH_BLOCK="$(render_nginx_auth_lines "true" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
 
 cat > "$NGINX_USER_CONF" <<EOF
 server {
@@ -470,54 +471,35 @@ PY
   PORT_MAPPING_CREATED=1
 fi
 
-# ===== 创建 / 更新 Basic Auth 用户 =====
-if [ "$BASIC_AUTH_ENABLED" = "false" ]; then
-  log "Basic Auth disabled for user: $USER_ID"
-else
+# ===== 创建 / 更新实例 Basic Auth 用户 =====
+{
   if ! command -v htpasswd >/dev/null 2>&1; then
     fail "htpasswd command not found. Please install apache2-utils first."
     fail "Ubuntu/Debian: sudo apt update && sudo apt install -y apache2-utils"
     exit 1
   fi
 
-  if ! command -v setfacl >/dev/null 2>&1; then
-    fail "setfacl command not found. Please install acl first."
-    fail "Ubuntu/Debian: sudo apt update && sudo apt install -y acl"
-    exit 1
-  fi
+  mkdir -p "$(dirname "$NGINX_USER_HTPASSWD_FILE")"
 
-  mkdir -p "$(dirname "$NGINX_HTPASSWD_FILE")"
-
-  if [ ! -f "$NGINX_HTPASSWD_FILE" ]; then
-    HTPASSWD_FILE_CREATED=1
-    log "Creating Basic Auth user: $USER_ID"
+  if [ ! -f "$NGINX_USER_HTPASSWD_FILE" ]; then
+    USER_HTPASSWD_FILE_CREATED=1
+    log "Creating instance Basic Auth user: $USER_ID"
     if [ -n "$BASIC_AUTH_PASSWORD" ]; then
-      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -ci "$NGINX_HTPASSWD_FILE" "$USER_ID"
+      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -ci "$NGINX_USER_HTPASSWD_FILE" "$USER_ID"
     else
-      htpasswd -c "$NGINX_HTPASSWD_FILE" "$USER_ID"
+      htpasswd -c "$NGINX_USER_HTPASSWD_FILE" "$USER_ID"
     fi
   else
-    log "Creating / updating Basic Auth user: $USER_ID"
+    log "Creating / updating instance Basic Auth user: $USER_ID"
     if [ -n "$BASIC_AUTH_PASSWORD" ]; then
-      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -i "$NGINX_HTPASSWD_FILE" "$USER_ID"
+      printf '%s\n' "$BASIC_AUTH_PASSWORD" | htpasswd -i "$NGINX_USER_HTPASSWD_FILE" "$USER_ID"
     else
-      htpasswd "$NGINX_HTPASSWD_FILE" "$USER_ID"
+      htpasswd "$NGINX_USER_HTPASSWD_FILE" "$USER_ID"
     fi
   fi
 
-  # ===== 修复 nginx 容器读取 .htpasswd 的权限 =====
-  NGINX_UID=$(docker exec "$NGINX_CONTAINER_NAME" id -u nginx 2>/dev/null || true)
-
-  if [ -z "$NGINX_UID" ]; then
-    fail "Could not detect nginx user UID in container: $NGINX_CONTAINER_NAME"
-    exit 1
-  fi
-
-  log "Granting nginx container user UID $NGINX_UID read access to htpasswd file"
-
-  sudo setfacl -m "u:${NGINX_UID}:rx" "$(dirname "$NGINX_HTPASSWD_FILE")"
-  sudo setfacl -m "u:${NGINX_UID}:r" "$NGINX_HTPASSWD_FILE"
-fi
+  ensure_nginx_htpasswd_permissions "$NGINX_USER_HTPASSWD_FILE"
+}
 
 # ===== 启动用户容器 =====
 cd "$USER_DIR"
@@ -606,6 +588,7 @@ python3 "$SCRIPT_DIR/metadata_cli.py" create-instance \
   --port "$PORT" \
   --openclaw-version "$VERSION" \
   --basic-auth-enabled "$BASIC_AUTH_ENABLED" \
+  --basic-auth-password-ref "$NGINX_USER_HTPASSWD_REF" \
   --openclaw-token "$TOKEN" \
   --message "created from create_user.sh" \
   || echo "[WARN] Metadata update failed for created user: $USER_ID"
@@ -621,14 +604,16 @@ echo "👉 https://$PUBLIC_HOST:$PORT"
 echo ""
 echo "Basic Auth:"
 if [ "$BASIC_AUTH_ENABLED" = "false" ]; then
-  echo "👉 disabled"
+  echo "👉 workspace: disabled"
 else
-  echo "👉 username: $USER_ID"
-  if [ -n "$BASIC_AUTH_PASSWORD" ]; then
-    echo "👉 password: $BASIC_AUTH_PASSWORD"
-  else
-    echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
-  fi
+  echo "👉 workspace: enabled"
+fi
+echo "👉 admin: enabled"
+echo "👉 username: $USER_ID"
+if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+  echo "👉 password: $BASIC_AUTH_PASSWORD"
+else
+  echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"
 fi
 
 echo "Login Token:"

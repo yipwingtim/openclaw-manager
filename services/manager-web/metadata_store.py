@@ -183,6 +183,17 @@ def upsert_credentials(
         )
 
 
+def get_credentials(user_id, conn=None):
+    owns_conn = conn is None
+    context = connect() if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        row = active_conn.execute(
+            "SELECT * FROM instance_credentials WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return row_to_dict(row)
+
+
 def record_port(port, user_id=None, status="allocated", conn=None):
     now = utc_now()
     released_at = now if status == "released" else None

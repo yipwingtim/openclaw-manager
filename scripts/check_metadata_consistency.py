@@ -249,6 +249,9 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     nginx = detect_nginx_conf(nginx_conf)
     csv_row = users_csv.get(user_id)
     db_row = db_instances.get(user_id)
+    csv_status = (csv_row or {}).get("status")
+    db_status = (db_row or {}).get("status")
+    is_deleted = csv_status == "deleted" or db_status == "deleted"
     expected_service = f"openclaw-{service_id(user_id)}"
     expected_container = f"openclaw_{user_id}"
     expected_htpasswd = container_htpasswd_path(user_id)
@@ -269,7 +272,7 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     if not compose["has_agent_net"]:
         reporter.error("compose_missing_agent_net", f"{user_id}: compose does not reference agent-net")
 
-    if not nginx["exists"]:
+    if not nginx["exists"] and not is_deleted:
         reporter.error("nginx_conf_missing", f"{user_id}: nginx conf missing: {nginx_conf}")
     if nginx["proxy_user"] and nginx["proxy_user"] != user_id:
         reporter.error("nginx_proxy_mismatch", f"{user_id}: proxy target user={nginx['proxy_user']}")
@@ -278,7 +281,7 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
             "admin_htpasswd_mismatch",
             f"{user_id}: admin htpasswd={nginx['admin_htpasswd']} expected={expected_htpasswd}",
         )
-    if not host_htpasswd_path(user_id).is_file():
+    if not host_htpasswd_path(user_id).is_file() and not is_deleted:
         reporter.error("htpasswd_missing", f"{user_id}: htpasswd missing: {host_htpasswd_path(user_id)}")
 
     verbose_check(verbose, user_id, "users.csv row")
@@ -295,7 +298,6 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
         reporter.warn("metadata_missing_user", f"{user_id}: user dir exists but metadata has no instance row")
         return
 
-    db_status = db_row.get("status")
     if db_status == "deleted":
         reporter.warn("metadata_deleted_but_dir_exists", f"{user_id}: metadata status is deleted but user dir exists")
     if nginx["port"] is not None and db_row.get("port") is not None and int(db_row["port"]) != nginx["port"]:
@@ -327,6 +329,8 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
         port_row = db_ports.get(int(port))
         if port_row is None:
             reporter.warn("metadata_port_row_missing", f"{user_id}: ports table missing port={port}")
+        elif is_deleted and port_row.get("status") == "released":
+            pass
         elif port_row.get("user_id") != user_id or port_row.get("status") != "allocated":
             reporter.warn(
                 "metadata_port_row_mismatch",

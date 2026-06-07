@@ -83,16 +83,16 @@ def service_id(user_id):
 
 
 def parse_users_csv(path, reporter):
-    rows = {}
+    records_by_user = {}
     if not path.is_file():
         reporter.warn("users_csv_missing", f"users.csv not found: {path}")
-        return rows
+        return {}
 
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         values = list(csv.reader(handle))
 
     if not values:
-        return rows
+        return {}
 
     first = [item.strip() for item in values[0]]
     has_header = {"user_id", "port", "created_at"}.issubset(set(first))
@@ -110,12 +110,26 @@ def parse_users_csv(path, reporter):
         if not user_id:
             reporter.warn("users_csv_empty_user", f"empty user_id at row {index}")
             continue
-        if user_id in rows:
-            reporter.error("users_csv_duplicate_user", f"duplicate user_id in users.csv: {user_id}")
-        rows[user_id] = {
+        records_by_user.setdefault(user_id, []).append({
             "port": parse_int(row.get("port")),
             "status": (row.get("status") or "active").strip() or "active",
-        }
+            "line": index,
+        })
+
+    rows = {}
+    for user_id, records in records_by_user.items():
+        active_records = [record for record in records if record["status"] == "active"]
+        if len(active_records) > 1:
+            lines = ", ".join(str(record["line"]) for record in active_records)
+            reporter.error(
+                "users_csv_duplicate_active_user",
+                f"multiple active rows for user_id={user_id} in users.csv lines: {lines}",
+            )
+            rows[user_id] = active_records[-1]
+        elif active_records:
+            rows[user_id] = active_records[-1]
+        else:
+            rows[user_id] = records[-1]
     return rows
 
 

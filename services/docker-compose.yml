@@ -20,7 +20,7 @@ services:
       - ${NGINX_AUTH_USERS_DIR:-/data/docker/nginx/auth/users}:${NGINX_AUTH_USERS_DIR:-/data/docker/nginx/auth/users}
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - agent-net
+      - manager-net
 
   pdf-extract-text:
     build: ./pdf-extract-text
@@ -28,9 +28,9 @@ services:
     restart: unless-stopped
 
     networks:
-      - agent-net
+      - manager-net
 
 
 networks:
-  agent-net:
+  manager-net:
     external: true

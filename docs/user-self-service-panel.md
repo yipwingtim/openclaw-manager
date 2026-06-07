@@ -72,6 +72,8 @@ User Browser
 
 Nginx 会通过 `X-OpenClaw-User` header 将当前实例的 `user_id` 传给 `manager-web`，因此用户不需要在 `/admin/` 页面再次选择自己的账号。
 
+`X-OpenClaw-User` 是内部信任 header，只应由 Nginx 注入。用户 OpenClaw 容器应只加入 `agent-net`，`manager-web` 应只加入 `manager-net`，Nginx 同时加入两个网络并作为唯一反向代理入口。
+
 如果文件名在允许目录中唯一，也可以使用直链下载：
 
 ```text
@@ -343,7 +345,7 @@ Delete Instance
 /data/docker/openclaw-public/users/<user_id>/backups/version-upgrades/<timestamp>/post-check.txt
 ```
 
-`manager-web` 通过 Web 页面调用管理脚本，并需要 Docker API 管理实例容器。容器内需要 Docker CLI、Docker Compose plugin、`/var/run/docker.sock`，并挂载 OpenClaw Manager 项目目录、OpenClaw public 数据目录、Nginx conf/auth/compose 目录。
+`manager-web` 通过 Web 页面调用管理脚本，并需要 Docker API 管理实例容器。容器内需要 Docker CLI、Docker Compose plugin、`/var/run/docker.sock`，并挂载 OpenClaw Manager 项目目录、OpenClaw public 数据目录、Nginx conf/auth/compose 目录。`manager-web` 应只加入 `manager-net`；用户实例容器应只加入 `agent-net`；Nginx 需要同时加入两个网络。
 
 Web 创建实例时，`create_user.sh` 会在成功后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。
 

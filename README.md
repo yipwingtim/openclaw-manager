@@ -190,6 +190,8 @@ Nginx 运行时配置不放在项目目录内，而是由脚本生成到 `/data/
 ## 📚 Documentation | 文档索引
 
 - [Agent Hosting Platform Architecture / 架构规划](docs/architecture/agent-hosting-platform.md)
+- [Roadmap / 后续规划](docs/architecture/roadmap.md)
+- [Fresh Environment Bootstrap / 全新环境初始化](docs/deployment/bootstrap.md)
 - [Metadata Storage Plan / 元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary / 元数据数据字典](docs/architecture/metadata-data-dictionary.md)
 - [User Self-Service Panel / 用户自助面板](docs/user-self-service-panel.md)
@@ -293,6 +295,8 @@ OPENCLAW_PUBLIC_DIR=/data/docker/openclaw-public
 NGINX_COMPOSE_DIR=/data/docker/nginx/compose
 NGINX_COMPOSE_FILE=/data/docker/nginx/compose/docker-compose.yml
 NGINX_USERS_CONF_DIR=/data/docker/nginx/conf
+NGINX_CERTS_DIR=/data/docker/nginx/certs
+NGINX_LOGS_DIR=/data/docker/nginx/logs
 NGINX_HTPASSWD_FILE=/data/docker/nginx/auth/.htpasswd
 NGINX_HTPASSWD_FILE_IN_CONTAINER=/etc/nginx/auth/.htpasswd
 NGINX_CONTAINER_NAME=openclaw-nginx
@@ -306,6 +310,33 @@ Notes | 说明：
 - 脚本应尽量从该配置文件读取路径，避免硬编码。
 - Do not commit secrets, certificates, `.htpasswd`, or production config files to a public repository.
 - 不应将敏感信息、证书、`.htpasswd` 或生产配置文件提交到公开仓库。
+
+### Fresh Environment Bootstrap | 全新环境初始化
+
+For a clean Ubuntu host, run the bootstrap script first:
+
+全新 Ubuntu 主机可先执行初始化脚本：
+
+Supported target systems are Ubuntu 22.04 LTS and Ubuntu 24.04 LTS. Install `python3`, Docker Engine, Docker Compose plugin, and `apache2-utils` before running bootstrap.
+
+当前支持目标为 Ubuntu 22.04 LTS 和 Ubuntu 24.04 LTS。执行 bootstrap 前，应先安装 `python3`、Docker Engine、Docker Compose plugin 和 `apache2-utils`。
+
+```bash
+./scripts/check_bootstrap_readiness.sh
+./scripts/bootstrap_runtime.sh
+```
+
+The bootstrap script creates missing runtime directories, external Docker networks, `users.csv`, `ports.txt`, SQLite metadata database, and initial Nginx compose/config files. It does not overwrite existing runtime files and does not start containers.
+
+该脚本会创建缺失的运行目录、外部 Docker 网络、`users.csv`、`ports.txt`、SQLite 元数据数据库和初始 Nginx compose/config 文件。脚本不会覆盖已有运行文件，也不会启动容器。
+
+After bootstrap, review `config/openclaw-manager.env`, place TLS certificate files, create the global manager Basic Auth user, and then start Nginx and manager services.
+
+初始化后，应检查 `config/openclaw-manager.env`，放置 TLS 证书文件，创建全局管理端 Basic Auth 用户，然后再启动 Nginx 和管理端服务。
+
+See [Fresh Environment Bootstrap / 全新环境初始化](docs/deployment/bootstrap.md) for detailed prerequisites and steps.
+
+详细前置条件和步骤见 [Fresh Environment Bootstrap / 全新环境初始化](docs/deployment/bootstrap.md)。
 
 ---
 

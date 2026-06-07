@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
 
-  openclaw-gateway:
+  openclaw-{{SERVICE_ID}}:
     image: ghcr.io/openclaw/openclaw:{{VERSION}}
     container_name: openclaw_{{USER_ID}}
     restart: unless-stopped

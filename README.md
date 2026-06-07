@@ -769,6 +769,24 @@ docker exec openclaw-nginx nginx -s reload
 - `manager-web` should only join `manager-net`. The public Nginx container should join both `agent-net` and `manager-net`.
 - `manager-web` 应只加入 `manager-net`。对外 Nginx 容器应同时加入 `agent-net` 和 `manager-net`。
 
+Production deployment order matters when enabling network isolation:
+
+1. Create the external `manager-net` Docker network.
+2. Attach the public Nginx container to `manager-net` while keeping it on `agent-net`.
+3. Persist both networks in the public Nginx compose file, otherwise a future Nginx recreate may lose `manager-net`.
+4. Pull this repository update and rebuild/recreate `manager-web`.
+5. Run `nginx -t` and reload Nginx after `manager-web` is recreated.
+6. Verify Nginx can reach `openclaw-manager-web:8080`, and user OpenClaw containers cannot.
+
+启用网络隔离时，生产部署顺序很重要：
+
+1. 创建外部 Docker 网络 `manager-net`。
+2. 让对外 Nginx 容器加入 `manager-net`，同时保留在 `agent-net`。
+3. 在对外 Nginx 的 compose 文件中持久化两个网络，否则未来重建 Nginx 后可能丢失 `manager-net`。
+4. 拉取本仓库更新并重建/重建容器 `manager-web`。
+5. `manager-web` 重建后执行 `nginx -t` 并 reload Nginx。
+6. 验证 Nginx 可以访问 `openclaw-manager-web:8080`，用户 OpenClaw 容器不能访问。
+
 Web 创建实例时，脚本会在创建完成后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。
 
 ---

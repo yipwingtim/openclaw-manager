@@ -110,6 +110,7 @@ HOST_MANAGER_GID="${HOST_MANAGER_GID:-$(stat -c %g "$BASE_DIR")}"
 USER_DIR="$BASE_DIR/users/$USER_ID"
 LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
 TEMPLATE="$MANAGER_DIR/templates/docker-compose.tpl.yml"
+SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
 
 # ===== 创建基础目录 =====
 mkdir -p "$BASE_DIR/users"
@@ -225,6 +226,11 @@ if [ -d "$USER_DIR" ]; then
   exit 1
 fi
 
+if [ -z "$SERVICE_ID" ]; then
+  fail "Could not derive compose service id from user: $USER_ID"
+  exit 1
+fi
+
 # ===== 检查模板 =====
 if [ ! -f "$TEMPLATE" ]; then
   fail "Template not found: $TEMPLATE"
@@ -323,6 +329,7 @@ cp "$TEMPLATE" "$TARGET_COMPOSE"
 
 # ===== 替换变量 =====
 sed -i "s#{{USER_ID}}#$USER_ID#g" "$TARGET_COMPOSE"
+sed -i "s#{{SERVICE_ID}}#$SERVICE_ID#g" "$TARGET_COMPOSE"
 sed -i "s#{{PORT}}#$PORT#g" "$TARGET_COMPOSE"
 sed -i "s#{{VERSION}}#$VERSION#g" "$TARGET_COMPOSE"
 sed -i "s#{{BASE_DIR}}#$BASE_DIR#g" "$TARGET_COMPOSE"

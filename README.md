@@ -124,6 +124,10 @@ OpenClaw Manager 当前采用三层访问控制。
    ./scripts/approve_device.sh <user_id> --latest
    ```
 
+4. Docker Network Isolation
+   User OpenClaw containers stay on `agent-net`, while `manager-web` runs on a separate `manager-net`. Nginx is the only service that should join both networks, so user containers cannot directly call `manager-web:8080`.
+   用户 OpenClaw 容器保留在 `agent-net`，`manager-web` 运行在独立的 `manager-net`。只有 Nginx 应同时加入两个网络，因此用户容器不能直接访问 `manager-web:8080`。
+
 Notes | 说明：
 
 - Basic Auth protects the outer Nginx entry point.
@@ -762,6 +766,8 @@ docker exec openclaw-nginx nginx -s reload
 - Nginx conf、auth 和 compose 目录挂载
 - Nginx auth root should stay read-only, while `auth/users` must be writable so Web-created instances can create per-instance htpasswd files.
 - Nginx auth 根目录建议保持只读，`auth/users` 必须可写，以便 Web 创建实例时生成每实例 htpasswd 文件。
+- `manager-web` should only join `manager-net`. The public Nginx container should join both `agent-net` and `manager-net`.
+- `manager-web` 应只加入 `manager-net`。对外 Nginx 容器应同时加入 `agent-net` 和 `manager-net`。
 
 Web 创建实例时，脚本会在创建完成后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。
 

@@ -74,6 +74,20 @@ Nginx 会通过 `X-OpenClaw-User` header 将当前实例的 `user_id` 传给 `ma
 
 `X-OpenClaw-User` 是内部信任 header，只应由 Nginx 注入。用户 OpenClaw 容器应只加入 `agent-net`，`manager-web` 应只加入 `manager-net`，Nginx 同时加入两个网络并作为唯一反向代理入口。
 
+生产环境启用网络隔离时，应先创建 `manager-net` 并让 Nginx 同时加入 `agent-net` 和 `manager-net`，再重建 `manager-web`。如果先把 `manager-web` 移到 `manager-net`，但 Nginx 尚未加入该网络，实例端口 `/admin/` 会返回 502。
+
+还需要把 `manager-net` 写入 Nginx 的 compose 文件；只执行 `docker network connect manager-net openclaw-nginx` 属于运行时变更，未来 Nginx 容器被 compose 重建后可能丢失该网络。
+
+可用以下命令验证隔离是否生效：
+
+```bash
+docker exec openclaw-nginx sh -lc 'wget -qO- -T 3 http://openclaw-manager-web:8080/ >/dev/null && echo "[OK] nginx can reach manager-web"'
+docker exec openclaw_<user_id> sh -lc 'getent hosts openclaw-manager-web || true'
+docker exec openclaw_<user_id> sh -lc 'wget -qO- -T 3 http://openclaw-manager-web:8080/ 2>&1 || echo "[OK] blocked"'
+```
+
+预期结果：Nginx 可以访问 `manager-web`；普通用户实例容器不能解析或不能访问 `openclaw-manager-web:8080`。
+
 如果文件名在允许目录中唯一，也可以使用直链下载：
 
 ```text

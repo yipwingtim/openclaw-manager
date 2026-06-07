@@ -716,6 +716,17 @@ docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
 /data/docker/openclaw-public/users/<user_id>/backups/version-upgrades/<timestamp>/post-check.txt
 ```
 
+### Metadata 一致性检查
+
+检查 SQLite 元数据与运行时文件是否一致：
+
+```bash
+./scripts/check_metadata_consistency.py
+./scripts/check_metadata_consistency.py --user-id <user_id>
+./scripts/check_metadata_consistency.py --verbose
+```
+
+该检查脚本只读扫描 `manager.db`、`users.csv`、用户目录、Nginx 配置、实例 htpasswd 文件和 Nginx compose 端口映射，用于发现元数据迁移期间的状态差异，不会自动修改生产数据。
 
 ### Device Pairing 管理
 - approve_device.sh

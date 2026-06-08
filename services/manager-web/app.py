@@ -6,6 +6,7 @@ import tempfile
 import csv
 import io
 import threading
+import hmac
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -21,6 +22,7 @@ PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-p
 NGINX_USERS_CONF_DIR = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf"))
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
 NGINX_CONTAINER_NAME = os.environ.get("NGINX_CONTAINER_NAME", "openclaw-nginx")
+OPENCLAW_INTERNAL_TOKEN = os.environ.get("OPENCLAW_INTERNAL_TOKEN", "").strip()
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
@@ -49,6 +51,20 @@ CREATE_EVENTS_LOCK = threading.Lock()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+if not OPENCLAW_INTERNAL_TOKEN:
+    app.logger.warning("OPENCLAW_INTERNAL_TOKEN is not configured; internal proxy token checks are disabled.")
+
+
+@app.before_request
+def require_internal_proxy_token():
+    if not request.path.startswith(("/admin", "/instance-admin")):
+        return None
+    if not OPENCLAW_INTERNAL_TOKEN:
+        return None
+    provided = request.headers.get("X-OpenClaw-Internal-Token", "")
+    if not hmac.compare_digest(provided, OPENCLAW_INTERNAL_TOKEN):
+        return forbidden("Forbidden: invalid internal proxy token.")
+    return None
 
 
 @app.context_processor

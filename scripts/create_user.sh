@@ -345,6 +345,10 @@ NGINX_USER_HTPASSWD_FILE_IN_CONTAINER="$(nginx_user_htpasswd_file_in_container "
 NGINX_USER_HTPASSWD_REF="$(nginx_user_htpasswd_ref "$USER_ID" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
 NGINX_ADMIN_AUTH_BLOCK="$(render_nginx_auth_lines "true" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
+NGINX_INTERNAL_TOKEN_HEADER=""
+if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
+  NGINX_INTERNAL_TOKEN_HEADER="        proxy_set_header X-OpenClaw-Internal-Token \"$OPENCLAW_INTERNAL_TOKEN\";"
+fi
 
 cat > "$NGINX_USER_CONF" <<EOF
 server {
@@ -374,6 +378,7 @@ $NGINX_ADMIN_AUTH_BLOCK
         proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-OpenClaw-User "$USER_ID";
+$NGINX_INTERNAL_TOKEN_HEADER
 
         proxy_read_timeout 300;
         proxy_send_timeout 300;

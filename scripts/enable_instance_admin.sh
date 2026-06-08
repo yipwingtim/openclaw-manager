@@ -55,14 +55,19 @@ for user_id in "$@"; do
   ensure_nginx_htpasswd_permissions "$user_htpasswd_file"
 
   auth_block="$(render_nginx_auth_lines "true" "$user_htpasswd_file_in_container")"
+  internal_token_header=""
+  if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
+    internal_token_header="        proxy_set_header X-OpenClaw-Internal-Token \"${OPENCLAW_INTERNAL_TOKEN}\";"
+  fi
 
-  python3 - "$nginx_conf" "$user_id" "$auth_block" <<'PY'
+  python3 - "$nginx_conf" "$user_id" "$auth_block" "$internal_token_header" <<'PY'
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
 user_id = sys.argv[2]
 auth_block = sys.argv[3]
+internal_token_header = sys.argv[4]
 
 text = path.read_text(encoding="utf-8")
 marker = "    location / {\n"
@@ -85,6 +90,7 @@ admin_block = f"""    location = /admin {{
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-OpenClaw-User "{user_id}";
+{internal_token_header}
 
         proxy_read_timeout 300;
         proxy_send_timeout 300;

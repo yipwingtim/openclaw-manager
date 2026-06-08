@@ -192,6 +192,7 @@ Nginx 运行时配置不放在项目目录内，而是由脚本生成到 `/data/
 - [Agent Hosting Platform Architecture / 架构规划](docs/architecture/agent-hosting-platform.md)
 - [Roadmap / 后续规划](docs/architecture/roadmap.md)
 - [Fresh Environment Bootstrap / 全新环境初始化](docs/deployment/bootstrap.md)
+- [Runtime Security Checks / 运行时安全检查](docs/deployment/runtime-security-checks.md)
 - [Metadata Storage Plan / 元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary / 元数据数据字典](docs/architecture/metadata-data-dictionary.md)
 - [User Self-Service Panel / 用户自助面板](docs/user-self-service-panel.md)

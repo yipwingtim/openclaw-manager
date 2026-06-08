@@ -779,6 +779,8 @@ docker exec openclaw-nginx nginx -s reload
 - Nginx auth 根目录建议保持只读，`auth/users` 必须可写，以便 Web 创建实例时生成每实例 htpasswd 文件。
 - `manager-web` should only join `manager-net`. The public Nginx container should join both `agent-net` and `manager-net`.
 - `manager-web` 应只加入 `manager-net`。对外 Nginx 容器应同时加入 `agent-net` 和 `manager-net`。
+- In production, set `OPENCLAW_INTERNAL_TOKEN` and configure Nginx to send `X-OpenClaw-Internal-Token` when proxying to `manager-web`.
+- 生产环境建议设置 `OPENCLAW_INTERNAL_TOKEN`，并让 Nginx 代理到 `manager-web` 时发送 `X-OpenClaw-Internal-Token`。
 
 Production deployment order matters when enabling network isolation:
 

@@ -192,6 +192,7 @@ Nginx 运行时配置不放在项目目录内，而是由脚本生成到 `/data/
 - [Agent Hosting Platform Architecture / 架构规划](docs/architecture/agent-hosting-platform.md)
 - [Metadata Storage Plan / 元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary / 元数据数据字典](docs/architecture/metadata-data-dictionary.md)
+- [Internal Proxy Token Deployment / 内部代理令牌部署](docs/deployment/internal-proxy-token.md)
 - [User Self-Service Panel / 用户自助面板](docs/user-self-service-panel.md)
 
 ---
@@ -780,7 +781,7 @@ docker exec openclaw-nginx nginx -s reload
 - `manager-web` should only join `manager-net`. The public Nginx container should join both `agent-net` and `manager-net`.
 - `manager-web` 应只加入 `manager-net`。对外 Nginx 容器应同时加入 `agent-net` 和 `manager-net`。
 - In production, set `OPENCLAW_INTERNAL_TOKEN` and configure Nginx to send `X-OpenClaw-Internal-Token` when proxying to `manager-web`.
-- 生产环境建议设置 `OPENCLAW_INTERNAL_TOKEN`，并让 Nginx 代理到 `manager-web` 时发送 `X-OpenClaw-Internal-Token`。
+- 生产环境建议设置 `OPENCLAW_INTERNAL_TOKEN`，并让 Nginx 代理到 `manager-web` 时发送 `X-OpenClaw-Internal-Token`。启用步骤见 [Internal Proxy Token Deployment / 内部代理令牌部署](docs/deployment/internal-proxy-token.md)。
 
 Production deployment order matters when enabling network isolation:
 

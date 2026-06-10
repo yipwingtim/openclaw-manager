@@ -1,0 +1,26 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: openclaw-nginx
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+      - "30015:30015"
+
+    volumes:
+      - {{NGINX_CONF_DIR}}:/etc/nginx/conf.d
+      - {{NGINX_CERTS_DIR}}:/etc/nginx/certs
+      - {{NGINX_LOGS_DIR}}:/var/log/nginx
+      - {{NGINX_AUTH_DIR}}:/etc/nginx/auth
+
+    networks:
+      - agent-net
+      - manager-net
+
+networks:
+  agent-net:
+    external: true
+  manager-net:
+    external: true

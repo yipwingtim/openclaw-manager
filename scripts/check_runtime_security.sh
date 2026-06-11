@@ -38,6 +38,37 @@ container_has_network() {
   container_networks "$container" | grep -Fxq "$network"
 }
 
+nginx_internal_token_header_exists() {
+  local file="$1"
+  awk '
+    $1 == "proxy_set_header" && $2 == "X-OpenClaw-Internal-Token" {
+      found = 1
+    }
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$file"
+}
+
+nginx_internal_token_matches() {
+  local file="$1"
+  local expected="$2"
+  awk -v expected="$expected" '
+    $1 == "proxy_set_header" && $2 == "X-OpenClaw-Internal-Token" {
+      value = $3
+      sub(/;$/, "", value)
+      sub(/^"/, "", value)
+      sub(/"$/, "", value)
+      if (value == expected) {
+        found = 1
+      }
+    }
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$file"
+}
+
 echo "[INFO] OpenClaw Manager runtime security check"
 echo "[INFO] Manager dir: $MANAGER_DIR"
 
@@ -67,10 +98,10 @@ if [ -d "$NGINX_CONF_DIR" ]; then
   manager_proxy_files="$(grep -rl --include='*.conf' "openclaw-manager-web:8080" "$NGINX_CONF_DIR" 2>/dev/null || true)"
   if [ -n "$manager_proxy_files" ]; then
     while IFS= read -r file; do
-      if grep -q "X-OpenClaw-Internal-Token" "$file"; then
+      if nginx_internal_token_header_exists "$file"; then
         ok "internal token header exists: $file"
         if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
-          if grep -Fq "X-OpenClaw-Internal-Token \"${OPENCLAW_INTERNAL_TOKEN}\"" "$file"; then
+          if nginx_internal_token_matches "$file" "$OPENCLAW_INTERNAL_TOKEN"; then
             ok "internal token header value matches config: $file"
           else
             error "internal token header value does not match OPENCLAW_INTERNAL_TOKEN: $file"

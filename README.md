@@ -60,6 +60,8 @@ Typical environments | 适用场景：
 - 使用 `scripts/update_instance_version.sh` 升级指定实例版本，并在升级前后执行检查。
 - Manage instances from the web admin UI: create, start, stop, restart, delete, and toggle Basic Auth.
 - 可通过 Web 管理页面创建、启停、重启、删除实例，并切换 Basic Auth。
+- Generate WeChat plugin binding URLs from the web UI when the instance container can run the Tencent WeChat OpenClaw CLI through `npx`.
+- 当实例容器可通过 `npx` 运行腾讯微信 OpenClaw CLI 时，可在 Web 页面生成微信插件绑定链接。
 
 Typical flow | 典型流程：
 

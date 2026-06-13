@@ -168,11 +168,11 @@
                       <td>
                         {% if file.can_delete %}
                           {% if instance_mode %}
-                            <form method="post" action="/admin/files/{{ file.root }}/{{ file.relative_path }}/delete">
+                            <form method="post" action="/admin/files/{{ file.root }}/{{ file.relative_path }}/delete" onsubmit="return confirm('确认删除文件 {{ file.name }}？此操作不可撤销。');">
                               <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
                             </form>
                           {% else %}
-                            <form method="post" action="{{ url_for(delete_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}">
+                            <form method="post" action="{{ url_for(delete_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}" onsubmit="return confirm('确认删除文件 {{ file.name }}？此操作不可撤销。');">
                               <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
                             </form>
                           {% endif %}

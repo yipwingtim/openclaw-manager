@@ -23,6 +23,7 @@
 - 查看实例访问 URL
 - 查看设备缓存 `devices.txt`
 - 审批最新 pending device request
+- 生成微信插件绑定链接
 - 上传文件到实例 `uploads` 目录
 - 查看并下载用户工作区中的常见导出文件
 - 删除顶层用户生成文件或上传文件
@@ -278,6 +279,8 @@ docker compose up -d
 
 Basic Auth 可按实例关闭。关闭后，该实例端口的 `/` 和 `/admin/` 都不再弹出 Nginx Basic Auth，但仍保留 OpenClaw Token 和 Device Approval。该模式只建议用于可信内网培训实例。
 
+微信绑定功能只执行固定的腾讯微信 OpenClaw CLI 安装命令，并从命令输出中提取绑定 URL；它不向用户开放任意 shell 命令。该功能依赖实例容器可访问 npm registry，并可运行 `npx -y @tencent-weixin/openclaw-weixin-cli install`。
+
 已有实例切换示例：
 
 ```bash
@@ -300,6 +303,9 @@ Approve Latest Device
 
 Refresh Device Cache
   -> scripts/approve_device.sh <user_id> --list-only
+
+Generate WeChat Bind URL
+  -> docker exec openclaw_<user_id> sh -lc 'timeout 60s npx -y @tencent-weixin/openclaw-weixin-cli install'
 
 Enable instance-local /admin
   -> scripts/enable_instance_admin.sh <user_id> [user_id ...]

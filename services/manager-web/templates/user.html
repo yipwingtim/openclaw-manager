@@ -91,6 +91,24 @@
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
+              <div class="section-title">微信绑定</div>
+              <div class="muted-small">生成微信插件绑定链接，复制后在浏览器中打开并按提示完成绑定。</div>
+            </div>
+          </div>
+          {% if wechat_url %}
+            <div class="alert soft-success">
+              <div class="fw-semibold mb-1">微信绑定链接</div>
+              <a href="{{ wechat_url }}" target="_blank" rel="noreferrer">{{ wechat_url }}</a>
+            </div>
+          {% endif %}
+          <form method="post" action="{{ wechat_bind_url }}">
+            <button class="btn btn-oc" type="submit">生成微信绑定链接</button>
+          </form>
+        </div>
+
+        <div class="surface p-3 p-lg-4 mb-3">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+            <div>
               <div class="section-title">文件上传</div>
               <div class="muted-small">上传文件到实例目录 {{ container_upload_dir }}，单个文件最大 {{ max_upload_mb }} MB。</div>
             </div>

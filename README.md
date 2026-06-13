@@ -193,6 +193,7 @@ Nginx 运行时配置不放在项目目录内，而是由脚本生成到 `/data/
 - [Roadmap / 后续规划](docs/architecture/roadmap.md)
 - [Fresh Environment Bootstrap / 全新环境初始化](docs/deployment/bootstrap.md)
 - [Runtime Security Checks / 运行时安全检查](docs/deployment/runtime-security-checks.md)
+- [Model Proxy Deployment / 模型代理部署](docs/deployment/model-proxy.md)
 - [Metadata Storage Plan / 元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary / 元数据数据字典](docs/architecture/metadata-data-dictionary.md)
 - [Internal Proxy Token Deployment / 内部代理令牌部署](docs/deployment/internal-proxy-token.md)
@@ -544,10 +545,20 @@ vim config/model-providers.env
 ```bash
 MODEL_PROVIDER_ID=gpustack
 MODEL_ID=gpustack/minimax-m2.1
-MODEL_BASE_URL=http://10.x.x.x:18080/v1
-MODEL_API_KEY=xxxxxxxx
+MODEL_BASE_URL=http://openclaw-model-proxy:8081/v1
 MODEL_ALIAS="MiniMax M2.1"
 ```
+
+真实上游模型服务地址和 API Key 应配置在 `config/openclaw-manager.env`：
+
+```bash
+MODEL_PROXY_UPSTREAM_BASE_URL=http://10.x.x.x:18080/v1
+MODEL_PROXY_UPSTREAM_API_KEY=xxxxxxxx
+```
+
+启用后，实例模型配置会写入 `MODEL_PROXY_PUBLIC_BASE_URL` 和实例级 token；真实上游 URL/API Key 不再写入用户实例。未来如改用独立 API 网关，可将 `MODEL_PROXY_PUBLIC_BASE_URL` 指向外部网关地址，并由外部网关完成鉴权、转发、限流和审计。
+
+详细部署说明见 [Model Proxy Deployment / 模型代理部署](docs/deployment/model-proxy.md)。
 
 配置完成后：
 

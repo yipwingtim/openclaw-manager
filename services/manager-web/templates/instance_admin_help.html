@@ -6,9 +6,9 @@
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <div class="page-kicker">Instance Guide</div>
+      <div class="page-kicker">实例使用说明</div>
       <h1 class="page-title">/admin 使用说明</h1>
-      <div class="page-subtitle">这里是当前 OpenClaw 实例的自助管理页面，用于设备审批、上传文件、下载和删除工作区文件。</div>
+      <div class="page-subtitle">这里是当前容器实例的自助管理页面，用于设备审批、上传文件、下载和删除工作区文件。</div>
     </div>
     <a class="btn btn-oc-outline" href="/admin/">返回管理页面</a>
   </div>
@@ -17,12 +17,12 @@
     <div class="col-12 col-lg-4">
       <div class="surface p-3 p-lg-4 h-100">
         <div class="section-title mb-2">1. 设备审批</div>
-        <div class="muted-small mb-3">首次打开 OpenClaw，或更换浏览器、清理缓存后，页面可能提示需要审批 device。</div>
+        <div class="muted-small mb-3">首次打开实例，或更换浏览器、清理缓存后，页面可能提示需要审批设备。</div>
         <ol class="mb-0">
-          <li class="mb-2">先打开当前实例的 OpenClaw 页面，按页面提示输入 token。</li>
-          <li class="mb-2">如果出现 device approval 提示，回到 <code>/admin/</code>。</li>
-          <li class="mb-2">点击 <strong>Refresh Device Cache</strong> 查看最新请求。</li>
-          <li>点击 <strong>Approve My Device</strong> 审批最近一次请求。</li>
+          <li class="mb-2">先打开当前实例页面，按页面提示输入访问 token。</li>
+          <li class="mb-2">如果出现设备审批提示，回到 <code>/admin/</code>。</li>
+          <li class="mb-2">点击 <strong>刷新设备缓存</strong> 查看最新请求。</li>
+          <li>点击 <strong>审批我的设备</strong> 审批最近一次请求。</li>
         </ol>
       </div>
     </div>
@@ -30,10 +30,10 @@
     <div class="col-12 col-lg-4">
       <div class="surface p-3 p-lg-4 h-100">
         <div class="section-title mb-2">2. 上传文件</div>
-        <div class="muted-small mb-3">上传的文件会进入实例内的 <code>{{ upload_dir }}</code>，可供 OpenClaw 在对话中读取。</div>
+        <div class="muted-small mb-3">上传的文件会进入实例内的 <code>{{ upload_dir }}</code>，可供当前实例在对话中读取。</div>
         <ol class="mb-0">
-          <li class="mb-2">在 <strong>Files</strong> 区域选择本地文件。</li>
-          <li class="mb-2">点击 <strong>Upload</strong> 上传。</li>
+          <li class="mb-2">在 <strong>文件上传</strong> 区域选择本地文件。</li>
+          <li class="mb-2">点击 <strong>上传</strong> 上传。</li>
           <li class="mb-2">上传完成后，页面会显示容器内路径。</li>
           <li>单个文件最大 {{ max_upload_mb }} MB。</li>
         </ol>
@@ -43,10 +43,10 @@
     <div class="col-12 col-lg-4">
       <div class="surface p-3 p-lg-4 h-100">
         <div class="section-title mb-2">3. 下载文件</div>
-        <div class="muted-small mb-3">下载列表展示工作区顶层文件，适合下载 OpenClaw 生成的文档、表格、PPT 和压缩包。</div>
+        <div class="muted-small mb-3">下载列表展示工作区顶层文件，适合下载实例生成的文档、表格、PPT 和压缩包。</div>
         <ol class="mb-0">
-          <li class="mb-2">在 <strong>Downloadable Files</strong> 区域找到文件。</li>
-          <li class="mb-2">点击 <strong>Download</strong> 下载。</li>
+          <li class="mb-2">在 <strong>文件下载</strong> 区域找到文件。</li>
+          <li class="mb-2">点击 <strong>下载</strong> 下载。</li>
           <li class="mb-2">如果文件名唯一，也可以访问 <code>/admin/files/文件名</code> 直接下载。</li>
           <li>支持类型：{{ download_extensions }}。</li>
         </ol>
@@ -60,7 +60,7 @@
       <div class="col-12 col-lg-6">
         <div class="action-panel h-100">
           <div class="section-title mb-2">可以删除</div>
-          <div class="muted-small">用户生成或上传的顶层文件通常会显示 Delete 按钮。删除后文件会从当前实例目录中移除。</div>
+          <div class="muted-small">用户生成或上传的顶层文件通常会显示删除按钮。删除后文件会从当前实例目录中移除。</div>
         </div>
       </div>
       <div class="col-12 col-lg-6">
@@ -84,12 +84,12 @@
         </thead>
         <tbody>
           <tr>
-            <td>OpenClaw 要求审批设备</td>
+            <td>实例要求审批设备</td>
             <td>进入 <code>/admin/</code>，先刷新设备缓存，再点击审批按钮。</td>
           </tr>
           <tr>
-            <td>上传后 OpenClaw 找不到文件</td>
-            <td>把页面显示的容器路径发给 OpenClaw，例如 <code>{{ upload_dir }}/文件名</code>。</td>
+            <td>上传后实例找不到文件</td>
+            <td>把页面显示的容器路径发给实例，例如 <code>{{ upload_dir }}/文件名</code>。</td>
           </tr>
           <tr>
             <td>文件列表没有显示想下载的文件</td>
@@ -97,7 +97,7 @@
           </tr>
           <tr>
             <td>直接下载链接提示找不到或文件名不唯一</td>
-            <td>回到 <code>/admin/</code> 文件列表，使用页面里的 Download 按钮。</td>
+            <td>回到 <code>/admin/</code> 文件列表，使用页面里的下载按钮。</td>
           </tr>
         </tbody>
       </table>

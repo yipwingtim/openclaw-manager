@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Device Approvals - OpenClaw Manager{% endblock %}
+{% block title %}设备审批 - 容器实例管理与运维平台{% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <div class="page-kicker">Batch Control</div>
-      <h1 class="page-title">Device Approvals</h1>
-      <div class="page-subtitle">Preview pending devices and approve requests from a controlled CSV batch.</div>
+      <div class="page-kicker">批量控制</div>
+      <h1 class="page-title">设备审批</h1>
+      <div class="page-subtitle">预览待审批设备，并通过受控 CSV 批量审批访问请求。</div>
     </div>
-    <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+    <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
   </div>
 
   {% if error %}
@@ -16,23 +16,23 @@
 
   <div class="surface p-3 p-lg-4 mb-3">
     <form method="post" action="/admin/device-approvals">
-      <label class="form-label" for="input_csv">Input CSV</label>
+      <label class="form-label" for="input_csv">输入 CSV</label>
       <input class="form-control mb-3" id="input_csv" name="input_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_input.csv" required>
 
-      <label class="form-label" for="output_csv">Output CSV</label>
+      <label class="form-label" for="output_csv">输出 CSV</label>
       <input class="form-control mb-3" id="output_csv" name="output_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_results.csv" required>
 
       <div class="d-flex gap-2 flex-wrap">
-        <button class="btn btn-oc-outline" type="submit" name="action" value="preview">Preview Pending Requests</button>
-        <button class="btn btn-oc" type="submit" name="action" value="approve">Run Batch Approval</button>
+        <button class="btn btn-oc-outline" type="submit" name="action" value="preview">预览待审批请求</button>
+        <button class="btn btn-oc" type="submit" name="action" value="approve">执行批量审批</button>
       </div>
     </form>
-    <div class="muted-small mt-3">Paths must be under /data/docker/openclaw-public/batches.</div>
+    <div class="muted-small mt-3">路径必须位于 /data/docker/openclaw-public/batches 目录下。</div>
   </div>
 
   {% if result %}
     <div class="surface p-3 p-lg-4">
-      <div class="section-title mb-3">Batch Result</div>
+      <div class="section-title mb-3">批量处理结果</div>
       <pre class="codebox mb-0">{{ result }}</pre>
     </div>
   {% endif %}

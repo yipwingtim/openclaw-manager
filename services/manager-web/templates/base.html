@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}OpenClaw Manager{% endblock %}</title>
+    <title>{% block title %}容器实例管理与运维平台{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
       :root {
@@ -328,18 +328,18 @@
   <body>
     <div class="app-layout">
       <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">OC</span>OpenClaw Manager</div>
-        <div class="sidebar-section">Operations</div>
+        <div class="sidebar-brand"><span class="brand-mark">管</span>容器实例管理与运维平台</div>
+        <div class="sidebar-section">功能菜单</div>
         <div class="sidebar-nav">
           {% if show_global_admin_nav %}
-            <a href="/admin/users">Users</a>
-            <a href="/admin/create-user">Create Instance</a>
-            <a href="/admin/device-approvals">Device Approvals</a>
-            <a href="/admin/metadata">Metadata</a>
+            <a href="/admin/users">用户实例管理</a>
+            <a href="/admin/create-user">创建用户实例</a>
+            <a href="/admin/device-approvals">设备审批</a>
+            <a href="/admin/metadata">元数据管理</a>
           {% endif %}
           {% block nav_right %}{% endblock %}
         </div>
-        <div class="sidebar-footer">Instance control plane</div>
+        <div class="sidebar-footer">多实例运维控制台</div>
       </aside>
       <div class="content-shell">
         <main class="container page-shell py-4 py-lg-5">

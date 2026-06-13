@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Create Instance - OpenClaw Manager{% endblock %}
+{% block title %}创建用户实例 - 容器实例管理与运维平台{% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <div class="page-kicker">Provisioning</div>
-      <h1 class="page-title">Create Instance</h1>
-      <div class="page-subtitle">Create one OpenClaw instance with a dedicated port and optional Basic Auth.</div>
+      <div class="page-kicker">实例开通</div>
+      <h1 class="page-title">创建用户实例</h1>
+      <div class="page-subtitle">为指定用户创建独立容器实例、访问端口和认证配置。</div>
     </div>
-    <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+    <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
   </div>
 
   {% if error %}
@@ -17,41 +17,41 @@
   {% if account %}
     <div class="alert soft-success d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
       <div>
-        <div class="section-title">Create instance succeeded</div>
-        <div class="muted-small">The instance is registered, the container has been started, and Nginx has been updated.</div>
+        <div class="section-title">用户实例创建成功</div>
+        <div class="muted-small">实例已登记，容器已启动，Nginx 访问配置已更新。</div>
       </div>
-      <a class="btn btn-sm btn-oc-outline" href="/admin/users">View Users</a>
+      <a class="btn btn-sm btn-oc-outline" href="/admin/users">查看用户列表</a>
     </div>
 
     <div class="surface p-3 p-lg-4 mb-4">
       <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
         <div>
-          <div class="section-title">Account Details</div>
-          <div class="muted-small">Structured output for sharing with the user.</div>
+          <div class="section-title">账号信息</div>
+          <div class="muted-small">可提供给用户的结构化账号与访问详情。</div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
-          <a class="btn btn-sm btn-oc" href="{{ account.access_url }}" target="_blank" rel="noreferrer">Open Instance</a>
-          <a class="btn btn-sm btn-oc-outline" href="{{ account.admin_url }}" target="_blank" rel="noreferrer">Open Admin</a>
-          <a class="btn btn-sm btn-oc-outline" href="/admin/create-user/{{ account.user_id }}/account.csv">Download CSV</a>
+          <a class="btn btn-sm btn-oc" href="{{ account.access_url }}" target="_blank" rel="noreferrer">打开实例</a>
+          <a class="btn btn-sm btn-oc-outline" href="{{ account.admin_url }}" target="_blank" rel="noreferrer">打开管理页</a>
+          <a class="btn btn-sm btn-oc-outline" href="/admin/create-user/{{ account.user_id }}/account.csv">下载 CSV</a>
         </div>
       </div>
 
       <div class="row g-3 mb-3">
         <div class="col-md-4">
           <div class="metric">
-            <div class="metric-label">User ID</div>
+            <div class="metric-label">用户 ID</div>
             <div class="metric-value">{{ account.user_id }}</div>
           </div>
         </div>
         <div class="col-md-4">
           <div class="metric">
-            <div class="metric-label">Port</div>
+            <div class="metric-label">端口</div>
             <div class="metric-value">{{ account.port }}</div>
           </div>
         </div>
         <div class="col-md-4">
           <div class="metric">
-            <div class="metric-label">Basic Auth</div>
+            <div class="metric-label">访问认证</div>
             <div class="metric-value">{{ account.basic_auth_enabled }}</div>
           </div>
         </div>
@@ -60,19 +60,19 @@
       <div class="table-responsive mb-3">
         <table class="table mb-0 align-middle">
           <tbody>
-            <tr><th>Access URL</th><td><a href="{{ account.access_url }}" target="_blank" rel="noreferrer">{{ account.access_url }}</a></td></tr>
-            <tr><th>Admin URL</th><td><a href="{{ account.admin_url }}" target="_blank" rel="noreferrer">{{ account.admin_url }}</a></td></tr>
-            <tr><th>Container</th><td>{{ account.container_name }}</td></tr>
-            <tr><th>Basic Auth Username</th><td>{{ account.basic_auth_username or "-" }}</td></tr>
-            <tr><th>Basic Auth Password</th><td>{{ account.basic_auth_password or "-" }}</td></tr>
-            <tr><th>OpenClaw Token</th><td class="fw-semibold">{{ account.openclaw_token or "Token not generated yet" }}</td></tr>
+            <tr><th>访问地址</th><td><a href="{{ account.access_url }}" target="_blank" rel="noreferrer">{{ account.access_url }}</a></td></tr>
+            <tr><th>管理地址</th><td><a href="{{ account.admin_url }}" target="_blank" rel="noreferrer">{{ account.admin_url }}</a></td></tr>
+            <tr><th>容器名称</th><td>{{ account.container_name }}</td></tr>
+            <tr><th>认证用户名</th><td>{{ account.basic_auth_username or "-" }}</td></tr>
+            <tr><th>认证密码</th><td>{{ account.basic_auth_password or "-" }}</td></tr>
+            <tr><th>实例访问 Token</th><td class="fw-semibold">{{ account.openclaw_token or "暂未生成 Token" }}</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
-        <label class="form-label mb-0" for="account_csv">CSV Row</label>
-        <button class="btn btn-sm btn-oc-outline" type="button" onclick="navigator.clipboard.writeText(document.getElementById('account_csv').value)">Copy CSV</button>
+        <label class="form-label mb-0" for="account_csv">CSV 记录</label>
+        <button class="btn btn-sm btn-oc-outline" type="button" onclick="navigator.clipboard.writeText(document.getElementById('account_csv').value)">复制 CSV</button>
       </div>
       <textarea class="form-control" id="account_csv" rows="4" readonly>{{ account_csv }}</textarea>
     </div>
@@ -81,35 +81,35 @@
   <div class="row g-3">
     <div class="col-lg-5">
       <div class="surface p-3 p-lg-4">
-        <form method="post" action="/admin/create-user" onsubmit="const button=this.querySelector('[data-create-submit]'); if (button) { button.disabled = true; button.textContent = 'Creating...'; }">
-          <label class="form-label" for="user_id">User ID</label>
+        <form method="post" action="/admin/create-user" onsubmit="const button=this.querySelector('[data-create-submit]'); if (button) { button.disabled = true; button.textContent = '创建中...'; }">
+          <label class="form-label" for="user_id">用户 ID</label>
           <input class="form-control mb-3" id="user_id" name="user_id" value="{{ user_id }}" autocomplete="off" required>
 
-          <label class="form-label" for="basic_auth_enabled">Basic Auth</label>
+          <label class="form-label" for="basic_auth_enabled">访问认证</label>
           <select class="form-control mb-3" id="basic_auth_enabled" name="basic_auth_enabled">
-            <option value="true" {% if basic_auth_enabled != "false" %}selected{% endif %}>Enabled</option>
-            <option value="false" {% if basic_auth_enabled == "false" %}selected{% endif %}>Disabled</option>
+            <option value="true" {% if basic_auth_enabled != "false" %}selected{% endif %}>启用</option>
+            <option value="false" {% if basic_auth_enabled == "false" %}selected{% endif %}>禁用</option>
           </select>
 
-          <label class="form-label" for="basic_auth_password">Basic Auth Password</label>
+          <label class="form-label" for="basic_auth_password">访问认证密码</label>
           <input class="form-control mb-3" id="basic_auth_password" name="basic_auth_password" type="password" autocomplete="new-password">
 
-          <button class="btn btn-oc" type="submit" data-create-submit>Create Instance</button>
+          <button class="btn btn-oc" type="submit" data-create-submit>创建实例</button>
         </form>
         <div class="muted-small mt-3">
-          Password is always required for the instance-local /admin/ page. The Basic Auth switch only controls the main workspace URL. The create script will allocate the next available port, start the instance, update Nginx, and print the access details.
+          实例本地 /admin/ 页面始终需要认证密码。访问认证开关仅控制主工作区入口。创建脚本会自动分配可用端口、启动实例、更新 Nginx 并输出访问详情。
         </div>
       </div>
     </div>
 
     <div class="col-lg-7">
       <div class="surface p-3 p-lg-4 h-100">
-        <div class="section-title mb-2">Operational Notes</div>
-        <div class="muted-small mb-2">This page runs the existing create script on the manager host.</div>
+        <div class="section-title mb-2">操作说明</div>
+        <div class="muted-small mb-2">本页面会在管理主机上调用现有创建脚本。</div>
         <ul class="muted-small mb-0">
-          <li>Use one instance per submission; batch creation still belongs in the CSV scripts.</li>
-          <li>Check the command output for port, token, and Nginx reload status.</li>
-          <li>If Basic Auth is disabled, only the main workspace URL skips Basic Auth; the instance-local /admin/ page remains protected.</li>
+          <li>每次提交创建一个实例；批量创建仍使用 CSV 批处理脚本。</li>
+          <li>请关注命令输出中的端口、Token 和 Nginx reload 状态。</li>
+          <li>如果禁用访问认证，仅主工作区入口跳过 Basic Auth；实例本地 /admin/ 页面仍保持保护。</li>
         </ul>
       </div>
     </div>
@@ -117,7 +117,7 @@
 
   {% if result %}
     <details class="surface p-3 p-lg-4 mt-3">
-      <summary class="section-title">Script Output</summary>
+      <summary class="section-title">脚本输出</summary>
       <pre class="codebox mt-3 mb-0">{{ result }}</pre>
     </details>
   {% endif %}

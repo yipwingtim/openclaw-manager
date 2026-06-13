@@ -1,18 +1,18 @@
 {% extends "base.html" %}
-{% block title %}{{ user_id }} - OpenClaw Manager{% endblock %}
+{% block title %}{{ user_id }} - 实例管理 - 容器实例管理与运维平台{% endblock %}
 {% block nav_right %}
-  Signed in as {{ current_user }}{% if is_admin %} (admin){% endif %}
+  当前用户：{{ current_user }}{% if is_admin %}（管理员）{% endif %}
 {% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <div class="page-kicker">Instance Dashboard</div>
+      <div class="page-kicker">实例管理面板</div>
       <h1 class="page-title">{{ user_id }}</h1>
       <div class="page-subtitle">
         {% if instance_mode %}
-          Instance-local admin panel for device approval, file upload, and workspace downloads.
+          当前实例的自助管理页面，可进行设备审批、文件上传和工作区文件下载。
         {% else %}
-          Approve devices, upload files, and inspect the OpenClaw runtime.
+          查看实例运行状态，处理设备审批、文件上传和运行日志。
         {% endif %}
       </div>
     </div>
@@ -21,9 +21,9 @@
         <a class="btn btn-oc-outline" href="/admin/help">使用说明</a>
       {% endif %}
       {% if show_admin_links %}
-        <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+        <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
       {% endif %}
-      <a class="btn btn-oc-outline" href="/">Switch User</a>
+      <a class="btn btn-oc-outline" href="/">切换用户</a>
     </div>
   </div>
 
@@ -32,7 +32,7 @@
       <div class="row g-3">
         <div class="col-12 col-md-4">
           <div class="metric">
-            <div class="metric-label">Status</div>
+            <div class="metric-label">运行状态</div>
             <div class="metric-value">
               {% if status.startswith("Up") %}
                 <span class="badge-status badge-running">{{ status }}</span>
@@ -46,18 +46,18 @@
         </div>
         <div class="col-6 col-md-3">
           <div class="metric">
-            <div class="metric-label">Port</div>
-            <div class="metric-value">{{ port or "Unknown" }}</div>
+            <div class="metric-label">访问端口</div>
+            <div class="metric-value">{{ port or "未知" }}</div>
           </div>
         </div>
         <div class="col-6 col-md-5">
           <div class="metric">
-            <div class="metric-label">Access URL</div>
+            <div class="metric-label">访问地址</div>
             <div class="metric-value">
               {% if access_url %}
                 <a href="{{ access_url }}" target="_blank" rel="noreferrer">{{ access_url }}</a>
               {% else %}
-                Unknown
+                未知
               {% endif %}
             </div>
           </div>
@@ -69,19 +69,19 @@
       <div class="surface p-3 p-lg-4 mb-3">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
           <div>
-            <div class="section-title">Device Approval</div>
-            <div class="muted-small">Refresh the device cache or approve the most recent request for this instance.</div>
+            <div class="section-title">设备审批</div>
+            <div class="muted-small">刷新设备请求缓存，或审批当前实例最近一次设备访问请求。</div>
           </div>
         </div>
         <div class="action-panel">
           <div class="d-flex gap-2 flex-wrap">
             {% if can_manage %}
               <form method="post" action="{{ approve_url }}">
-                <button type="submit" class="btn btn-oc">{% if is_admin %}Approve Latest Device{% else %}Approve My Device{% endif %}</button>
+                <button type="submit" class="btn btn-oc">{% if is_admin %}审批最新设备{% else %}审批我的设备{% endif %}</button>
               </form>
             {% endif %}
             <form method="post" action="{{ refresh_url }}">
-              <button type="submit" class="btn btn-oc-outline">Refresh Device Cache</button>
+              <button type="submit" class="btn btn-oc-outline">刷新设备缓存</button>
             </form>
           </div>
         </div>
@@ -91,14 +91,14 @@
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
-              <div class="section-title">Files</div>
-              <div class="muted-small">Upload files into {{ container_upload_dir }}. Max file size: {{ max_upload_mb }} MB.</div>
+              <div class="section-title">文件上传</div>
+              <div class="muted-small">上传文件到实例目录 {{ container_upload_dir }}，单个文件最大 {{ max_upload_mb }} MB。</div>
             </div>
           </div>
           <form method="post" action="{{ upload_url }}" enctype="multipart/form-data" class="mb-3">
             <div class="input-group">
               <input class="form-control" type="file" name="file" required>
-              <button class="btn btn-oc" type="submit">Upload</button>
+              <button class="btn btn-oc" type="submit">上传</button>
             </div>
           </form>
             {% if uploaded_files %}
@@ -106,9 +106,9 @@
                 <table class="table table-sm align-middle mb-0">
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Size</th>
-                      <th>Container Path</th>
+                      <th>文件名</th>
+                      <th>大小</th>
+                      <th>容器路径</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -123,18 +123,18 @@
                 </table>
               </div>
             {% else %}
-              <div class="muted-small">No uploaded files.</div>
+              <div class="muted-small">暂无已上传文件。</div>
             {% endif %}
         </div>
 
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
-              <div class="section-title">Downloadable Files</div>
-              <div class="muted-small">Top-level files in workspace, workspaces, and uploads. Allowed types: {{ download_extensions }}.</div>
-              <div class="muted-small mt-1">Protected files such as {{ protected_filenames }} are downloadable but cannot be deleted here.</div>
+              <div class="section-title">文件下载</div>
+              <div class="muted-small">展示 workspace、workspaces 和 uploads 顶层目录中的可下载文件。允许类型：{{ download_extensions }}。</div>
+              <div class="muted-small mt-1">受保护文件（如 {{ protected_filenames }}）允许下载，但不能在此页面删除。</div>
               {% if instance_mode %}
-                <div class="muted-small mt-1">Direct links can use <code>/admin/files/filename.ext</code> when the filename is unique.</div>
+                <div class="muted-small mt-1">文件名唯一时，可使用 <code>/admin/files/filename.ext</code> 直接下载。</div>
               {% endif %}
             </div>
           </div>
@@ -143,12 +143,12 @@
               <table class="table table-sm align-middle mb-0">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Source</th>
-                    <th>Size</th>
-                    <th>Container Path</th>
-                    <th>Download</th>
-                    <th>Delete</th>
+                    <th>文件名</th>
+                    <th>来源</th>
+                    <th>大小</th>
+                    <th>容器路径</th>
+                    <th>下载</th>
+                    <th>删除</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -160,24 +160,24 @@
                       <td>{{ file.container_path }}</td>
                       <td>
                         {% if instance_mode %}
-                          <a class="btn btn-sm btn-oc-outline" href="/admin/files/{{ file.root }}/{{ file.relative_path }}">Download</a>
+                          <a class="btn btn-sm btn-oc-outline" href="/admin/files/{{ file.root }}/{{ file.relative_path }}">下载</a>
                         {% else %}
-                          <a class="btn btn-sm btn-oc-outline" href="{{ url_for(download_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}">Download</a>
+                          <a class="btn btn-sm btn-oc-outline" href="{{ url_for(download_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}">下载</a>
                         {% endif %}
                       </td>
                       <td>
                         {% if file.can_delete %}
                           {% if instance_mode %}
                             <form method="post" action="/admin/files/{{ file.root }}/{{ file.relative_path }}/delete">
-                              <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                              <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
                             </form>
                           {% else %}
                             <form method="post" action="{{ url_for(delete_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}">
-                              <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                              <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
                             </form>
                           {% endif %}
                         {% else %}
-                          <span class="badge-status badge-neutral">Protected</span>
+                          <span class="badge-status badge-neutral">受保护</span>
                         {% endif %}
                       </td>
                     </tr>
@@ -186,7 +186,7 @@
               </table>
             </div>
           {% else %}
-            <div class="muted-small">No downloadable files found yet.</div>
+            <div class="muted-small">暂无可下载文件。</div>
           {% endif %}
         </div>
       {% endif %}
@@ -196,8 +196,8 @@
       <div class="surface p-3 p-lg-4 mb-3">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
           <div>
-            <div class="section-title">Device Cache</div>
-            <div class="muted-small">Cached device requests discovered from this instance.</div>
+            <div class="section-title">设备请求缓存</div>
+            <div class="muted-small">展示当前实例发现的设备访问请求缓存。</div>
           </div>
         </div>
           {% if result %}
@@ -212,8 +212,8 @@
       <div class="surface p-3 p-lg-4">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
           <div>
-            <div class="section-title">Recent Logs</div>
-            <div class="muted-small">Latest container output for quick troubleshooting.</div>
+            <div class="section-title">最近日志</div>
+            <div class="muted-small">展示最近容器输出，便于快速排查运行问题。</div>
           </div>
         </div>
         <pre class="codebox mb-0">{{ recent_logs }}</pre>

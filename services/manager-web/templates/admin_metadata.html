@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Metadata - OpenClaw Manager{% endblock %}
+{% block title %}元数据管理 - 容器实例管理与运维平台{% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <div class="page-kicker">Metadata Store</div>
-      <h1 class="page-title">SQLite Metadata</h1>
-      <div class="page-subtitle">Inspect persisted instance metadata and recent operation records.</div>
+      <div class="page-kicker">元数据存储</div>
+      <h1 class="page-title">SQLite 元数据管理</h1>
+      <div class="page-subtitle">查看持久化实例元数据、端口记录、凭据引用和近期操作记录。</div>
     </div>
-    <a class="btn btn-oc-outline" href="/admin/users">All Users</a>
+    <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
   </div>
 
   {% if error %}
@@ -15,15 +15,15 @@
   {% endif %}
 
   <div class="surface p-3 p-lg-4 mb-3">
-    <div class="section-title mb-2">Database</div>
+    <div class="section-title mb-2">数据库文件</div>
     <div class="muted-small">{{ db_file }}</div>
   </div>
 
   {% if not error and (counts.instances | default(0)) == 0 and (counts.operation_records | default(0)) == 0 %}
     <div class="alert soft-warning mb-3">
-      <div class="section-title">Metadata database is empty</div>
+      <div class="section-title">元数据数据库为空</div>
       <div class="muted-small mb-2">
-        Existing instances are still recorded in users.csv and runtime files. Bootstrap SQLite from users.csv before using this page as a source of truth.
+        现有实例仍记录在 users.csv 和运行时文件中。将本页面作为数据源前，请先从 users.csv 初始化 SQLite。
       </div>
       <pre class="codebox mb-0">cd /data/docker/openclaw-manager
 ./scripts/import_users_csv_to_metadata_db.sh</pre>
@@ -33,25 +33,25 @@
   <div class="row g-3 mb-3">
     <div class="col-md-3">
       <div class="metric">
-        <div class="metric-label">Instances</div>
+        <div class="metric-label">实例</div>
         <div class="metric-value">{{ counts.instances | default(0) }}</div>
       </div>
     </div>
     <div class="col-md-3">
       <div class="metric">
-        <div class="metric-label">Ports</div>
+        <div class="metric-label">端口</div>
         <div class="metric-value">{{ counts.ports | default(0) }}</div>
       </div>
     </div>
     <div class="col-md-3">
       <div class="metric">
-        <div class="metric-label">Credentials</div>
+        <div class="metric-label">凭据</div>
         <div class="metric-value">{{ counts.instance_credentials | default(0) }}</div>
       </div>
     </div>
     <div class="col-md-3">
       <div class="metric">
-        <div class="metric-label">Operations</div>
+        <div class="metric-label">操作记录</div>
         <div class="metric-value">{{ counts.operation_records | default(0) }}</div>
       </div>
     </div>
@@ -59,20 +59,20 @@
 
   <div class="surface mb-3">
     <div class="p-3 p-lg-4 border-bottom">
-      <div class="section-title">Recent Instances</div>
-      <div class="muted-small">Latest 20 records from the metadata database.</div>
+      <div class="section-title">最近实例</div>
+      <div class="muted-small">展示元数据数据库中的最近 20 条实例记录。</div>
     </div>
     {% if instances %}
       <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
           <thead>
             <tr>
-              <th>User</th>
-              <th>Status</th>
-              <th>Port</th>
-              <th>Version</th>
-              <th>Basic Auth</th>
-              <th>Updated</th>
+              <th>用户</th>
+              <th>状态</th>
+              <th>端口</th>
+              <th>版本</th>
+              <th>访问认证</th>
+              <th>更新时间</th>
             </tr>
           </thead>
           <tbody>
@@ -82,7 +82,7 @@
                 <td><span class="badge-status badge-neutral">{{ instance.status }}</span></td>
                 <td>{{ instance.port or "-" }}</td>
                 <td>{{ instance.openclaw_version or "-" }}</td>
-                <td>{{ "Enabled" if instance.basic_auth_enabled else "Disabled" }}</td>
+                <td>{{ "已启用" if instance.basic_auth_enabled else "已禁用" }}</td>
                 <td>{{ instance.updated_at }}</td>
               </tr>
             {% endfor %}
@@ -90,26 +90,26 @@
         </table>
       </div>
     {% else %}
-      <div class="p-4 muted-small">No instance metadata yet.</div>
+      <div class="p-4 muted-small">暂无实例元数据。</div>
     {% endif %}
   </div>
 
   <div class="surface">
     <div class="p-3 p-lg-4 border-bottom">
-      <div class="section-title">Recent Operations</div>
-      <div class="muted-small">Latest 20 operation records from SQLite.</div>
+      <div class="section-title">最近操作</div>
+      <div class="muted-small">展示 SQLite 中最近 20 条操作记录。</div>
     </div>
     {% if operations %}
       <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>User</th>
-              <th>Status</th>
-              <th>Message</th>
+              <th>时间</th>
+              <th>操作人</th>
+              <th>动作</th>
+              <th>用户</th>
+              <th>状态</th>
+              <th>消息</th>
             </tr>
           </thead>
           <tbody>
@@ -127,7 +127,7 @@
         </table>
       </div>
     {% else %}
-      <div class="p-4 muted-small">No operation records yet.</div>
+      <div class="p-4 muted-small">暂无操作记录。</div>
     {% endif %}
   </div>
 {% endblock %}

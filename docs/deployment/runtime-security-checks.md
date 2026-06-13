@@ -13,6 +13,9 @@
 - `openclaw-nginx` 是否同时连接 `agent-net` 和 `manager-net`
 - 用户实例容器是否没有连接 `manager-net`
 - 从 Nginx 容器内部不带 token 直连管理路由是否被 `manager-web` 返回 `403`
+- `model-proxy` token 目录是否存在
+- 每个实例级 `.token` 是否有对应的非空 `.models` 模型白名单
+- `openclaw-model-proxy` 容器是否连接 `agent-net`
 
 该脚本检查部署和网络安全状态，不替代 `scripts/check_metadata_consistency.py`。
 
@@ -41,6 +44,8 @@ OPENCLAW_INTERNAL_TOKEN=
 NGINX_CONF_DIR=/data/docker/nginx/conf
 NGINX_CONTAINER_NAME=openclaw-nginx
 MANAGER_WEB_CONTAINER_NAME=openclaw-manager-web
+MODEL_PROXY_CONTAINER_NAME=openclaw-model-proxy
+MODEL_PROXY_TOKEN_DIR=/data/docker/openclaw-public/model-proxy-tokens
 USER_CONTAINER_PREFIX=openclaw_
 ```
 
@@ -51,6 +56,7 @@ USER_CONTAINER_PREFIX=openclaw_
 - 首次部署完成后
 - 修改 Nginx 配置后
 - 修改 `OPENCLAW_INTERNAL_TOKEN` 后
+- 修改 model-proxy token 或 `.models` 白名单后
 - 重建 `manager-web` 或 `openclaw-nginx` 后
 - 批量创建或恢复用户实例后
 

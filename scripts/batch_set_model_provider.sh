@@ -93,6 +93,7 @@ set_model_provider() {
   local proxy_base_url="${MODEL_PROXY_PUBLIC_BASE_URL:-${model_base_url:-http://openclaw-model-proxy:8081/v1}}"
   local token_dir="${MODEL_PROXY_TOKEN_DIR:-/data/docker/openclaw-public/model-proxy-tokens}"
   local token_file="$token_dir/${user_id}.token"
+  local models_file="$token_dir/${user_id}.models"
   local proxy_token
 
   mkdir -p "$token_dir"
@@ -109,6 +110,8 @@ PY
     printf '%s\n' "$proxy_token" > "$token_file"
   fi
   chmod 600 "$token_file"
+  printf '%s\n' "$model_short_id" > "$models_file"
+  chmod 600 "$models_file"
 
   provider_json=$(python3 - "$proxy_base_url" "$proxy_token" "$model_short_id" "$model_alias" <<'PY'
 import json

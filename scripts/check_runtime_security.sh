@@ -84,6 +84,8 @@ OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/data/docker/nginx/conf}"
 NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
 MANAGER_WEB_CONTAINER_NAME="${MANAGER_WEB_CONTAINER_NAME:-openclaw-manager-web}"
+MODEL_PROXY_CONTAINER_NAME="${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
+MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
 
 if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
@@ -120,6 +122,30 @@ else
   error "Nginx conf dir missing: $NGINX_CONF_DIR"
 fi
 
+if [ -d "$MODEL_PROXY_TOKEN_DIR" ]; then
+  ok "model proxy token dir exists: $MODEL_PROXY_TOKEN_DIR"
+  model_proxy_tokens="$(find "$MODEL_PROXY_TOKEN_DIR" -maxdepth 1 -type f -name '*.token' 2>/dev/null | sort || true)"
+  if [ -n "$model_proxy_tokens" ]; then
+    while IFS= read -r token_file; do
+      user_id="$(basename "$token_file" .token)"
+      models_file="$MODEL_PROXY_TOKEN_DIR/${user_id}.models"
+      if [ -s "$models_file" ]; then
+        ok "model allowlist exists: $models_file"
+      elif [ -f "$models_file" ]; then
+        error "model allowlist is empty: $models_file"
+      else
+        error "model allowlist missing for token: $token_file"
+      fi
+    done <<EOF
+$model_proxy_tokens
+EOF
+  else
+    warn "no model proxy token files found in: $MODEL_PROXY_TOKEN_DIR"
+  fi
+else
+  warn "model proxy token dir missing: $MODEL_PROXY_TOKEN_DIR"
+fi
+
 if has_cmd docker; then
   if docker inspect "$MANAGER_WEB_CONTAINER_NAME" >/dev/null 2>&1; then
     ok "container exists: $MANAGER_WEB_CONTAINER_NAME"
@@ -151,6 +177,17 @@ if has_cmd docker; then
     fi
   else
     warn "container not found: $NGINX_CONTAINER_NAME"
+  fi
+
+  if docker inspect "$MODEL_PROXY_CONTAINER_NAME" >/dev/null 2>&1; then
+    ok "container exists: $MODEL_PROXY_CONTAINER_NAME"
+    if container_has_network "$MODEL_PROXY_CONTAINER_NAME" agent-net; then
+      ok "$MODEL_PROXY_CONTAINER_NAME is attached to agent-net"
+    else
+      error "$MODEL_PROXY_CONTAINER_NAME is not attached to agent-net"
+    fi
+  else
+    warn "container not found: $MODEL_PROXY_CONTAINER_NAME"
   fi
 
   user_containers="$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "^${USER_CONTAINER_PREFIX}" || true)"

@@ -558,6 +558,8 @@ MODEL_PROXY_UPSTREAM_API_KEY=xxxxxxxx
 
 启用后，实例模型配置会写入 `MODEL_PROXY_PUBLIC_BASE_URL` 和实例级 token；真实上游 URL/API Key 不再写入用户实例。未来如改用独立 API 网关，可将 `MODEL_PROXY_PUBLIC_BASE_URL` 指向外部网关地址，并由外部网关完成鉴权、转发、限流和审计。
 
+`model-proxy` 还会按实例 token 读取 `<user_id>.models` 白名单，限制 `/v1/models` 可见模型和 chat/completions 等请求可调用模型，避免上游 key 的其他模型权限被用户实例直接使用。
+
 详细部署说明见 [Model Proxy Deployment / 模型代理部署](docs/deployment/model-proxy.md)。
 
 配置完成后：

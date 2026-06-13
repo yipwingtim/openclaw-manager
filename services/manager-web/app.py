@@ -694,12 +694,14 @@ def render_user_dashboard(user_id, instance_mode=False):
         approve_url = "/admin/approve-latest"
         refresh_url = "/admin/refresh-devices"
         upload_url = "/admin/upload"
+        wechat_bind_url = "/admin/wechat-bind-url"
         download_endpoint = ""
         delete_endpoint = ""
     else:
         approve_url = url_for("approve_latest", user_id=user_id)
         refresh_url = url_for("refresh_devices", user_id=user_id)
         upload_url = url_for("upload_file", user_id=user_id)
+        wechat_bind_url = url_for("user_wechat_bind_url", user_id=user_id)
         download_endpoint = "download_workspace_file"
         delete_endpoint = "delete_workspace_file"
 
@@ -726,24 +728,70 @@ def render_user_dashboard(user_id, instance_mode=False):
         approve_url=approve_url,
         refresh_url=refresh_url,
         upload_url=upload_url,
+        wechat_bind_url=wechat_bind_url,
         download_endpoint=download_endpoint,
         delete_endpoint=delete_endpoint,
+        wechat_url=request.args.get("wechat_url", ""),
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )
 
 
-def redirect_to_user_dashboard(user_id, instance_mode=False, result="", error=""):
+def redirect_to_user_dashboard(user_id, instance_mode=False, result="", error="", wechat_url=""):
     values = {}
     if result:
         values["result"] = result
     if error:
         values["error"] = error
+    if wechat_url:
+        values["wechat_url"] = wechat_url
 
     if instance_mode:
         query = urlencode(values)
         return redirect("/admin/" + (f"?{query}" if query else ""))
     return redirect(url_for("user_detail", user_id=user_id, **values))
+
+
+def extract_wechat_bind_url(output):
+    match = re.search(r"https://liteapp\.weixin\.qq\.com/q/[^\s\"'<>]+", output or "")
+    if not match:
+        return ""
+    return match.group(0).strip()
+
+
+def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
+    container_name = f"openclaw_{user_id}"
+    if get_container_status(user_id) == "STOPPED":
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="实例容器未运行，无法生成微信绑定链接。")
+
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            container_name,
+            "sh",
+            "-lc",
+            "timeout 60s npx -y @tencent-weixin/openclaw-weixin-cli install",
+        ],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=75,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    bind_url = extract_wechat_bind_url(output)
+    output_preview = output[-500:] if output else "无输出"
+
+    if bind_url:
+        message = "微信绑定链接已生成，请复制后在浏览器中打开并按页面提示完成绑定。"
+        message += persist_operation_metadata("generate_wechat_bind_url", user_id=user_id, message="wechat bind url generated")
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message, wechat_url=bind_url)
+
+    message = f"未能从命令输出中提取微信绑定链接。命令输出摘要：{output_preview}"
+    if result.returncode != 0:
+        message = f"微信插件命令执行失败或超时。\n\n{message}"
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=message)
 
 
 def summarize_approval_output(output):
@@ -1237,6 +1285,14 @@ def instance_upload_file():
     return upload_file_for_user(user_id, instance_mode=True)
 
 
+@app.post("/instance-admin/wechat-bind-url")
+def instance_wechat_bind_url():
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return generate_wechat_bind_url_for_user(user_id, instance_mode=True)
+
+
 @app.get("/instance-admin/files/<root_key>/<path:relative_path>")
 def instance_download_workspace_file(root_key, relative_path):
     user_id = get_instance_user()
@@ -1396,6 +1452,23 @@ def upload_file(user_id):
         return denied
 
     return upload_file_for_user(user_id)
+
+
+@app.post("/users/<user_id>/wechat-bind-url")
+def user_wechat_bind_url(user_id):
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    denied = require_instance_access(user_id)
+    if denied:
+        return denied
+
+    return generate_wechat_bind_url_for_user(user_id)
 
 
 @app.get("/users/<user_id>/files/<root_key>/<path:relative_path>")

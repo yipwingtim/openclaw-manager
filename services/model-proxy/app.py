@@ -1,4 +1,5 @@
 import hmac
+import json
 import os
 from pathlib import Path
 from urllib.parse import urljoin
@@ -20,6 +21,12 @@ HOP_BY_HOP_HEADERS = {
     "trailers",
     "transfer-encoding",
     "upgrade",
+}
+MODEL_GATED_PATHS = {
+    "chat/completions",
+    "completions",
+    "embeddings",
+    "responses",
 }
 
 app = Flask(__name__)
@@ -57,6 +64,65 @@ def authenticate():
         if hmac.compare_digest(provided, token):
             return user_id
     return None
+
+
+def allowed_models_for_user(user_id):
+    model_file = TOKEN_DIR / f"{user_id}.models"
+    if not model_file.is_file():
+        return set()
+    return {
+        line.strip()
+        for line in model_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+
+def request_model():
+    if not request.is_json:
+        return ""
+    payload = request.get_json(silent=True) or {}
+    model = payload.get("model")
+    return model.strip() if isinstance(model, str) else ""
+
+
+def enforce_model_allowlist(user_id, path):
+    allowed_models = allowed_models_for_user(user_id)
+    if not allowed_models:
+        return jsonify({"error": "no models are allowed for this model proxy token"}), 403
+
+    normalized_path = path.strip("/")
+    if request.method in {"POST", "PUT", "PATCH"} and normalized_path in MODEL_GATED_PATHS:
+        model = request_model()
+        if not model:
+            return jsonify({"error": "request model is required"}), 400
+        if model not in allowed_models:
+            return jsonify({"error": "model is not allowed for this model proxy token", "model": model}), 403
+
+    return None
+
+
+def filter_models_response(user_id, upstream_response):
+    allowed_models = allowed_models_for_user(user_id)
+    if not allowed_models:
+        return jsonify({"object": "list", "data": []}), upstream_response.status_code
+
+    try:
+        payload = upstream_response.json()
+    except ValueError:
+        return Response(
+            upstream_response.iter_content(chunk_size=8192),
+            status=upstream_response.status_code,
+            headers=response_headers(upstream_response),
+        )
+
+    data = payload.get("data")
+    if isinstance(data, list):
+        payload["data"] = [
+            item
+            for item in data
+            if isinstance(item, dict) and item.get("id") in allowed_models
+        ]
+    return jsonify(payload), upstream_response.status_code
 
 
 def upstream_headers(user_id):
@@ -103,6 +169,10 @@ def proxy(path=""):
     if not user_id:
         return jsonify({"error": "invalid model proxy token"}), 401
 
+    allowlist_error = enforce_model_allowlist(user_id, path)
+    if allowlist_error is not None:
+        return allowlist_error
+
     upstream_url = urljoin(f"{UPSTREAM_BASE_URL}/", path)
     if request.query_string:
         upstream_url = f"{upstream_url}?{request.query_string.decode('utf-8', errors='ignore')}"
@@ -119,6 +189,9 @@ def proxy(path=""):
     except requests.RequestException as exc:
         app.logger.warning("upstream request failed for user=%s path=/v1/%s: %s", user_id, path, exc)
         return jsonify({"error": "upstream request failed"}), 502
+
+    if request.method == "GET" and path.strip("/") == "models":
+        return filter_models_response(user_id, upstream_response)
 
     return Response(
         upstream_response.iter_content(chunk_size=8192),

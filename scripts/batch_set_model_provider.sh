@@ -2,6 +2,17 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+MANAGER_ENV_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+
+if [ -f "$MANAGER_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$MANAGER_ENV_FILE"
+  set +a
+fi
+
 INPUT_CSV="${1:-}"
 OUTPUT_CSV="${2:-}"
 
@@ -10,6 +21,9 @@ if [ "$#" -ne 2 ]; then
   echo
   echo "Input CSV columns:"
   echo "  user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias"
+  echo
+  echo "model_base_url and model_api_key are kept for backward-compatible CSV input."
+  echo "Instances receive MODEL_PROXY_PUBLIC_BASE_URL and an instance-scoped model proxy token."
   exit 1
 fi
 
@@ -70,14 +84,33 @@ set_model_provider() {
   local model_provider_id="$2"
   local model_id="$3"
   local model_base_url="$4"
-  local model_api_key="$5"
+  local _model_api_key="$5"
   local model_alias="$6"
   local container_name="openclaw_${user_id}"
   local model_short_id="${model_id#${model_provider_id}/}"
   local primary_model="$model_id"
   local provider_json
+  local proxy_base_url="${MODEL_PROXY_PUBLIC_BASE_URL:-${model_base_url:-http://openclaw-model-proxy:8081/v1}}"
+  local token_dir="${MODEL_PROXY_TOKEN_DIR:-/data/docker/openclaw-public/model-proxy-tokens}"
+  local token_file="$token_dir/${user_id}.token"
+  local proxy_token
 
-  provider_json=$(python3 - "$model_base_url" "$model_api_key" "$model_short_id" "$model_alias" <<'PY'
+  mkdir -p "$token_dir"
+  if [ -s "$token_file" ]; then
+    proxy_token="$(tr -d '\r\n' < "$token_file")"
+  else
+    proxy_token="$(python3 - <<'PY'
+import secrets
+
+print("ocm_" + secrets.token_urlsafe(32))
+PY
+)"
+    umask 077
+    printf '%s\n' "$proxy_token" > "$token_file"
+  fi
+  chmod 600 "$token_file"
+
+  provider_json=$(python3 - "$proxy_base_url" "$proxy_token" "$model_short_id" "$model_alias" <<'PY'
 import json
 import sys
 
@@ -147,7 +180,7 @@ while IFS=, read -r raw_user_id raw_provider_id raw_model_id raw_base_url raw_ap
     continue
   fi
 
-  if [ -z "$model_provider_id" ] || [ -z "$model_id" ] || [ -z "$model_base_url" ] || [ -z "$model_api_key" ]; then
+  if [ -z "$model_provider_id" ] || [ -z "$model_id" ]; then
     echo "[WARN] Skip incomplete model config at line $line_no: $user_id" >&2
     write_output_row "$user_id" "$container_name" "$model_provider_id" "$model_id" "$model_base_url" "invalid_config" "Missing required model config"
     continue

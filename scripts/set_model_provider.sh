@@ -7,30 +7,50 @@ MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTANCE_ID="${1:?请提供实例 ID，例如：xinxizhongxin}"
 CONTAINER_NAME="openclaw_${INSTANCE_ID}"
 
-ENV_FILE="$MANAGER_DIR/config/model-providers.env"
+MANAGER_ENV_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+PROVIDER_ENV_FILE="$MANAGER_DIR/config/model-providers.env"
 
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "错误：未找到配置文件：$ENV_FILE"
+if [[ ! -f "$PROVIDER_ENV_FILE" ]]; then
+  echo "错误：未找到配置文件：$PROVIDER_ENV_FILE"
   exit 1
 fi
 
 set -a
-source "$ENV_FILE"
+if [[ -f "$MANAGER_ENV_FILE" ]]; then
+  source "$MANAGER_ENV_FILE"
+fi
+source "$PROVIDER_ENV_FILE"
 set +a
 
 MODEL_PROVIDER_ID="${MODEL_PROVIDER_ID:?缺少 MODEL_PROVIDER_ID}"
 MODEL_ID="${MODEL_ID:?缺少 MODEL_ID}"
-MODEL_BASE_URL="${MODEL_BASE_URL:?缺少 MODEL_BASE_URL}"
-MODEL_API_KEY="${MODEL_API_KEY:?缺少 MODEL_API_KEY}"
 MODEL_ALIAS="${MODEL_ALIAS:-$MODEL_ID}"
+MODEL_PROXY_PUBLIC_BASE_URL="${MODEL_PROXY_PUBLIC_BASE_URL:-${MODEL_BASE_URL:-http://openclaw-model-proxy:8081/v1}}"
+MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-/data/docker/openclaw-public/model-proxy-tokens}"
 
 MODEL_SHORT_ID="${MODEL_ID#${MODEL_PROVIDER_ID}/}"
 PRIMARY_MODEL="$MODEL_ID"
+MODEL_PROXY_TOKEN_FILE="$MODEL_PROXY_TOKEN_DIR/${INSTANCE_ID}.token"
+
+mkdir -p "$MODEL_PROXY_TOKEN_DIR"
+if [[ -s "$MODEL_PROXY_TOKEN_FILE" ]]; then
+  MODEL_PROXY_TOKEN="$(tr -d '\r\n' < "$MODEL_PROXY_TOKEN_FILE")"
+else
+  MODEL_PROXY_TOKEN="$(python3 - <<'PY'
+import secrets
+
+print("ocm_" + secrets.token_urlsafe(32))
+PY
+)"
+  umask 077
+  printf '%s\n' "$MODEL_PROXY_TOKEN" > "$MODEL_PROXY_TOKEN_FILE"
+fi
+chmod 600 "$MODEL_PROXY_TOKEN_FILE"
 
 PROVIDER_JSON=$(cat <<EOF
 {
-  "baseUrl": "$MODEL_BASE_URL",
-  "apiKey": "$MODEL_API_KEY",
+  "baseUrl": "$MODEL_PROXY_PUBLIC_BASE_URL",
+  "apiKey": "$MODEL_PROXY_TOKEN",
   "api": "openai-completions",
   "models": [
     {
@@ -66,3 +86,5 @@ echo "重启容器使配置生效 ..."
 docker restart "$CONTAINER_NAME"
 
 echo "完成。容器已重启：$CONTAINER_NAME"
+echo "模型代理地址：$MODEL_PROXY_PUBLIC_BASE_URL"
+echo "实例模型 token 文件：$MODEL_PROXY_TOKEN_FILE"

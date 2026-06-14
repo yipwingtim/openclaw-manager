@@ -35,6 +35,40 @@
     </div>
   </div>
 
+  <div class="surface p-3 mb-3">
+    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+      <div>
+        <div class="section-title">批量安装 Skill</div>
+        <div class="muted-small">为多个运行中的实例安装预设 Skill。只允许选择配置白名单中的 Skill。</div>
+      </div>
+    </div>
+    {% if skill_presets %}
+      <form method="post" action="/admin/users/bulk-skill-install" onsubmit="return confirm('确认批量安装所选 Skill？该操作会在每个目标实例容器中执行安装命令。');">
+        <div class="row g-3">
+          <div class="col-12 col-lg-4">
+            <label class="form-label fw-semibold" for="skill_id">Skill</label>
+            <select class="form-select" id="skill_id" name="skill_id" required>
+              {% for skill in skill_presets %}
+                <option value="{{ skill }}">{{ skill }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-lg-8">
+            <label class="form-label fw-semibold" for="user_ids">目标实例</label>
+            <textarea class="form-control" id="user_ids" name="user_ids" rows="3" required>{% for user in users if user.status.startswith("Up") %}{{ user.user_id }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea>
+            <div class="muted-small mt-2">默认填入当前筛选结果中的运行中实例，可按需删除或补充；支持换行、空格或逗号分隔。</div>
+          </div>
+        </div>
+        <div class="mt-3">
+          <button class="btn btn-oc" type="submit">批量安装 Skill</button>
+        </div>
+      </form>
+    {% else %}
+      <div class="alert soft-warning mb-0">未配置 Skill 白名单。请在 <code>MANAGER_SKILL_PRESETS</code> 中配置允许安装的 Skill。</div>
+    {% endif %}
+  </div>
+
   <div class="surface">
       {% if users %}
         <div class="table-responsive">

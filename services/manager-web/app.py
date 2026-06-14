@@ -25,7 +25,9 @@ NGINX_CONTAINER_NAME = os.environ.get("NGINX_CONTAINER_NAME", "openclaw-nginx")
 OPENCLAW_INTERNAL_TOKEN = os.environ.get("OPENCLAW_INTERNAL_TOKEN", "").strip()
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
+SKILL_INSTALL_TIMEOUT = int(os.environ.get("MANAGER_SKILL_INSTALL_TIMEOUT", "180"))
 CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
 WORKSPACE_FILE_ROOTS = {
     "workspace": ("OpenClaw Workspace", "workspace", "/home/node/.openclaw/workspace"),
@@ -83,6 +85,22 @@ def validate_user_id(user_id):
     if not USER_ID_RE.fullmatch(user_id):
         return None
     return user_id
+
+
+def configured_skill_presets():
+    raw = os.environ.get("MANAGER_SKILL_PRESETS", "")
+    presets = []
+    seen = set()
+    for item in re.split(r"[,\n]", raw):
+        skill_id = item.strip()
+        if not skill_id or skill_id in seen:
+            continue
+        if not SKILL_ID_RE.fullmatch(skill_id):
+            app.logger.warning("Skip invalid MANAGER_SKILL_PRESETS entry: %s", skill_id)
+            continue
+        seen.add(skill_id)
+        presets.append(skill_id)
+    return presets
 
 
 def get_user_dir(user_id):
@@ -602,6 +620,28 @@ def get_container_logs(user_id, tail=120):
     return output or "No recent logs."
 
 
+def install_skill_for_user(user_id, skill_id):
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return 1, f"User not found: {user_id}"
+
+    status = get_container_status(user_id)
+    if not status.startswith("Up"):
+        return 1, f"Instance is not running: {status}"
+
+    container_name = f"openclaw_{user_id}"
+    result = subprocess.run(
+        ["docker", "exec", container_name, "openclaw", "skills", "install", skill_id],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=SKILL_INSTALL_TIMEOUT,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    return result.returncode, output
+
+
 def run_instance_lifecycle_action(user_id, action):
     user_dir = get_user_dir(user_id)
     if not user_dir.is_dir():
@@ -944,6 +984,7 @@ def admin_users():
         "admin_users.html",
         users=list_active_users(status_filter),
         status_filter=status_filter,
+        skill_presets=configured_skill_presets(),
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )
@@ -1222,6 +1263,47 @@ def admin_instance_lifecycle(user_id):
     output += persist_lifecycle_metadata(user_id, action, output)
     clipped_output = output[-1200:] if output else ""
     return redirect(url_for("admin_users", result=f"{label} completed: {user_id}\n{clipped_output}"))
+
+
+@app.post("/admin/users/bulk-skill-install")
+def admin_bulk_skill_install():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    presets = configured_skill_presets()
+    skill_id = (request.form.get("skill_id") or "").strip()
+    if skill_id not in presets:
+        return redirect(url_for("admin_users", error="Invalid or unconfigured skill preset."))
+
+    raw_user_ids = request.form.get("user_ids", "")
+    user_ids = []
+    seen = set()
+    for item in re.split(r"[\s,]+", raw_user_ids):
+        user_id = validate_user_id(item)
+        if not user_id or user_id in seen:
+            continue
+        seen.add(user_id)
+        user_ids.append(user_id)
+
+    if not user_ids:
+        return redirect(url_for("admin_users", error="No valid user ids selected for skill installation."))
+
+    summaries = []
+    errors = []
+    for user_id in user_ids:
+        returncode, output = install_skill_for_user(user_id, skill_id)
+        clipped_output = output[-500:] if output else ""
+        if returncode == 0:
+            summaries.append(f"[OK] {user_id}: {skill_id} installed")
+            persist_operation_metadata("install_skill", user_id=user_id, message=f"Installed {skill_id}")
+        else:
+            errors.append(f"[ERROR] {user_id}: {clipped_output or 'skill install failed'}")
+
+    message = "\n".join(summaries + errors)
+    if errors:
+        return redirect(url_for("admin_users", error=message[-1800:]))
+    return redirect(url_for("admin_users", result=message[-1800:]))
 
 
 @app.get("/instance-admin")

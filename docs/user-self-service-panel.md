@@ -31,6 +31,7 @@
 - 提供实例端口内的中文操作说明页面 `/admin/help`
 - 管理员可在 `30015` 的 `/admin/create-user` 创建单个实例
 - 管理员可在 `30015` 的 `/admin/users` 启停、重启、删除实例，并切换 Basic Auth
+- 管理员可在 `30015` 的 `/admin/users` 为多个运行中的实例批量安装白名单 Skill
 
 审批动作背后调用：
 
@@ -321,6 +322,9 @@ Start / Stop / Restart Instance
 
 Delete Instance
   -> scripts/delete_user.sh <user_id>
+
+Bulk Install Skill
+  -> docker exec openclaw_<user_id> openclaw skills install <skill_id>
 ```
 
 后续可以继续纳入：
@@ -335,6 +339,8 @@ Delete Instance
 
 `https://<PUBLIC_HOST>:30015/admin/users` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
 用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
+
+批量安装 Skill 功能只允许选择 `MANAGER_SKILL_PRESETS` 中配置的白名单 Skill。页面会默认填入当前筛选结果中的运行中实例，管理员可在提交前编辑目标实例列表。该功能不会开放任意 shell 命令，实际执行的是固定模板 `docker exec openclaw_<user_id> openclaw skills install <skill_id>`。
 
 文件能力当前由 `manager-web` 直接处理：
 

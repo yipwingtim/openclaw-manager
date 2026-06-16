@@ -28,6 +28,7 @@ USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
 SKILL_INSTALL_TIMEOUT = int(os.environ.get("MANAGER_SKILL_INSTALL_TIMEOUT", "180"))
+WECHAT_BIND_TIMEOUT = int(os.environ.get("MANAGER_WECHAT_BIND_TIMEOUT", "300"))
 CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
 WORKSPACE_FILE_ROOTS = {
     "workspace": ("OpenClaw Workspace", "workspace", "/home/node/.openclaw/workspace"),
@@ -765,6 +766,8 @@ def render_user_dashboard(user_id, instance_mode=False):
         protected_filenames=", ".join(sorted(PROTECTED_FILENAMES)),
         container_upload_dir=CONTAINER_UPLOAD_DIR,
         max_upload_mb=MAX_UPLOAD_BYTES // 1024 // 1024,
+        wechat_bind_timeout_seconds=WECHAT_BIND_TIMEOUT,
+        wechat_bind_timeout_minutes=max(1, WECHAT_BIND_TIMEOUT // 60),
         approve_url=approve_url,
         refresh_url=refresh_url,
         upload_url=upload_url,
@@ -811,12 +814,12 @@ def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
             container_name,
             "sh",
             "-lc",
-            "timeout 60s npx -y @tencent-weixin/openclaw-weixin-cli install",
+            f"timeout {WECHAT_BIND_TIMEOUT}s npx -y @tencent-weixin/openclaw-weixin-cli install",
         ],
         cwd=str(MANAGER_DIR),
         text=True,
         capture_output=True,
-        timeout=75,
+        timeout=WECHAT_BIND_TIMEOUT + 15,
         check=False,
     )
     output = (result.stdout + "\n" + result.stderr).strip()
@@ -824,7 +827,7 @@ def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
     output_preview = output[-500:] if output else "无输出"
 
     if bind_url:
-        message = "微信绑定链接已生成，请复制后在浏览器中打开并按页面提示完成绑定。"
+        message = f"微信绑定链接已生成，请在 {max(1, WECHAT_BIND_TIMEOUT // 60)} 分钟内打开链接并完成绑定。"
         message += persist_operation_metadata("generate_wechat_bind_url", user_id=user_id, message="wechat bind url generated")
         return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message, wechat_url=bind_url)
 

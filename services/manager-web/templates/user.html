@@ -116,9 +116,11 @@
             <div class="alert soft-danger">微信绑定命令失败或超时：{{ wechat_bind_job.error }}</div>
           {% endif %}
           <form method="post" action="{{ wechat_bind_url }}" id="wechat-bind-form">
-            <button class="btn btn-oc" type="submit" id="wechat-bind-button">生成微信绑定链接</button>
+            <button class="btn btn-oc" type="submit" id="wechat-bind-button" {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] %}disabled{% endif %}>
+              {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] %}正在生成...{% else %}生成微信绑定链接{% endif %}
+            </button>
           </form>
-          <div class="mt-3 d-none" id="wechat-bind-pending" aria-live="polite">
+          <div class="mt-3 {% if not (wechat_bind_job and wechat_bind_job.status in ["starting", "running"]) %}d-none{% endif %}" id="wechat-bind-pending" aria-live="polite">
             <div class="muted-small mb-2">正在生成微信绑定链接，请稍等。首次安装或更新插件可能需要几十秒，链接生成后请在 {{ wechat_bind_timeout_minutes }} 分钟内完成绑定。</div>
             <div class="progress" role="progressbar" aria-label="正在生成微信绑定链接">
               <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
@@ -271,10 +273,10 @@
       });
     }
 
-    {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] and not wechat_url %}
+    {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] %}
       window.setTimeout(() => {
         window.location.reload();
-      }, 2000);
+      }, {% if wechat_url %}5000{% else %}2000{% endif %});
     {% endif %}
   </script>
 {% endblock %}

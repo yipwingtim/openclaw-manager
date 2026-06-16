@@ -850,7 +850,7 @@ def run_wechat_bind_job(user_id, container_name):
             update_wechat_bind_job(
                 user_id,
                 status="success",
-                bind_url=bind_url,
+                bind_url="",
                 output_preview=output[-500:] if output else "",
                 process=None,
             )
@@ -859,7 +859,7 @@ def run_wechat_bind_job(user_id, container_name):
             update_wechat_bind_job(
                 user_id,
                 status="failed",
-                bind_url=bind_url,
+                bind_url="",
                 error=output[-500:] if output else "微信插件命令执行失败或超时。",
                 process=None,
             )

@@ -92,7 +92,7 @@
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
               <div class="section-title">微信绑定</div>
-              <div class="muted-small">生成微信插件绑定链接，复制后在浏览器中打开并按提示完成绑定。</div>
+              <div class="muted-small">生成微信插件绑定链接，请在 {{ wechat_bind_timeout_minutes }} 分钟内复制或打开链接并按提示完成绑定。</div>
             </div>
           </div>
           {% if wechat_url %}
@@ -105,7 +105,7 @@
             <button class="btn btn-oc" type="submit" id="wechat-bind-button">生成微信绑定链接</button>
           </form>
           <div class="mt-3 d-none" id="wechat-bind-pending" aria-live="polite">
-            <div class="muted-small mb-2">正在生成微信绑定链接，请稍等。首次安装或更新插件可能需要几十秒。</div>
+            <div class="muted-small mb-2">正在生成微信绑定链接，请稍等。首次安装或更新插件可能需要几十秒，链接生成后请在 {{ wechat_bind_timeout_minutes }} 分钟内完成绑定。</div>
             <div class="progress" role="progressbar" aria-label="正在生成微信绑定链接">
               <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
             </div>

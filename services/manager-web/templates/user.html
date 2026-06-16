@@ -65,6 +65,17 @@
       </div>
     </div>
 
+    {% if result or error %}
+      <div class="col-12">
+        {% if result %}
+          <div class="alert soft-success mb-2">{{ result }}</div>
+        {% endif %}
+        {% if error %}
+          <div class="alert soft-danger mb-2">{{ error }}</div>
+        {% endif %}
+      </div>
+    {% endif %}
+
     <div class="col-12 col-lg-7">
       <div class="surface p-3 p-lg-4 mb-3">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
@@ -120,6 +131,11 @@
               {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] %}正在生成...{% else %}生成微信绑定链接{% endif %}
             </button>
           </form>
+          {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] %}
+            <form method="post" action="{{ wechat_bind_cancel_url }}" class="mt-2">
+              <button class="btn btn-oc-outline" type="submit">取消并清除当前绑定任务</button>
+            </form>
+          {% endif %}
           <div class="mt-3 {% if not (wechat_bind_job and wechat_bind_job.status in ["starting", "running"]) %}d-none{% endif %}" id="wechat-bind-pending" aria-live="polite">
             <div class="muted-small mb-2">正在生成微信绑定链接，请稍等。首次安装或更新插件可能需要几十秒，链接生成后请在 {{ wechat_bind_timeout_minutes }} 分钟内完成绑定。</div>
             <div class="progress" role="progressbar" aria-label="正在生成微信绑定链接">
@@ -240,12 +256,6 @@
             <div class="muted-small">展示当前实例发现的设备访问请求缓存。</div>
           </div>
         </div>
-          {% if result %}
-            <div class="alert soft-success">{{ result }}</div>
-          {% endif %}
-          {% if error %}
-            <div class="alert alert-danger">{{ error }}</div>
-          {% endif %}
           <pre class="codebox mb-0">{{ devices_cache }}</pre>
       </div>
 

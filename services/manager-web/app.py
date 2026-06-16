@@ -738,6 +738,7 @@ def render_user_dashboard(user_id, instance_mode=False):
         refresh_url = "/admin/refresh-devices"
         upload_url = "/admin/upload"
         wechat_bind_url = "/admin/wechat-bind-url"
+        wechat_bind_cancel_url = "/admin/wechat-bind-cancel"
         download_endpoint = ""
         delete_endpoint = ""
     else:
@@ -745,6 +746,7 @@ def render_user_dashboard(user_id, instance_mode=False):
         refresh_url = url_for("refresh_devices", user_id=user_id)
         upload_url = url_for("upload_file", user_id=user_id)
         wechat_bind_url = url_for("user_wechat_bind_url", user_id=user_id)
+        wechat_bind_cancel_url = url_for("user_wechat_bind_cancel", user_id=user_id)
         download_endpoint = "download_workspace_file"
         delete_endpoint = "delete_workspace_file"
 
@@ -778,6 +780,7 @@ def render_user_dashboard(user_id, instance_mode=False):
         refresh_url=refresh_url,
         upload_url=upload_url,
         wechat_bind_url=wechat_bind_url,
+        wechat_bind_cancel_url=wechat_bind_cancel_url,
         download_endpoint=download_endpoint,
         delete_endpoint=delete_endpoint,
         wechat_url=wechat_url,
@@ -809,13 +812,16 @@ def extract_wechat_bind_url(output):
     return match.group(0).strip()
 
 
-def update_wechat_bind_job(user_id, **values):
+def update_wechat_bind_job(user_id, job_id=None, **values):
     with WECHAT_BIND_JOBS_LOCK:
         job = WECHAT_BIND_JOBS.setdefault(user_id, {})
+        if job_id is not None and job.get("job_id") != job_id:
+            return False
         job.update(values)
+        return True
 
 
-def run_wechat_bind_job(user_id, container_name):
+def run_wechat_bind_job(user_id, container_name, job_id):
     command = [
         "docker",
         "exec",
@@ -833,7 +839,9 @@ def run_wechat_bind_job(user_id, container_name):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        update_wechat_bind_job(user_id, process=process, status="running")
+        if not update_wechat_bind_job(user_id, job_id=job_id, process=process, status="running"):
+            process.terminate()
+            return
 
         assert process.stdout is not None
         for line in process.stdout:
@@ -841,14 +849,14 @@ def run_wechat_bind_job(user_id, container_name):
             output = "".join(output_parts)
             bind_url = extract_wechat_bind_url(output)
             if bind_url:
-                update_wechat_bind_job(user_id, bind_url=bind_url)
+                update_wechat_bind_job(user_id, job_id=job_id, bind_url=bind_url)
 
         returncode = process.wait(timeout=5)
         output = "".join(output_parts).strip()
-        bind_url = extract_wechat_bind_url(output)
         if returncode == 0:
             update_wechat_bind_job(
                 user_id,
+                job_id=job_id,
                 status="success",
                 bind_url="",
                 output_preview=output[-500:] if output else "",
@@ -858,6 +866,7 @@ def run_wechat_bind_job(user_id, container_name):
         else:
             update_wechat_bind_job(
                 user_id,
+                job_id=job_id,
                 status="failed",
                 bind_url="",
                 error=output[-500:] if output else "微信插件命令执行失败或超时。",
@@ -867,10 +876,25 @@ def run_wechat_bind_job(user_id, container_name):
         output = "".join(output_parts).strip()
         update_wechat_bind_job(
             user_id,
+            job_id=job_id,
             status="failed",
             error=f"{exc}\n{output[-500:] if output else ''}".strip(),
             process=None,
         )
+
+
+def cancel_wechat_bind_job_for_user(user_id, instance_mode=False):
+    with WECHAT_BIND_JOBS_LOCK:
+        job = WECHAT_BIND_JOBS.pop(user_id, None)
+
+    process = job.get("process") if job else None
+    if process is not None and process.poll() is None:
+        try:
+            process.terminate()
+        except Exception:
+            pass
+
+    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result="微信绑定任务已取消，页面状态已清除。")
 
 
 def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
@@ -888,9 +912,10 @@ def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
                 result=f"微信绑定任务正在运行，请在 {max(1, WECHAT_BIND_TIMEOUT // 60)} 分钟内完成绑定。",
                 wechat_url=bind_url,
             )
-        WECHAT_BIND_JOBS[user_id] = {"status": "starting", "bind_url": "", "error": "", "output_preview": "", "process": None}
+        job_id = f"{user_id}:{metadata_store.utc_now()}"
+        WECHAT_BIND_JOBS[user_id] = {"job_id": job_id, "status": "starting", "bind_url": "", "error": "", "output_preview": "", "process": None}
 
-    thread = threading.Thread(target=run_wechat_bind_job, args=(user_id, container_name), daemon=True)
+    thread = threading.Thread(target=run_wechat_bind_job, args=(user_id, container_name, job_id), daemon=True)
     thread.start()
 
     return redirect_to_user_dashboard(
@@ -1441,6 +1466,14 @@ def instance_wechat_bind_url():
     return generate_wechat_bind_url_for_user(user_id, instance_mode=True)
 
 
+@app.post("/instance-admin/wechat-bind-cancel")
+def instance_wechat_bind_cancel():
+    user_id = get_instance_user()
+    if not user_id:
+        return forbidden("Forbidden: missing instance user header.")
+    return cancel_wechat_bind_job_for_user(user_id, instance_mode=True)
+
+
 @app.get("/instance-admin/files/<root_key>/<path:relative_path>")
 def instance_download_workspace_file(root_key, relative_path):
     user_id = get_instance_user()
@@ -1617,6 +1650,23 @@ def user_wechat_bind_url(user_id):
         return denied
 
     return generate_wechat_bind_url_for_user(user_id)
+
+
+@app.post("/users/<user_id>/wechat-bind-cancel")
+def user_wechat_bind_cancel(user_id):
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
+
+    denied = require_instance_access(user_id)
+    if denied:
+        return denied
+
+    return cancel_wechat_bind_job_for_user(user_id)
 
 
 @app.get("/users/<user_id>/files/<root_key>/<path:relative_path>")

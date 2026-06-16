@@ -99,7 +99,21 @@
             <div class="alert soft-success">
               <div class="fw-semibold mb-1">微信绑定链接</div>
               <a href="{{ wechat_url }}" target="_blank" rel="noreferrer">{{ wechat_url }}</a>
+              <div class="mt-2">请在 {{ wechat_bind_timeout_minutes }} 分钟内打开链接并完成绑定。</div>
             </div>
+          {% endif %}
+          {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] %}
+            <div class="alert soft-warning">
+              <div class="fw-semibold mb-1">微信绑定任务正在运行</div>
+              <div>链接生成后请尽快打开并完成绑定。后台进程会继续等待确认，最长 {{ wechat_bind_timeout_minutes }} 分钟。</div>
+              {% if not wechat_url %}
+                <div class="mt-2">正在等待插件输出绑定链接，页面将自动刷新。</div>
+              {% endif %}
+            </div>
+          {% elif wechat_bind_job and wechat_bind_job.status == "success" %}
+            <div class="alert soft-success">微信绑定命令已完成。</div>
+          {% elif wechat_bind_job and wechat_bind_job.status == "failed" %}
+            <div class="alert soft-danger">微信绑定命令失败或超时：{{ wechat_bind_job.error }}</div>
           {% endif %}
           <form method="post" action="{{ wechat_bind_url }}" id="wechat-bind-form">
             <button class="btn btn-oc" type="submit" id="wechat-bind-button">生成微信绑定链接</button>
@@ -256,5 +270,11 @@
         wechatBindPending.classList.remove("d-none");
       });
     }
+
+    {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] and not wechat_url %}
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    {% endif %}
   </script>
 {% endblock %}

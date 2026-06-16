@@ -849,7 +849,7 @@ def run_wechat_bind_job(user_id, container_name, job_id):
             output = "".join(output_parts)
             bind_url = extract_wechat_bind_url(output)
             if bind_url:
-                update_wechat_bind_job(user_id, job_id=job_id, bind_url=bind_url)
+                update_wechat_bind_job(user_id, job_id=job_id, status="waiting_confirmation", bind_url=bind_url)
 
         returncode = process.wait(timeout=5)
         output = "".join(output_parts).strip()
@@ -904,12 +904,17 @@ def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
 
     with WECHAT_BIND_JOBS_LOCK:
         existing_job = WECHAT_BIND_JOBS.get(user_id)
-        if existing_job and existing_job.get("status") == "running":
+        if existing_job and existing_job.get("status") in {"starting", "running", "waiting_confirmation"}:
             bind_url = existing_job.get("bind_url", "")
+            message = (
+                f"微信绑定链接已生成，请在 {max(1, WECHAT_BIND_TIMEOUT // 60)} 分钟内完成绑定；如需重新生成，请先取消当前任务。"
+                if bind_url
+                else f"微信绑定任务正在运行，请在 {max(1, WECHAT_BIND_TIMEOUT // 60)} 分钟内完成绑定。"
+            )
             return redirect_to_user_dashboard(
                 user_id,
                 instance_mode=instance_mode,
-                result=f"微信绑定任务正在运行，请在 {max(1, WECHAT_BIND_TIMEOUT // 60)} 分钟内完成绑定。",
+                result=message,
                 wechat_url=bind_url,
             )
         job_id = f"{user_id}:{metadata_store.utc_now()}"

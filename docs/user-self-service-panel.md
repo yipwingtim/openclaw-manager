@@ -280,7 +280,7 @@ docker compose up -d
 
 Basic Auth 可按实例关闭。关闭后，该实例端口的 `/` 和 `/admin/` 都不再弹出 Nginx Basic Auth，但仍保留 OpenClaw Token 和 Device Approval。该模式只建议用于可信内网培训实例。
 
-微信绑定功能只执行固定的腾讯微信 OpenClaw CLI 安装命令，并从命令输出中提取绑定 URL；它不向用户开放任意 shell 命令。该功能依赖实例容器可访问 npm registry，并可运行 `npx -y @tencent-weixin/openclaw-weixin-cli install`。绑定命令默认等待 300 秒，可通过 `MANAGER_WECHAT_BIND_TIMEOUT` 调整。
+微信绑定功能只执行固定的腾讯微信 OpenClaw CLI 安装命令，并从命令输出中提取绑定 URL；它不向用户开放任意 shell 命令。该功能会在后台等待用户打开链接或扫码确认，依赖实例容器可访问 npm registry，并可运行 `npx -y @tencent-weixin/openclaw-weixin-cli install`。绑定命令默认等待 300 秒，可通过 `MANAGER_WECHAT_BIND_TIMEOUT` 调整。
 
 已有实例切换示例：
 

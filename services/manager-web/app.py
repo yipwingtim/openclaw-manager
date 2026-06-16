@@ -51,6 +51,8 @@ ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "o
 LAST_CREATED_ACCOUNTS = {}
 CREATE_EVENTS = {}
 CREATE_EVENTS_LOCK = threading.Lock()
+WECHAT_BIND_JOBS = {}
+WECHAT_BIND_JOBS_LOCK = threading.Lock()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -746,6 +748,10 @@ def render_user_dashboard(user_id, instance_mode=False):
         download_endpoint = "download_workspace_file"
         delete_endpoint = "delete_workspace_file"
 
+    with WECHAT_BIND_JOBS_LOCK:
+        wechat_bind_job = dict(WECHAT_BIND_JOBS.get(user_id, {}))
+    wechat_url = request.args.get("wechat_url", "") or wechat_bind_job.get("bind_url", "")
+
     return render_template(
         "user.html",
         user_id=user_id,
@@ -774,7 +780,8 @@ def render_user_dashboard(user_id, instance_mode=False):
         wechat_bind_url=wechat_bind_url,
         download_endpoint=download_endpoint,
         delete_endpoint=delete_endpoint,
-        wechat_url=request.args.get("wechat_url", ""),
+        wechat_url=wechat_url,
+        wechat_bind_job=wechat_bind_job,
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )
@@ -802,39 +809,95 @@ def extract_wechat_bind_url(output):
     return match.group(0).strip()
 
 
+def update_wechat_bind_job(user_id, **values):
+    with WECHAT_BIND_JOBS_LOCK:
+        job = WECHAT_BIND_JOBS.setdefault(user_id, {})
+        job.update(values)
+
+
+def run_wechat_bind_job(user_id, container_name):
+    command = [
+        "docker",
+        "exec",
+        container_name,
+        "sh",
+        "-lc",
+        f"timeout {WECHAT_BIND_TIMEOUT}s npx -y @tencent-weixin/openclaw-weixin-cli install",
+    ]
+    output_parts = []
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(MANAGER_DIR),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        update_wechat_bind_job(user_id, process=process, status="running")
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            output_parts.append(line)
+            output = "".join(output_parts)
+            bind_url = extract_wechat_bind_url(output)
+            if bind_url:
+                update_wechat_bind_job(user_id, bind_url=bind_url)
+
+        returncode = process.wait(timeout=5)
+        output = "".join(output_parts).strip()
+        bind_url = extract_wechat_bind_url(output)
+        if returncode == 0:
+            update_wechat_bind_job(
+                user_id,
+                status="success",
+                bind_url=bind_url,
+                output_preview=output[-500:] if output else "",
+                process=None,
+            )
+            persist_operation_metadata("generate_wechat_bind_url", user_id=user_id, message="wechat bind completed")
+        else:
+            update_wechat_bind_job(
+                user_id,
+                status="failed",
+                bind_url=bind_url,
+                error=output[-500:] if output else "微信插件命令执行失败或超时。",
+                process=None,
+            )
+    except Exception as exc:
+        output = "".join(output_parts).strip()
+        update_wechat_bind_job(
+            user_id,
+            status="failed",
+            error=f"{exc}\n{output[-500:] if output else ''}".strip(),
+            process=None,
+        )
+
+
 def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
     container_name = f"openclaw_{user_id}"
     if get_container_status(user_id) == "STOPPED":
         return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="实例容器未运行，无法生成微信绑定链接。")
 
-    result = subprocess.run(
-        [
-            "docker",
-            "exec",
-            container_name,
-            "sh",
-            "-lc",
-            f"timeout {WECHAT_BIND_TIMEOUT}s npx -y @tencent-weixin/openclaw-weixin-cli install",
-        ],
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=WECHAT_BIND_TIMEOUT + 15,
-        check=False,
+    with WECHAT_BIND_JOBS_LOCK:
+        existing_job = WECHAT_BIND_JOBS.get(user_id)
+        if existing_job and existing_job.get("status") == "running":
+            bind_url = existing_job.get("bind_url", "")
+            return redirect_to_user_dashboard(
+                user_id,
+                instance_mode=instance_mode,
+                result=f"微信绑定任务正在运行，请在 {max(1, WECHAT_BIND_TIMEOUT // 60)} 分钟内完成绑定。",
+                wechat_url=bind_url,
+            )
+        WECHAT_BIND_JOBS[user_id] = {"status": "starting", "bind_url": "", "error": "", "output_preview": "", "process": None}
+
+    thread = threading.Thread(target=run_wechat_bind_job, args=(user_id, container_name), daemon=True)
+    thread.start()
+
+    return redirect_to_user_dashboard(
+        user_id,
+        instance_mode=instance_mode,
+        result="微信绑定任务已启动，页面会自动刷新并显示绑定链接。",
     )
-    output = (result.stdout + "\n" + result.stderr).strip()
-    bind_url = extract_wechat_bind_url(output)
-    output_preview = output[-500:] if output else "无输出"
-
-    if bind_url:
-        message = f"微信绑定链接已生成，请在 {max(1, WECHAT_BIND_TIMEOUT // 60)} 分钟内打开链接并完成绑定。"
-        message += persist_operation_metadata("generate_wechat_bind_url", user_id=user_id, message="wechat bind url generated")
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message, wechat_url=bind_url)
-
-    message = f"未能从命令输出中提取微信绑定链接。命令输出摘要：{output_preview}"
-    if result.returncode != 0:
-        message = f"微信插件命令执行失败或超时。\n\n{message}"
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=message)
 
 
 def summarize_approval_output(output):

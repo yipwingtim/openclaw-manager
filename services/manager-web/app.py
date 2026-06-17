@@ -650,25 +650,25 @@ def run_instance_lifecycle_action(user_id, action):
     if not user_dir.is_dir():
         return 1, f"User not found: {user_id}"
 
+    container_name = f"openclaw_{user_id}"
     if action == "start":
-        command = ["docker", "compose", "up", "-d"]
+        command = ["docker", "start", container_name]
         timeout = 90
     elif action == "stop":
-        command = ["docker", "compose", "stop"]
+        command = ["docker", "stop", container_name]
         timeout = 60
     elif action == "restart":
-        command = ["docker", "compose", "restart"]
+        command = ["docker", "restart", container_name]
         timeout = 90
     elif action == "delete":
         command = [str(MANAGER_DIR / "scripts" / "delete_user.sh"), user_id]
         timeout = 180
-        user_dir = MANAGER_DIR
     else:
         return 1, "Invalid lifecycle action."
 
     result = subprocess.run(
         command,
-        cwd=str(user_dir),
+        cwd=str(MANAGER_DIR),
         text=True,
         capture_output=True,
         timeout=timeout,

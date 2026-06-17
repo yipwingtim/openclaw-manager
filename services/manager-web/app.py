@@ -582,6 +582,10 @@ def is_basic_auth_enabled(user_id):
 
 
 def nginx_disabled_conf_dir():
+    return NGINX_USERS_CONF_DIR / "_disabled"
+
+
+def nginx_legacy_disabled_conf_dir():
     return Path(str(NGINX_USERS_CONF_DIR) + ".disabled")
 
 
@@ -593,8 +597,16 @@ def nginx_disabled_user_conf(user_id):
     return nginx_disabled_conf_dir() / f"{user_id}.conf"
 
 
+def nginx_legacy_disabled_user_conf(user_id):
+    return nginx_legacy_disabled_conf_dir() / f"{user_id}.conf"
+
+
 def nginx_user_conf_candidates(user_id):
-    return [nginx_active_user_conf(user_id), nginx_disabled_user_conf(user_id)]
+    return [
+        nginx_active_user_conf(user_id),
+        nginx_disabled_user_conf(user_id),
+        nginx_legacy_disabled_user_conf(user_id),
+    ]
 
 
 def run_command(command, timeout=30):
@@ -653,10 +665,14 @@ def disable_nginx_user_conf(user_id):
 def enable_nginx_user_conf(user_id):
     active_conf = nginx_active_user_conf(user_id)
     disabled_conf = nginx_disabled_user_conf(user_id)
+    legacy_disabled_conf = nginx_legacy_disabled_user_conf(user_id)
     if active_conf.is_file():
         return 0, f"Nginx config already enabled: {active_conf}"
     if not disabled_conf.is_file():
-        return 1, f"Disabled nginx config not found: {disabled_conf}"
+        if legacy_disabled_conf.is_file():
+            disabled_conf = legacy_disabled_conf
+        else:
+            return 1, f"Disabled nginx config not found: {disabled_conf}"
 
     shutil.move(str(disabled_conf), str(active_conf))
     reload_code, reload_output = reload_nginx()

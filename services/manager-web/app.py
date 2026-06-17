@@ -557,29 +557,118 @@ def resolve_deletable_file(user_id, root_key, relative_path):
 
 
 def detect_port(user_id):
-    nginx_conf = NGINX_USERS_CONF_DIR / f"{user_id}.conf"
-    if not nginx_conf.is_file():
-        return ""
-
-    for line in nginx_conf.read_text(encoding="utf-8", errors="ignore").splitlines():
-        match = re.match(r"^\s*listen\s+([0-9]+)\b", line)
-        if match:
-            return match.group(1)
+    for nginx_conf in nginx_user_conf_candidates(user_id):
+        if not nginx_conf.is_file():
+            continue
+        for line in nginx_conf.read_text(encoding="utf-8", errors="ignore").splitlines():
+            match = re.match(r"^\s*listen\s+([0-9]+)\b", line)
+            if match:
+                return match.group(1)
 
     return ""
 
 
 def is_basic_auth_enabled(user_id):
-    nginx_conf = NGINX_USERS_CONF_DIR / f"{user_id}.conf"
-    if not nginx_conf.is_file():
-        return None
+    for nginx_conf in nginx_user_conf_candidates(user_id):
+        if not nginx_conf.is_file():
+            continue
 
-    text = nginx_conf.read_text(encoding="utf-8", errors="ignore")
-    if "auth_basic off;" in text:
-        return False
-    if 'auth_basic "OpenClaw Login";' in text:
-        return True
+        text = nginx_conf.read_text(encoding="utf-8", errors="ignore")
+        if "auth_basic off;" in text:
+            return False
+        if 'auth_basic "OpenClaw Login";' in text:
+            return True
     return None
+
+
+def nginx_disabled_conf_dir():
+    return Path(str(NGINX_USERS_CONF_DIR) + ".disabled")
+
+
+def nginx_active_user_conf(user_id):
+    return NGINX_USERS_CONF_DIR / f"{user_id}.conf"
+
+
+def nginx_disabled_user_conf(user_id):
+    return nginx_disabled_conf_dir() / f"{user_id}.conf"
+
+
+def nginx_user_conf_candidates(user_id):
+    return [nginx_active_user_conf(user_id), nginx_disabled_user_conf(user_id)]
+
+
+def run_command(command, timeout=30):
+    result = subprocess.run(
+        command,
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    return result.returncode, output
+
+
+def reload_nginx():
+    test_code, test_output = run_command(["docker", "exec", NGINX_CONTAINER_NAME, "nginx", "-t"], timeout=30)
+    if test_code != 0:
+        return test_code, f"Nginx test failed:\n{test_output}"
+
+    reload_code, reload_output = run_command(
+        ["docker", "exec", NGINX_CONTAINER_NAME, "nginx", "-s", "reload"],
+        timeout=30,
+    )
+    if reload_code != 0:
+        return reload_code, f"Nginx reload failed:\n{reload_output}"
+
+    return 0, "\n".join(part for part in [test_output, reload_output] if part)
+
+
+def disable_nginx_user_conf(user_id):
+    active_conf = nginx_active_user_conf(user_id)
+    disabled_conf = nginx_disabled_user_conf(user_id)
+    if not active_conf.is_file():
+        if disabled_conf.is_file():
+            return 0, f"Nginx config already disabled: {disabled_conf}"
+        return 0, f"Nginx config not found, skip disabling: {active_conf}"
+
+    disabled_conf.parent.mkdir(parents=True, exist_ok=True)
+    if disabled_conf.exists():
+        return 1, f"Disabled nginx config already exists: {disabled_conf}"
+
+    shutil.move(str(active_conf), str(disabled_conf))
+    reload_code, reload_output = reload_nginx()
+    if reload_code == 0:
+        return 0, f"Disabled nginx config: {disabled_conf}\n{reload_output}".strip()
+
+    shutil.move(str(disabled_conf), str(active_conf))
+    rollback_code, rollback_output = reload_nginx()
+    rollback_note = "\nRolled back nginx config disable."
+    if rollback_code != 0:
+        rollback_note += f"\nRollback reload failed:\n{rollback_output}"
+    return reload_code, f"{reload_output}{rollback_note}"
+
+
+def enable_nginx_user_conf(user_id):
+    active_conf = nginx_active_user_conf(user_id)
+    disabled_conf = nginx_disabled_user_conf(user_id)
+    if active_conf.is_file():
+        return 0, f"Nginx config already enabled: {active_conf}"
+    if not disabled_conf.is_file():
+        return 1, f"Disabled nginx config not found: {disabled_conf}"
+
+    shutil.move(str(disabled_conf), str(active_conf))
+    reload_code, reload_output = reload_nginx()
+    if reload_code == 0:
+        return 0, f"Enabled nginx config: {active_conf}\n{reload_output}".strip()
+
+    shutil.move(str(active_conf), str(disabled_conf))
+    rollback_code, rollback_output = reload_nginx()
+    rollback_note = "\nRolled back nginx config enable."
+    if rollback_code != 0:
+        rollback_note += f"\nRollback reload failed:\n{rollback_output}"
+    return reload_code, f"{reload_output}{rollback_note}"
 
 
 def detect_openclaw_version(user_id):
@@ -652,11 +741,35 @@ def run_instance_lifecycle_action(user_id, action):
 
     container_name = f"openclaw_{user_id}"
     if action == "start":
-        command = ["docker", "start", container_name]
-        timeout = 90
+        start_code, start_output = run_command(["docker", "start", container_name], timeout=90)
+        if start_code != 0:
+            return start_code, start_output
+
+        nginx_code, nginx_output = enable_nginx_user_conf(user_id)
+        combined_output = "\n".join(part for part in [start_output, nginx_output] if part)
+        if nginx_code == 0:
+            return 0, combined_output
+
+        rollback_code, rollback_output = run_command(["docker", "stop", container_name], timeout=60)
+        rollback_note = "\nRolled back container start."
+        if rollback_code != 0:
+            rollback_note += f"\nRollback stop failed:\n{rollback_output}"
+        return nginx_code, f"{combined_output}{rollback_note}"
     elif action == "stop":
-        command = ["docker", "stop", container_name]
-        timeout = 60
+        nginx_code, nginx_output = disable_nginx_user_conf(user_id)
+        if nginx_code != 0:
+            return nginx_code, nginx_output
+
+        stop_code, stop_output = run_command(["docker", "stop", container_name], timeout=60)
+        combined_output = "\n".join(part for part in [nginx_output, stop_output] if part)
+        if stop_code == 0:
+            return 0, combined_output
+
+        rollback_code, rollback_output = enable_nginx_user_conf(user_id)
+        rollback_note = "\nRolled back nginx config disable."
+        if rollback_code != 0:
+            rollback_note += f"\nRollback enable failed:\n{rollback_output}"
+        return stop_code, f"{combined_output}{rollback_note}"
     elif action == "restart":
         command = ["docker", "restart", container_name]
         timeout = 90
@@ -666,16 +779,8 @@ def run_instance_lifecycle_action(user_id, action):
     else:
         return 1, "Invalid lifecycle action."
 
-    result = subprocess.run(
-        command,
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
-    )
-    output = (result.stdout + "\n" + result.stderr).strip()
-    return result.returncode, output
+    returncode, output = run_command(command, timeout=timeout)
+    return returncode, output
 
 
 def read_devices_cache(user_id):

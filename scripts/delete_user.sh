@@ -59,6 +59,8 @@ BASE_DIR="$OPENCLAW_PUBLIC_DIR"
 USER_DIR="$BASE_DIR/users/$USER_ID"
 DELETED_DIR="$BASE_DIR/deleted"
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
+NGINX_DISABLED_USERS_CONF_DIR="${NGINX_USERS_CONF_DIR}.disabled"
+NGINX_DISABLED_USER_CONF="$NGINX_DISABLED_USERS_CONF_DIR/${USER_ID}.conf"
 
 if [ ! -d "$USER_DIR" ]; then
   echo "[WARN] User not found: $USER_ID"
@@ -69,8 +71,15 @@ fi
 # ===== 识别 nginx 端口 =====
 PORT=""
 
+NGINX_PORT_SOURCE_CONF=""
 if [ -f "$NGINX_USER_CONF" ]; then
-  PORT=$(grep -E '^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]+ssl;' "$NGINX_USER_CONF" \
+  NGINX_PORT_SOURCE_CONF="$NGINX_USER_CONF"
+elif [ -f "$NGINX_DISABLED_USER_CONF" ]; then
+  NGINX_PORT_SOURCE_CONF="$NGINX_DISABLED_USER_CONF"
+fi
+
+if [ -n "$NGINX_PORT_SOURCE_CONF" ]; then
+  PORT=$(grep -E '^[[:space:]]*listen[[:space:]]+[0-9]+[[:space:]]+ssl;' "$NGINX_PORT_SOURCE_CONF" \
     | head -n1 \
     | sed -E 's/.*listen[[:space:]]+([0-9]+)[[:space:]]+ssl;.*/\1/')
 fi
@@ -116,8 +125,12 @@ if [ -f "$NGINX_USER_CONF" ]; then
   echo "[INFO] Moving nginx config to recycle bin..."
   mkdir -p "$RECYCLE_DIR/nginx"
   mv "$NGINX_USER_CONF" "$RECYCLE_DIR/nginx/${USER_ID}.conf"
+elif [ -f "$NGINX_DISABLED_USER_CONF" ]; then
+  echo "[INFO] Moving disabled nginx config to recycle bin..."
+  mkdir -p "$RECYCLE_DIR/nginx"
+  mv "$NGINX_DISABLED_USER_CONF" "$RECYCLE_DIR/nginx/${USER_ID}.conf"
 else
-  echo "[WARN] Nginx user config not found: $NGINX_USER_CONF"
+  echo "[WARN] Nginx user config not found: $NGINX_USER_CONF or $NGINX_DISABLED_USER_CONF"
 fi
 
 # ===== 从 nginx docker-compose.yml 移除端口映射 =====

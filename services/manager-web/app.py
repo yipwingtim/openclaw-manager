@@ -7,6 +7,7 @@ import csv
 import io
 import threading
 import hmac
+import time
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -20,6 +21,7 @@ APP_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = Path(os.environ.get("OPENCLAW_MANAGER_DIR", "/opt/openclaw-manager"))
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
 NGINX_USERS_CONF_DIR = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf"))
+NGINX_COMPOSE_DIR = Path(os.environ.get("NGINX_COMPOSE_DIR", "/data/docker/nginx/compose"))
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
 NGINX_CONTAINER_NAME = os.environ.get("NGINX_CONTAINER_NAME", "openclaw-nginx")
 OPENCLAW_INTERNAL_TOKEN = os.environ.get("OPENCLAW_INTERNAL_TOKEN", "").strip()
@@ -644,10 +646,10 @@ def nginx_user_conf_candidates(user_id):
     ]
 
 
-def run_command(command, timeout=30):
+def run_command(command, timeout=30, cwd=None):
     result = subprocess.run(
         command,
-        cwd=str(MANAGER_DIR),
+        cwd=str(cwd or MANAGER_DIR),
         text=True,
         capture_output=True,
         timeout=timeout,
@@ -670,6 +672,42 @@ def reload_nginx():
         return reload_code, f"Nginx reload failed:\n{reload_output}"
 
     return 0, "\n".join(part for part in [test_output, reload_output] if part)
+
+
+def refresh_nginx_after_create(user_id, actor=None):
+    time.sleep(2)
+    compose_code, compose_output = run_command(
+        ["docker", "compose", "up", "-d"],
+        timeout=90,
+        cwd=NGINX_COMPOSE_DIR,
+    )
+    if compose_code != 0:
+        persist_operation_metadata(
+            "refresh_nginx_after_create",
+            user_id=user_id,
+            status="failed",
+            actor=actor,
+            message=f"Nginx compose update failed:\n{compose_output[-1200:]}",
+        )
+        return
+
+    reload_code, reload_output = reload_nginx()
+    status = "success" if reload_code == 0 else "failed"
+    message = "\n".join(
+        part
+        for part in [
+            f"Nginx compose update:\n{compose_output[-800:]}",
+            reload_output[-1200:] if reload_output else "",
+        ]
+        if part
+    )
+    persist_operation_metadata(
+        "refresh_nginx_after_create",
+        user_id=user_id,
+        status=status,
+        actor=actor,
+        message=message,
+    )
 
 
 def disable_nginx_user_conf(user_id):
@@ -1394,6 +1432,7 @@ def run_admin_create_user():
         user_id,
         "--basic-auth-enabled",
         basic_auth_enabled,
+        "--skip-nginx-reload",
     ]
     if basic_auth_password:
         command.extend(["--password", basic_auth_password])
@@ -1414,7 +1453,19 @@ def run_admin_create_user():
         account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
         LAST_CREATED_ACCOUNTS[user_id] = account
         save_account_record(account)
-        return redirect(url_for("admin_created_user_detail", user_id=user_id, result="Instance created."))
+        actor = get_actor_user() or None
+        threading.Thread(
+            target=refresh_nginx_after_create,
+            args=(user_id, actor),
+            daemon=True,
+        ).start()
+        return redirect(
+            url_for(
+                "admin_created_user_detail",
+                user_id=user_id,
+                result="Instance created. Nginx update is running in the background.",
+            )
+        )
     finally:
         create_event.set()
         with CREATE_EVENTS_LOCK:

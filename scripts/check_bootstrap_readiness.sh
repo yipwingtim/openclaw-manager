@@ -65,6 +65,86 @@ check_network() {
   fi
 }
 
+check_docker_data_root() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return
+  fi
+
+  local actual
+  if ! actual="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)"; then
+    warn "could not read Docker Root Dir from docker info"
+    return
+  fi
+  if [ -z "$actual" ]; then
+    warn "could not read Docker Root Dir from docker info"
+    return
+  fi
+
+  if [ "$actual" = "$DOCKER_DATA_ROOT" ]; then
+    ok "Docker Root Dir is $actual"
+  else
+    warn "Docker Root Dir is $actual; expected $DOCKER_DATA_ROOT for OpenClaw runtime data"
+  fi
+}
+
+read_containerd_config_value() {
+  local key="$1"
+  local config_file="${CONTAINERD_CONFIG_FILE:-/etc/containerd/config.toml}"
+  [ -r "$config_file" ] || return
+
+  awk -F= -v key="$key" '
+    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      value=$2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/^"|"$/, "", value)
+      print value
+      exit
+    }
+  ' "$config_file"
+}
+
+check_containerd_paths() {
+  local config_file="${CONTAINERD_CONFIG_FILE:-/etc/containerd/config.toml}"
+  if [ ! -f "$config_file" ]; then
+    warn "containerd config not found: $config_file; default root may remain /var/lib/containerd"
+  elif [ ! -r "$config_file" ]; then
+    warn "containerd config is not readable: $config_file"
+  else
+    local actual_root actual_state
+    actual_root="$(read_containerd_config_value root || true)"
+    actual_state="$(read_containerd_config_value state || true)"
+
+    if [ "$actual_root" = "$CONTAINERD_ROOT" ]; then
+      ok "containerd root is $actual_root"
+    elif [ -n "$actual_root" ]; then
+      warn "containerd root is $actual_root; expected $CONTAINERD_ROOT"
+    else
+      warn "containerd root is not configured in $config_file; default may be /var/lib/containerd"
+    fi
+
+    if [ "$actual_state" = "$CONTAINERD_STATE" ]; then
+      ok "containerd state is $actual_state"
+    elif [ -n "$actual_state" ]; then
+      warn "containerd state is $actual_state; expected $CONTAINERD_STATE"
+    else
+      warn "containerd state is not configured in $config_file; expected $CONTAINERD_STATE"
+    fi
+  fi
+
+  if [ -d /var/lib/containerd ] && [ "$CONTAINERD_ROOT" != "/var/lib/containerd" ]; then
+    local old_size_kb old_size_human
+    old_size_kb="$(du -sk /var/lib/containerd 2>/dev/null | awk '{print $1}' || true)"
+    old_size_human="$(du -sh /var/lib/containerd 2>/dev/null | awk '{print $1}' || true)"
+    if [ -z "$old_size_kb" ]; then
+      warn "could not inspect /var/lib/containerd size; verify it is not holding runtime data"
+    elif [ "$old_size_kb" -gt 102400 ]; then
+      warn "/var/lib/containerd still uses ${old_size_human}; migrate manually before creating many instances"
+    else
+      ok "/var/lib/containerd is present but small: ${old_size_human:-${old_size_kb}K}"
+    fi
+  fi
+}
+
 echo "[INFO] OpenClaw Manager readiness check"
 echo "[INFO] Manager dir: $MANAGER_DIR"
 
@@ -113,6 +193,9 @@ PORT_FILE="${PORT_FILE:-$OPENCLAW_PUBLIC_DIR/ports.txt}"
 USERS_CSV="${USERS_CSV:-$OPENCLAW_PUBLIC_DIR/users.csv}"
 METADATA_DB_FILE="${METADATA_DB_FILE:-$OPENCLAW_PUBLIC_DIR/manager.db}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
+DOCKER_DATA_ROOT="${DOCKER_DATA_ROOT:-/data/docker}"
+CONTAINERD_ROOT="${CONTAINERD_ROOT:-/data/docker/containerd}"
+CONTAINERD_STATE="${CONTAINERD_STATE:-/run/containerd}"
 
 NGINX_COMPOSE_DIR="${NGINX_COMPOSE_DIR:-/data/docker/nginx/compose}"
 NGINX_COMPOSE_FILE="${NGINX_COMPOSE_FILE:-$NGINX_COMPOSE_DIR/docker-compose.yml}"
@@ -158,6 +241,9 @@ case "$key_host_path" in
 esac
 check_file "$cert_host_path"
 check_file "$key_host_path"
+
+check_docker_data_root
+check_containerd_paths
 
 check_network agent-net
 check_network manager-net

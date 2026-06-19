@@ -111,6 +111,17 @@
           <li>请关注命令输出中的端口、Token 和 Nginx reload 状态。</li>
           <li>如果禁用访问认证，仅主工作区入口跳过 Basic Auth；实例本地 /admin/ 页面仍保持保护。</li>
         </ul>
+        <div class="border-top mt-3 pt-3">
+          <label class="form-label" for="lookup_user_id">查看已创建账号信息</label>
+          <div class="d-flex gap-2">
+            <input class="form-control" id="lookup_user_id" autocomplete="off" placeholder="用户 ID">
+            <button
+              class="btn btn-oc-outline"
+              type="button"
+              onclick="const value=document.getElementById('lookup_user_id').value.trim(); if (value) window.location.href='/admin/create-user/' + encodeURIComponent(value);"
+            >查看</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

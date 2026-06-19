@@ -407,6 +407,41 @@ def account_csv(account):
     return buffer.getvalue()
 
 
+def account_records_dir():
+    return PUBLIC_DIR / "accounts"
+
+
+def account_record_path(user_id):
+    return account_records_dir() / f"{user_id}_account.csv"
+
+
+def save_account_record(account):
+    user_id = account.get("user_id", "")
+    if not user_id:
+        return
+    account_records_dir().mkdir(parents=True, exist_ok=True)
+    account_record_path(user_id).write_text(account_csv(account), encoding="utf-8")
+
+
+def load_account_record(user_id):
+    account = LAST_CREATED_ACCOUNTS.get(user_id)
+    if account is not None:
+        return account
+
+    path = account_record_path(user_id)
+    if not path.is_file():
+        return None
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        return None
+
+    account = rows[0]
+    LAST_CREATED_ACCOUNTS[user_id] = account
+    return account
+
+
 def require_admin():
     actor = get_actor_user()
     if not actor or not is_admin_user(actor):
@@ -1253,6 +1288,32 @@ def admin_create_user():
     )
 
 
+@app.get("/admin/create-user/<user_id>")
+def admin_created_user_detail(user_id):
+    denied = require_admin()
+    if denied:
+        return denied
+
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    account = load_account_record(user_id)
+    if account is None:
+        return render_template("error.html", message="Created account record not found. Create the instance again or use batch export."), 404
+
+    return render_template(
+        "admin_create_user.html",
+        user_id="",
+        basic_auth_enabled="true",
+        basic_auth_password="",
+        account=account,
+        account_csv=account_csv(account),
+        result=request.args.get("result", ""),
+        error="",
+    )
+
+
 @app.post("/admin/create-user")
 def run_admin_create_user():
     denied = require_admin()
@@ -1301,7 +1362,7 @@ def run_admin_create_user():
         return render_create_form(error="Basic Auth password is required for the instance admin page.", status=400)
 
     if get_user_dir(user_id).exists():
-        account = LAST_CREATED_ACCOUNTS.get(user_id)
+        account = load_account_record(user_id)
         if account is not None:
             return render_create_success(account, result=f"Instance already created: {user_id}")
         return render_create_form(error=f"User already exists: {user_id}", status=400)
@@ -1317,7 +1378,7 @@ def run_admin_create_user():
 
     if not owns_create:
         create_event.wait(timeout=430)
-        account = LAST_CREATED_ACCOUNTS.get(user_id)
+        account = load_account_record(user_id)
         if account is not None:
             return render_create_success(account, result=f"Instance creation completed: {user_id}")
         if get_user_dir(user_id).exists():
@@ -1352,7 +1413,8 @@ def run_admin_create_user():
 
         account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)
         LAST_CREATED_ACCOUNTS[user_id] = account
-        return render_create_success(account, result=output)
+        save_account_record(account)
+        return redirect(url_for("admin_created_user_detail", user_id=user_id, result="Instance created."))
     finally:
         create_event.set()
         with CREATE_EVENTS_LOCK:
@@ -1370,7 +1432,7 @@ def download_created_account_csv(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    account = LAST_CREATED_ACCOUNTS.get(user_id)
+    account = load_account_record(user_id)
     if account is None:
         return render_template("error.html", message="Created account record not found. Create the instance again or use batch export."), 404
 

@@ -119,6 +119,7 @@ The bootstrap script does not:
 - request or generate public TLS certificates
 - create production Basic Auth users
 - overwrite existing runtime files
+- move or migrate Docker/containerd runtime data
 - start Nginx
 - start `manager-web`
 - create OpenClaw user instances
@@ -130,9 +131,36 @@ The bootstrap script does not:
 - 申请或生成公网 TLS 证书
 - 创建生产 Basic Auth 用户
 - 覆盖已有运行文件
+- 移动或迁移 Docker/containerd 运行时数据
 - 启动 Nginx
 - 启动 `manager-web`
 - 创建 OpenClaw 用户实例
+
+## Docker Runtime Data Paths | Docker 运行时数据路径
+
+OpenClaw instances can consume significant Docker and containerd storage. On production hosts, keep both Docker and containerd runtime data on the data disk, not the small system root disk.
+
+OpenClaw 实例会占用较多 Docker 和 containerd 存储。生产环境应将 Docker 和 containerd 运行时数据放在数据盘，而不是较小的系统根盘。
+
+Expected paths:
+
+推荐路径：
+
+- Docker Root Dir: `/data/docker`
+- containerd root: `/data/docker/containerd`
+- containerd state: `/run/containerd`
+
+`scripts/check_bootstrap_readiness.sh` checks these paths and prints warnings if Docker or containerd still points to defaults such as `/var/lib/docker` or `/var/lib/containerd`.
+
+`scripts/check_bootstrap_readiness.sh` 会检查这些路径。如果 Docker 或 containerd 仍指向 `/var/lib/docker`、`/var/lib/containerd` 等默认路径，脚本会输出 warning。
+
+The bootstrap script does not migrate existing runtime data automatically. Existing hosts should migrate Docker/containerd data manually during a maintenance window after reviewing current mounts, running containers, and disk usage.
+
+bootstrap 脚本不会自动迁移已有运行时数据。已有主机应在维护窗口内人工确认当前挂载、运行容器和磁盘占用后，再手动迁移 Docker/containerd 数据。
+
+If `/var/lib/containerd` still contains a large amount of data, migrate it before creating many instances.
+
+如果 `/var/lib/containerd` 仍占用大量空间，应先完成迁移，再批量创建实例。
 
 ## Run Bootstrap | 执行初始化
 
@@ -154,6 +182,10 @@ Run the read-only readiness check:
 ```bash
 ./scripts/check_bootstrap_readiness.sh
 ```
+
+Review Docker/containerd path warnings before continuing. Do not ignore large `/var/lib/containerd` usage on production hosts.
+
+继续前应检查 Docker/containerd 路径 warning。生产主机不要忽略 `/var/lib/containerd` 的大容量占用。
 
 Run bootstrap:
 

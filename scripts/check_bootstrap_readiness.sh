@@ -164,6 +164,7 @@ check_cmd bash
 check_cmd python3
 check_cmd sudo
 check_cmd docker
+check_cmd flock
 check_cmd htpasswd
 
 if command -v docker >/dev/null 2>&1; then

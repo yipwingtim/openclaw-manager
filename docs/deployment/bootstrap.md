@@ -29,6 +29,7 @@ Install these before running `scripts/bootstrap_runtime.sh`:
 - `bash`
 - `python3`
 - `sudo`
+- `flock`, usually provided by `util-linux`
 - Docker Engine
 - Docker Compose plugin
 
@@ -44,7 +45,7 @@ Ubuntu 上通常可使用以下方式安装依赖：
 
 ```bash
 sudo apt update
-sudo apt install -y python3 apache2-utils ca-certificates curl gnupg
+sudo apt install -y python3 util-linux apache2-utils ca-certificates curl gnupg
 ```
 
 Install Docker Engine and the Docker Compose plugin using Docker's official Ubuntu installation guide.

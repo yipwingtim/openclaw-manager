@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
 LIB_NGINX_AUTH="$SCRIPT_DIR/lib_nginx_auth.sh"
+LIB_PORT_ALLOCATOR="$SCRIPT_DIR/lib_port_allocator.sh"
 
 # ===== 读取统一配置 =====
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -17,6 +18,7 @@ fi
 
 source "$CONFIG_FILE"
 source "$LIB_NGINX_AUTH"
+source "$LIB_PORT_ALLOCATOR"
 
 # ===== 参数 =====
 USER_ID="${1:-}"
@@ -237,52 +239,8 @@ if [ ! -f "$TEMPLATE" ]; then
   exit 1
 fi
 
-# ===== 初始化端口文件 =====
-if [ ! -f "$PORT_FILE" ]; then
-  echo "$PORT_START" > "$PORT_FILE"
-fi
-
-# ===== 分配端口：自动跳过已占用端口，并限制在端口范围内 =====
-PORT=$(cat "$PORT_FILE")
-
-if [ "$PORT" -lt "$PORT_START" ]; then
-  PORT="$PORT_START"
-fi
-
-while true; do
-  if [ "$PORT" -gt "$PORT_END" ]; then
-    fail "No available port in range $PORT_START-$PORT_END"
-    exit 1
-  fi
-
-  if python3 - "$PORT" <<'PY'
-import socket
-import sys
-
-port = int(sys.argv[1])
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-try:
-    sock.bind(("0.0.0.0", port))
-except OSError:
-    raise SystemExit(0)
-finally:
-    sock.close()
-
-raise SystemExit(1)
-PY
-  then
-    log "Port $PORT is already in use, skip"
-    PORT=$((PORT + 1))
-    continue
-  fi
-
-  break
-done
-
-NEXT_PORT=$((PORT + 1))
-
+# ===== 分配端口：用文件锁避免并发创建拿到同一个端口 =====
+PORT="$(allocate_port "$PORT_FILE" "$PORT_START" "$PORT_END")"
 log "Alloc port $PORT for user $USER_ID"
 
 GATEWAY_TOKEN="$(python3 - <<'PY'
@@ -550,9 +508,6 @@ else
     exit 1
   fi
 fi
-
-# ===== 成功后再提交端口 =====
-echo "$NEXT_PORT" > "$PORT_FILE"
 
 log "User $USER_ID created successfully"
 log "Port: $PORT"

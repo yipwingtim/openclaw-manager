@@ -825,7 +825,7 @@ def install_skill_for_user(user_id, skill_id):
 
 def run_instance_lifecycle_action(user_id, action):
     user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
+    if action != "delete" and not user_dir.is_dir():
         return 1, f"User not found: {user_id}"
 
     container_name = f"openclaw_{user_id}"

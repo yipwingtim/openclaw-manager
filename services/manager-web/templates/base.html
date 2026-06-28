@@ -7,34 +7,57 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
       :root {
-        --oc-ink: #17202a;
-        --oc-muted: #6c7786;
-        --oc-line: #dfe5ec;
+        --oc-ink: #182331;
+        --oc-muted: #718097;
+        --oc-line: #d7e0e8;
+        --oc-line-strong: #b9c8d6;
         --oc-panel: #ffffff;
-        --oc-panel-soft: #f7f4ee;
-        --oc-page: #f3f5f3;
-        --oc-red: #b51f2b;
-        --oc-red-dark: #8f1822;
-        --oc-red-soft: #f8e6e8;
-        --oc-green: #16735f;
-        --oc-green-soft: #e3f2ed;
-        --oc-amber: #9d6a13;
-        --oc-amber-soft: #fff2d2;
-        --oc-blue: #225e8c;
-        --oc-blue-soft: #e3eff8;
-        --oc-shadow: 0 18px 45px rgba(23, 32, 42, 0.08);
+        --oc-panel-soft: #f4f8fb;
+        --oc-page: #eef4f7;
+        --oc-red: #d7475d;
+        --oc-red-dark: #a92b3f;
+        --oc-red-soft: #fde8ed;
+        --oc-green: #087a67;
+        --oc-green-soft: #ddf6ef;
+        --oc-amber: #a26105;
+        --oc-amber-soft: #fff0cf;
+        --oc-blue: #126a9c;
+        --oc-blue-soft: #e2f3fb;
+        --oc-cyan: #09a9c8;
+        --oc-cyan-soft: #dff8fb;
+        --oc-violet: #5f64d8;
+        --oc-sidebar: #0d1721;
+        --oc-sidebar-2: #122638;
+        --oc-shadow: 0 20px 60px rgba(15, 31, 44, 0.12);
+        --oc-glow: 0 0 0 1px rgba(9, 169, 200, 0.18), 0 16px 44px rgba(9, 169, 200, 0.10);
       }
       * {
         letter-spacing: 0;
       }
+      *::selection {
+        background: rgba(9, 169, 200, 0.22);
+      }
       body {
         min-height: 100vh;
         background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(243, 245, 243, 0.92) 42%, #eef2f1 100%),
-          radial-gradient(circle at top left, rgba(181, 31, 43, 0.12), transparent 34%),
-          linear-gradient(135deg, rgba(34, 94, 140, 0.10) 0 25%, transparent 25% 100%);
+          linear-gradient(90deg, rgba(18, 106, 156, 0.055) 1px, transparent 1px),
+          linear-gradient(180deg, rgba(18, 106, 156, 0.04) 1px, transparent 1px),
+          radial-gradient(circle at 18% 8%, rgba(9, 169, 200, 0.18), transparent 28rem),
+          radial-gradient(circle at 92% 18%, rgba(8, 122, 103, 0.13), transparent 24rem),
+          linear-gradient(180deg, #f7fbfd 0%, #eef4f7 48%, #e8f0f3 100%);
+        background-size: 44px 44px, 44px 44px, auto, auto, auto;
         color: var(--oc-ink);
         font-family: "Aptos", "Segoe UI", "Helvetica Neue", sans-serif;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background:
+          linear-gradient(120deg, transparent 0 58%, rgba(9, 169, 200, 0.08) 58% 58.25%, transparent 58.25% 100%),
+          linear-gradient(120deg, transparent 0 71%, rgba(18, 106, 156, 0.08) 71% 71.18%, transparent 71.18% 100%);
       }
       a {
         color: var(--oc-blue);
@@ -50,28 +73,56 @@
         height: 1.8rem;
         margin-right: 0.55rem;
         place-items: center;
-        border: 1px solid rgba(255, 255, 255, 0.28);
-        border-radius: 0.35rem;
-        background: var(--oc-red);
-        color: #fff;
+        border: 1px solid rgba(96, 219, 232, 0.44);
+        border-radius: 0.42rem;
+        background:
+          linear-gradient(135deg, rgba(9, 169, 200, 0.95), rgba(8, 122, 103, 0.86));
+        color: #f7feff;
         font-size: 0.82rem;
         font-weight: 800;
+        box-shadow: 0 0 22px rgba(9, 169, 200, 0.26);
       }
       .app-layout {
         display: grid;
-        grid-template-columns: 15.5rem minmax(0, 1fr);
+        grid-template-columns: 16.25rem minmax(0, 1fr);
         min-height: 100vh;
       }
       .sidebar {
         position: sticky;
         top: 0;
         height: 100vh;
-        padding: 1rem;
-        background: rgba(23, 32, 42, 0.98);
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
-        box-shadow: 10px 0 30px rgba(23, 32, 42, 0.10);
+        padding: 1.1rem;
+        overflow: hidden;
+        background:
+          linear-gradient(180deg, rgba(18, 38, 56, 0.92), rgba(13, 23, 33, 0.98)),
+          linear-gradient(135deg, rgba(9, 169, 200, 0.18), transparent 42%);
+        border-right: 1px solid rgba(126, 194, 217, 0.18);
+        box-shadow: 14px 0 42px rgba(13, 23, 33, 0.18);
+      }
+      .sidebar::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.032) 1px, transparent 1px);
+        background-size: 26px 26px;
+        mask-image: linear-gradient(180deg, black, transparent 82%);
+      }
+      .sidebar::after {
+        content: "";
+        position: absolute;
+        right: -4rem;
+        bottom: 7rem;
+        width: 10rem;
+        height: 10rem;
+        border: 1px solid rgba(9, 169, 200, 0.18);
+        transform: rotate(35deg);
       }
       .sidebar-brand {
+        position: relative;
+        z-index: 1;
         display: flex;
         align-items: center;
         margin-bottom: 1.25rem;
@@ -80,13 +131,17 @@
         font-weight: 780;
       }
       .sidebar-section {
+        position: relative;
+        z-index: 1;
         margin: 1rem 0 0.45rem;
-        color: rgba(255, 255, 255, 0.44);
+        color: rgba(157, 220, 232, 0.62);
         font-size: 0.72rem;
         font-weight: 800;
         text-transform: uppercase;
       }
       .sidebar-nav {
+        position: relative;
+        z-index: 1;
         display: grid;
         gap: 0.35rem;
       }
@@ -94,25 +149,40 @@
         display: flex;
         align-items: center;
         min-height: 2.35rem;
-        padding: 0.45rem 0.65rem;
-        border: 1px solid transparent;
-        border-radius: 0.48rem;
-        color: rgba(255, 255, 255, 0.78);
+        padding: 0.5rem 0.72rem;
+        border: 1px solid rgba(126, 194, 217, 0.08);
+        border-radius: 0.42rem;
+        background: rgba(255, 255, 255, 0.035);
+        color: rgba(234, 247, 250, 0.82);
         text-decoration: none;
         font-size: 0.92rem;
         font-weight: 720;
+        transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+      }
+      .sidebar-nav a::before {
+        content: "";
+        width: 0.38rem;
+        height: 0.38rem;
+        margin-right: 0.62rem;
+        border-radius: 999px;
+        background: rgba(9, 169, 200, 0.44);
+        box-shadow: 0 0 12px rgba(9, 169, 200, 0.35);
       }
       .sidebar-nav a:hover {
-        border-color: rgba(255, 255, 255, 0.16);
-        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(9, 169, 200, 0.36);
+        background: linear-gradient(90deg, rgba(9, 169, 200, 0.16), rgba(255, 255, 255, 0.055));
         color: #fff;
+        transform: translateX(2px);
       }
       .sidebar-footer {
+        z-index: 1;
         position: absolute;
         right: 1rem;
         bottom: 1rem;
         left: 1rem;
-        color: rgba(255, 255, 255, 0.48);
+        border-top: 1px solid rgba(126, 194, 217, 0.18);
+        padding-top: 0.85rem;
+        color: rgba(197, 226, 233, 0.58);
         font-size: 0.78rem;
       }
       .content-shell {
@@ -122,7 +192,7 @@
         max-width: 1240px;
       }
       .page-kicker {
-        color: var(--oc-muted);
+        color: var(--oc-blue);
         font-size: 0.78rem;
         font-weight: 800;
         letter-spacing: 0.08em;
@@ -131,65 +201,83 @@
       .page-title {
         margin: 0;
         color: var(--oc-ink);
-        font-weight: 780;
+        font-weight: 820;
       }
       .page-subtitle {
         color: var(--oc-muted);
       }
       .btn-oc {
-        background: var(--oc-red);
-        border-color: var(--oc-red);
+        background: linear-gradient(135deg, var(--oc-blue), var(--oc-cyan));
+        border-color: rgba(9, 169, 200, 0.74);
         color: #fff;
         font-weight: 700;
-        box-shadow: 0 10px 22px rgba(181, 31, 43, 0.18);
+        box-shadow: 0 12px 24px rgba(9, 169, 200, 0.22);
       }
       .btn-oc:hover {
-        background: var(--oc-red-dark);
-        border-color: var(--oc-red-dark);
+        background: linear-gradient(135deg, #075982, #078fa9);
+        border-color: #078fa9;
         color: #fff;
       }
       .btn-oc-outline {
-        border-color: #c8d0d9;
+        border-color: #b8cad8;
         color: var(--oc-ink);
-        background: rgba(255, 255, 255, 0.78);
+        background: rgba(255, 255, 255, 0.76);
         font-weight: 700;
       }
       .btn-oc-outline:hover {
-        border-color: var(--oc-red);
-        background: var(--oc-red);
+        border-color: var(--oc-blue);
+        background: var(--oc-blue);
         color: #fff;
       }
       .btn {
-        border-radius: 0.48rem;
+        border-radius: 0.42rem;
       }
       .text-oc {
-        color: var(--oc-red) !important;
+        color: var(--oc-cyan) !important;
       }
       .card {
-        border: 1px solid rgba(223, 229, 236, 0.96);
-        border-radius: 0.55rem;
-        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(185, 200, 214, 0.78);
+        border-radius: 0.48rem;
+        background: rgba(255, 255, 255, 0.88);
         box-shadow: var(--oc-shadow);
       }
       .card-header {
-        background: rgba(255, 255, 255, 0.88);
+        background: rgba(247, 251, 253, 0.92);
         border-bottom-color: var(--oc-line);
       }
       .surface {
-        border: 1px solid var(--oc-line);
-        border-radius: 0.55rem;
-        background: rgba(255, 255, 255, 0.9);
+        position: relative;
+        border: 1px solid rgba(185, 200, 214, 0.82);
+        border-radius: 0.5rem;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 252, 253, 0.91));
         box-shadow: var(--oc-shadow);
+      }
+      .surface::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border-radius: inherit;
+        background: linear-gradient(135deg, rgba(9, 169, 200, 0.10), transparent 28%);
+        opacity: 0.75;
+      }
+      .surface > * {
+        position: relative;
+        z-index: 1;
       }
       .metric {
         min-height: 6.5rem;
-        border: 1px solid var(--oc-line);
-        border-radius: 0.55rem;
-        background: linear-gradient(180deg, #fff 0%, #f9faf8 100%);
+        border: 1px solid rgba(185, 200, 214, 0.82);
+        border-radius: 0.46rem;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(238, 247, 250, 0.8)),
+          linear-gradient(90deg, rgba(9, 169, 200, 0.18) 0 0.18rem, transparent 0.18rem 100%);
         padding: 1rem;
+        box-shadow: var(--oc-glow);
       }
       .metric-label {
-        color: var(--oc-muted);
+        color: #5f7288;
         font-size: 0.78rem;
         font-weight: 760;
         text-transform: uppercase;
@@ -205,25 +293,29 @@
         align-items: center;
         min-height: 1.75rem;
         padding: 0.28rem 0.62rem;
-        border-radius: 999px;
+        border-radius: 0.35rem;
         font-size: 0.78rem;
         font-weight: 780;
+        border: 1px solid transparent;
       }
       .badge-running {
         background: var(--oc-green-soft);
         color: var(--oc-green);
+        border-color: rgba(8, 122, 103, 0.16);
       }
       .badge-stopped {
         background: var(--oc-amber-soft);
         color: var(--oc-amber);
+        border-color: rgba(162, 97, 5, 0.18);
       }
       .badge-neutral {
-        background: #edf0f4;
-        color: #52606d;
+        background: #edf5f8;
+        color: #526879;
+        border-color: rgba(82, 104, 121, 0.12);
       }
       .table thead th {
-        background: #f6f8fa;
-        color: #5d6977;
+        background: #eef6f9;
+        color: #516b7d;
         font-size: 0.78rem;
         font-weight: 800;
         text-transform: uppercase;
@@ -231,18 +323,21 @@
       }
       .table > :not(caption) > * > * {
         padding: 0.92rem 1rem;
-        border-bottom-color: #edf0f3;
+        border-bottom-color: #e6eef3;
       }
       .table-hover tbody tr:hover {
-        background-color: rgba(34, 94, 140, 0.045);
+        background-color: rgba(9, 169, 200, 0.055);
       }
-      .form-control {
+      .form-control,
+      .form-select {
         border-color: #cfd7df;
-        border-radius: 0.48rem;
+        border-radius: 0.42rem;
+        background-color: rgba(255, 255, 255, 0.88);
       }
-      .form-control:focus {
-        border-color: var(--oc-blue);
-        box-shadow: 0 0 0 0.22rem rgba(34, 94, 140, 0.12);
+      .form-control:focus,
+      .form-select:focus {
+        border-color: var(--oc-cyan);
+        box-shadow: 0 0 0 0.2rem rgba(9, 169, 200, 0.14);
       }
       pre {
         white-space: pre-wrap;
@@ -251,10 +346,10 @@
       .codebox {
         max-height: 30rem;
         overflow: auto;
-        background: #15202b;
-        color: #dfe9ef;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 0.5rem;
+        background: #0c1720;
+        color: #d9edf4;
+        border: 1px solid rgba(9, 169, 200, 0.22);
+        border-radius: 0.42rem;
         padding: 1rem;
         font-size: 0.82rem;
         line-height: 1.55;
@@ -275,9 +370,9 @@
         border: 1px solid #edd18d;
       }
       .action-panel {
-        border: 1px solid var(--oc-line);
-        border-radius: 0.55rem;
-        background: var(--oc-panel-soft);
+        border: 1px solid rgba(185, 200, 214, 0.82);
+        border-radius: 0.5rem;
+        background: linear-gradient(180deg, rgba(244, 248, 251, 0.92), rgba(237, 246, 249, 0.88));
         padding: 1rem;
       }
       .section-title {

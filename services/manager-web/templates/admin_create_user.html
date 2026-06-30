@@ -14,6 +14,13 @@
     <div class="alert soft-danger">{{ error }}</div>
   {% endif %}
 
+  {% if batch_create.error %}
+    <div class="alert soft-danger">
+      <div class="section-title">批量创建预检未通过</div>
+      <pre class="mb-0 mt-2">{{ batch_create.error }}</pre>
+    </div>
+  {% endif %}
+
   {% if account %}
     <div class="alert soft-success d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
       <div>
@@ -78,6 +85,95 @@
     </div>
   {% endif %}
 
+  <div class="surface p-3 p-lg-4 mb-3">
+    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+      <div>
+        <div class="section-title">批量创建用户实例</div>
+        <div class="muted-small">上传 CSV 后先做预检，确认用户 ID、重复实例、端口余量和运行配置，再执行创建。</div>
+      </div>
+      {% if batch_create.output_relative_path %}
+        <a class="btn btn-sm btn-oc-outline" href="/admin/create-user/batch/results/{{ batch_create.output_relative_path }}">下载结果 CSV</a>
+      {% endif %}
+    </div>
+
+    <form class="mb-3" method="post" action="/admin/create-user/batch/preview" enctype="multipart/form-data">
+      <label class="form-label" for="batch_input_file">上传创建 CSV</label>
+      <input class="form-control mb-2" id="batch_input_file" name="input_file" type="file" accept=".csv">
+      <div class="muted-small mb-3">CSV 表头：user_id,basic_auth_password,basic_auth_enabled。密码可留空，脚本会自动生成；basic_auth_enabled 可省略，默认启用。</div>
+
+      <label class="form-label" for="batch_input_csv">或使用服务器已有 CSV 路径</label>
+      <input class="form-control mb-3" id="batch_input_csv" name="input_csv" value="{{ batch_create.input_csv }}" placeholder="/data/docker/openclaw-public/batches/20260624/create_users.csv">
+
+      <button class="btn btn-oc-outline" type="submit">预检 CSV</button>
+    </form>
+
+    {% if batch_create.capacity %}
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <div class="metric">
+            <div class="metric-label">端口范围</div>
+            <div class="metric-value">{{ batch_create.capacity.start }}-{{ batch_create.capacity.end }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="metric">
+            <div class="metric-label">下一个端口</div>
+            <div class="metric-value">{{ batch_create.capacity.next }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="metric">
+            <div class="metric-label">估算可用</div>
+            <div class="metric-value">{{ batch_create.capacity.available }}</div>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if batch_create.rows %}
+      <div class="table-responsive mb-3">
+        <table class="table table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>行号</th>
+              <th>用户 ID</th>
+              <th>密码</th>
+              <th>访问认证</th>
+              <th>状态</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in batch_create.rows %}
+              <tr>
+                <td>{{ row.line }}</td>
+                <td class="fw-semibold">{{ row.user_id }}</td>
+                <td>{% if row.password_provided %}已提供{% else %}自动生成{% endif %}</td>
+                <td>{{ row.basic_auth_enabled }}</td>
+                <td>
+                  {% if row.status == "ready" %}
+                    <span class="badge-status badge-running">ready</span>
+                  {% else %}
+                    <span class="badge-status badge-stopped">{{ row.status }}</span>
+                  {% endif %}
+                </td>
+                <td class="muted-small">{{ row.message or "-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if batch_create.can_execute %}
+        <form method="post" action="/admin/create-user/batch/run" onsubmit="const button=this.querySelector('[data-batch-create-submit]'); if (button) { button.disabled = true; button.textContent = '批量创建中...'; }">
+          <input type="hidden" name="input_csv" value="{{ batch_create.input_csv }}">
+          <input type="hidden" name="output_csv" value="{{ batch_create.output_csv }}">
+          <button class="btn btn-oc" type="submit" data-batch-create-submit>执行批量创建</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </div>
+
   <div class="row g-3">
     <div class="col-lg-5">
       <div class="surface p-3 p-lg-4">
@@ -107,7 +203,8 @@
         <div class="section-title mb-2">操作说明</div>
         <div class="muted-small mb-2">本页面会在管理主机上调用现有创建脚本。</div>
         <ul class="muted-small mb-0">
-          <li>每次提交创建一个实例；批量创建仍使用 CSV 批处理脚本。</li>
+          <li>单实例创建会立即开通一个用户实例。</li>
+          <li>批量创建会先保存/读取 CSV，预检通过后调用现有批处理脚本。</li>
           <li>请关注命令输出中的端口、Token 和 Nginx reload 状态。</li>
           <li>如果禁用访问认证，仅主工作区入口跳过 Basic Auth；实例本地 /admin/ 页面仍保持保护。</li>
         </ul>

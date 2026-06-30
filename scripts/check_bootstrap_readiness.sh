@@ -65,6 +65,36 @@ check_network() {
   fi
 }
 
+check_writable_dir() {
+  if [ ! -d "$1" ]; then
+    missing "directory missing: $1"
+  elif [ -w "$1" ]; then
+    ok "directory is writable: $1"
+  else
+    warn "directory is not writable by current user: $1"
+  fi
+}
+
+check_writable_file() {
+  if [ ! -f "$1" ]; then
+    missing "file missing: $1"
+  elif [ -w "$1" ]; then
+    ok "file is writable: $1"
+  else
+    warn "file is not writable by current user: $1"
+  fi
+}
+
+check_executable_file() {
+  if [ ! -f "$1" ]; then
+    missing "file missing: $1"
+  elif [ -x "$1" ]; then
+    ok "file is executable: $1"
+  else
+    warn "file is not executable: $1"
+  fi
+}
+
 check_docker_data_root() {
   if ! command -v docker >/dev/null 2>&1; then
     return
@@ -212,19 +242,24 @@ NGINX_SSL_KEY="${NGINX_SSL_KEY:-/etc/nginx/certs/openclaw.key}"
 
 check_dir "$OPENCLAW_PUBLIC_DIR"
 check_dir "$OPENCLAW_PUBLIC_DIR/users"
+check_writable_dir "$OPENCLAW_PUBLIC_DIR/batches"
 check_dir "$OPENCLAW_PUBLIC_DIR/deleted"
 check_dir "$OPENCLAW_PUBLIC_DIR/logs"
 check_dir "$MODEL_PROXY_TOKEN_DIR"
-check_file "$USERS_CSV"
-check_file "$PORT_FILE"
+check_writable_file "$USERS_CSV"
+check_writable_file "$PORT_FILE"
 check_file "$METADATA_DB_FILE"
 
+check_executable_file "$MANAGER_DIR/scripts/create_user.sh"
+check_executable_file "$MANAGER_DIR/scripts/batch_create_users.sh"
+check_executable_file "$MANAGER_DIR/scripts/delete_user.sh"
+
 check_dir "$NGINX_CONF_DIR"
-check_dir "$NGINX_USERS_CONF_DIR"
+check_writable_dir "$NGINX_USERS_CONF_DIR"
 check_dir "$NGINX_CERTS_DIR"
 check_dir "$NGINX_LOGS_DIR"
 check_dir "$NGINX_AUTH_DIR"
-check_dir "$NGINX_AUTH_USERS_DIR"
+check_writable_dir "$NGINX_AUTH_USERS_DIR"
 check_file "$NGINX_COMPOSE_FILE"
 check_nonempty_file "$NGINX_HTPASSWD_FILE"
 

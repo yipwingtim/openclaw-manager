@@ -8,6 +8,7 @@ import io
 import threading
 import hmac
 import time
+import uuid
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -31,6 +32,7 @@ SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
 SKILL_INSTALL_TIMEOUT = int(os.environ.get("MANAGER_SKILL_INSTALL_TIMEOUT", "180"))
 WECHAT_BIND_TIMEOUT = int(os.environ.get("MANAGER_WECHAT_BIND_TIMEOUT", "300"))
+BATCH_CREATE_TIMEOUT = int(os.environ.get("MANAGER_BATCH_CREATE_TIMEOUT", "3600"))
 CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
 WORKSPACE_FILE_ROOTS = {
     "workspace": ("OpenClaw Workspace", "workspace", "/home/node/.openclaw/workspace"),
@@ -155,6 +157,230 @@ def read_text_preview(path, max_chars=8000):
     if len(text) > max_chars:
         return text[:max_chars] + "\n... truncated ..."
     return text
+
+
+def normalize_basic_auth_enabled(value):
+    value = (value or "true").strip().lower()
+    if value in {"", "true", "yes", "y", "1", "on", "enabled"}:
+        return "true"
+    if value in {"false", "no", "n", "0", "off", "disabled"}:
+        return "false"
+    return None
+
+
+def read_active_users_csv():
+    active_users = set()
+    users_csv = PUBLIC_DIR / "users.csv"
+    if not users_csv.is_file():
+        return active_users
+
+    with users_csv.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            user_id = (row.get("user_id") or "").strip()
+            status = (row.get("status") or "").strip()
+            if user_id and status == "active":
+                active_users.add(user_id)
+    return active_users
+
+
+def read_port_config():
+    config_file = MANAGER_DIR / "config" / "openclaw-manager.env"
+    values = {}
+    if not config_file.is_file():
+        return None, None, None, f"Config file not found: {config_file}"
+
+    for line in config_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        if key in {"PORT_START", "PORT_END", "PORT_FILE"}:
+            values[key] = raw_value.strip().strip("\"'")
+
+    try:
+        port_start = int(values.get("PORT_START", ""))
+        port_end = int(values.get("PORT_END", ""))
+    except ValueError:
+        return None, None, None, "PORT_START/PORT_END are missing or invalid in config."
+
+    port_file = Path(values.get("PORT_FILE") or (PUBLIC_DIR / "ports.txt"))
+    return port_start, port_end, port_file, ""
+
+
+def estimate_port_capacity():
+    port_start, port_end, port_file, error = read_port_config()
+    if error:
+        return None, error
+
+    next_port = port_start
+    if port_file and port_file.is_file():
+        try:
+            next_port = int(port_file.read_text(encoding="utf-8", errors="ignore").strip())
+        except ValueError:
+            next_port = port_start
+    next_port = max(port_start, next_port)
+
+    used_ports = set()
+    for conf in NGINX_USERS_CONF_DIR.glob("*.conf"):
+        text = conf.read_text(encoding="utf-8", errors="ignore")
+        for match in re.finditer(r"^\s*listen\s+([0-9]+)\b", text, re.MULTILINE):
+            used_ports.add(int(match.group(1)))
+
+    if port_start is None or port_end is None:
+        return None, "Port range is not configured."
+
+    total = max(0, port_end - port_start + 1)
+    used_in_range = sum(1 for port in used_ports if port_start <= port <= port_end)
+    allocatable = [port for port in range(next_port, port_end + 1) if port not in used_ports]
+    return {
+        "start": port_start,
+        "end": port_end,
+        "next": next_port,
+        "total": total,
+        "used": used_in_range,
+        "available": len(allocatable),
+    }, ""
+
+
+def parse_batch_create_csv(path):
+    rows = []
+    errors = []
+    seen = set()
+
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            fieldnames = reader.fieldnames or []
+            if not fieldnames or fieldnames[0] != "user_id":
+                return [], ["CSV first column must be user_id."]
+
+            for line_no, row in enumerate(reader, start=2):
+                raw_user_id = (row.get("user_id") or "").strip()
+                if not raw_user_id:
+                    continue
+
+                user_id = validate_user_id(raw_user_id)
+                password = (row.get("basic_auth_password") or "").strip()
+                basic_auth_enabled = normalize_basic_auth_enabled(row.get("basic_auth_enabled"))
+
+                item = {
+                    "line": line_no,
+                    "user_id": raw_user_id,
+                    "password_provided": bool(password),
+                    "basic_auth_enabled": basic_auth_enabled or (row.get("basic_auth_enabled") or "").strip(),
+                    "status": "ready",
+                    "message": "",
+                }
+
+                if not user_id:
+                    item["status"] = "invalid"
+                    item["message"] = "Invalid user_id."
+                    errors.append(f"line {line_no}: invalid user_id {raw_user_id}")
+                elif user_id in seen:
+                    item["status"] = "duplicate"
+                    item["message"] = "Duplicate user_id in CSV."
+                    errors.append(f"line {line_no}: duplicate user_id {user_id}")
+                elif basic_auth_enabled is None:
+                    item["status"] = "invalid"
+                    item["message"] = "Invalid basic_auth_enabled."
+                    errors.append(f"line {line_no}: invalid basic_auth_enabled")
+                else:
+                    item["user_id"] = user_id
+                    seen.add(user_id)
+
+                rows.append(item)
+    except UnicodeDecodeError:
+        return [], ["CSV must be UTF-8 encoded."]
+
+    if not rows:
+        errors.append("CSV has no user rows.")
+
+    return rows, errors
+
+
+def batch_create_paths(batch_id):
+    batch_dir = PUBLIC_DIR / "batches" / "web-create-users" / batch_id
+    return batch_dir, batch_dir / "input.csv", batch_dir / "results.csv"
+
+
+def batch_relative_path(path):
+    try:
+        return str(path.resolve().relative_to((PUBLIC_DIR / "batches").resolve()))
+    except ValueError:
+        return ""
+
+
+def batch_create_context(input_csv=None, output_csv=None, rows=None, result="", error="", capacity=None):
+    return {
+        "batch_create": {
+            "input_csv": str(input_csv) if input_csv else "",
+            "output_csv": str(output_csv) if output_csv else "",
+            "output_relative_path": batch_relative_path(output_csv) if output_csv else "",
+            "rows": rows or [],
+            "result": result,
+            "error": error,
+            "capacity": capacity,
+            "can_execute": bool(input_csv and rows and not error),
+        }
+    }
+
+
+def preflight_batch_create(input_csv):
+    rows, errors = parse_batch_create_csv(input_csv)
+    try:
+        active_users = read_active_users_csv()
+    except OSError as exc:
+        active_users = set()
+        errors.append(f"Could not read users.csv: {exc}")
+
+    ready_count = 0
+    for row in rows:
+        if row["status"] != "ready":
+            continue
+
+        user_id = row["user_id"]
+        if user_id in active_users or get_user_dir(user_id).exists():
+            row["status"] = "exists"
+            row["message"] = "User already exists."
+            errors.append(f"{user_id}: user already exists")
+            continue
+
+        ready_count += 1
+
+    capacity, capacity_error = estimate_port_capacity()
+    if capacity_error:
+        errors.append(capacity_error)
+    elif capacity and capacity["available"] < ready_count:
+        errors.append(
+            f"Not enough available ports: need {ready_count}, available {capacity['available']} "
+            f"in {capacity['start']}-{capacity['end']}."
+        )
+
+    script = MANAGER_DIR / "scripts" / "batch_create_users.sh"
+    if not script.is_file():
+        errors.append(f"Batch create script not found: {script}")
+
+    config_file = MANAGER_DIR / "config" / "openclaw-manager.env"
+    if not config_file.is_file():
+        errors.append(f"Runtime config not found: {config_file}")
+
+    return rows, errors, capacity
+
+
+def save_batch_create_account_records(output_csv):
+    if not output_csv.is_file():
+        return 0
+
+    saved = 0
+    with output_csv.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            user_id = validate_user_id(row.get("user_id"))
+            if not user_id or row.get("status") != "created":
+                continue
+            LAST_CREATED_ACCOUNTS[user_id] = row
+            save_account_record(row)
+            saved += 1
+    return saved
 
 
 def parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password):
@@ -1323,6 +1549,7 @@ def admin_create_user():
         account_csv="",
         result="",
         error="",
+        **batch_create_context(),
     )
 
 
@@ -1349,7 +1576,177 @@ def admin_created_user_detail(user_id):
         account_csv=account_csv(account),
         result=request.args.get("result", ""),
         error="",
+        **batch_create_context(),
     )
+
+
+@app.post("/admin/create-user/batch/preview")
+def preview_admin_batch_create_users():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    upload = request.files.get("input_file")
+    existing_input = (request.form.get("input_csv") or "").strip()
+    if upload and upload.filename:
+        if not upload.filename.lower().endswith(".csv"):
+            return render_template(
+                "admin_create_user.html",
+                user_id="",
+                basic_auth_enabled="true",
+                basic_auth_password="",
+                account=None,
+                account_csv="",
+                result="",
+                error="",
+                **batch_create_context(error="Uploaded file must be a CSV."),
+            ), 400
+        batch_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        batch_dir, input_csv, output_csv = batch_create_paths(batch_id)
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        upload.save(input_csv)
+    else:
+        input_csv, input_error = batch_path_from_form(existing_input)
+        if input_error:
+            return render_template(
+                "admin_create_user.html",
+                user_id="",
+                basic_auth_enabled="true",
+                basic_auth_password="",
+                account=None,
+                account_csv="",
+                result="",
+                error="",
+                **batch_create_context(error=input_error),
+            ), 400
+        output_csv = input_csv.with_name(input_csv.stem + "_results.csv")
+
+    rows, errors, capacity = preflight_batch_create(input_csv)
+    error = "\n".join(errors)
+    return render_template(
+        "admin_create_user.html",
+        user_id="",
+        basic_auth_enabled="true",
+        basic_auth_password="",
+        account=None,
+        account_csv="",
+        result="",
+        error="",
+        **batch_create_context(input_csv=input_csv, output_csv=output_csv, rows=rows, error=error, capacity=capacity),
+    ), 400 if errors else 200
+
+
+@app.post("/admin/create-user/batch/run")
+def run_admin_batch_create_users():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    input_csv, input_error = batch_path_from_form(request.form.get("input_csv"))
+    output_csv, output_error = batch_path_from_form(request.form.get("output_csv"))
+    if input_error or output_error:
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result="",
+            error="",
+            **batch_create_context(error=input_error or output_error),
+        ), 400
+
+    if not input_csv.is_file():
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result="",
+            error="",
+            **batch_create_context(input_csv=input_csv, output_csv=output_csv, error=f"Input CSV not found: {input_csv}"),
+        ), 400
+
+    rows, errors, capacity = preflight_batch_create(input_csv)
+    if errors:
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result="",
+            error="",
+            **batch_create_context(
+                input_csv=input_csv,
+                output_csv=output_csv,
+                rows=rows,
+                error="\n".join(errors),
+                capacity=capacity,
+            ),
+        ), 400
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    script = MANAGER_DIR / "scripts" / "batch_create_users.sh"
+    process = subprocess.run(
+        [str(script), str(input_csv), str(output_csv)],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=BATCH_CREATE_TIMEOUT,
+        check=False,
+    )
+    command_output = (process.stdout + "\n" + process.stderr).strip()
+    result_csv = read_text_preview(output_csv, max_chars=12000)
+    saved_count = save_batch_create_account_records(output_csv)
+    result = f"{command_output}\n\nResult CSV:\n{result_csv}".strip()
+
+    if process.returncode != 0:
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result=result,
+            error="Batch create failed.",
+            **batch_create_context(input_csv=input_csv, output_csv=output_csv, rows=rows, capacity=capacity),
+        ), 500
+
+    result += persist_operation_metadata(
+        "batch_create_users",
+        message=f"input={input_csv.name} output={output_csv.name} saved_accounts={saved_count} {command_output[-500:]}".strip(),
+    )
+    return render_template(
+        "admin_create_user.html",
+        user_id="",
+        basic_auth_enabled="true",
+        basic_auth_password="",
+        account=None,
+        account_csv="",
+        result=result,
+        error="",
+        **batch_create_context(input_csv=input_csv, output_csv=output_csv, rows=rows, capacity=capacity),
+    )
+
+
+@app.get("/admin/create-user/batch/results/<path:relative_path>")
+def download_batch_create_results(relative_path):
+    denied = require_admin()
+    if denied:
+        return denied
+
+    output_csv, error = batch_path_from_form(relative_path)
+    if error:
+        return render_template("error.html", message=error), 400
+    if not output_csv.is_file():
+        return render_template("error.html", message="Result CSV not found."), 404
+    return send_file(output_csv, as_attachment=True, download_name=output_csv.name)
 
 
 @app.post("/admin/create-user")
@@ -1374,6 +1771,7 @@ def run_admin_create_user():
                 account_csv="",
                 result=result,
                 error=error,
+                **batch_create_context(),
             ),
             status,
         )
@@ -1388,6 +1786,7 @@ def run_admin_create_user():
             account_csv=account_csv(account),
             result=result,
             error="",
+            **batch_create_context(),
         )
 
     if not user_id:

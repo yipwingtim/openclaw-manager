@@ -397,7 +397,7 @@ cd /data/docker/openclaw-manager
 https://<服务器IP>:30015/admin/create-user
 ```
 
-该页面会调用同一个 `scripts/create_user.sh`，适合临时补开单个实例。批量创建仍建议使用 CSV 批处理脚本。
+该页面支持单实例创建和 Web 批量创建。单实例创建会调用 `scripts/create_user.sh`；批量创建会先上传或读取 CSV，完成预检后调用 `scripts/batch_create_users.sh`。
 
 如需关闭该实例的 Nginx Basic Auth：
 
@@ -414,6 +414,16 @@ training02,example-password,true
 ```
 
 默认值为 `true`。
+
+Web 批量创建流程：
+
+1. 打开 `https://<服务器IP>:30015/admin/create-user`。
+2. 上传 CSV，或填写 `/data/docker/openclaw-public/batches/...` 下已有 CSV 路径。
+3. 点击“预检 CSV”，确认用户 ID、重复实例、端口余量和运行配置。
+4. 预检通过后点击“执行批量创建”。
+5. 创建完成后下载结果 CSV，结果包含账号、访问地址、端口、容器名、Token 和状态。
+
+上传的 CSV 会保存到 `/data/docker/openclaw-public/batches/web-create-users/<timestamp>/input.csv`，结果文件保存为同目录下的 `results.csv`。
 
 示例：
 
@@ -796,8 +806,8 @@ docker exec openclaw-nginx nginx -s reload
 
 管理员也可以在 `https://<服务器IP>:30015/admin/users` 中直接切换。页面会先备份当前 Nginx 用户配置，执行 `nginx -t`，测试通过后才 reload；失败时自动恢复原配置。
 
-管理员也可以在 `https://<服务器IP>:30015/admin/create-user` 创建单个实例。表单支持选择是否启用 Basic Auth；启用时需要填写 Basic Auth 密码，关闭时不写密码即可。
-创建成功后页面会显示访问地址、Basic Auth 状态、OpenClaw Login Token，并支持复制或下载本次创建的 `accounts.csv`。该下载记录保存在 manager-web 进程内存中，manager-web 重启后需要从 `users.csv` 或实例配置中重新查询。
+管理员也可以在 `https://<服务器IP>:30015/admin/create-user` 创建实例。表单支持选择是否启用 Basic Auth；启用时需要填写 Basic Auth 密码，关闭时不写密码即可。该页面也支持上传批量创建 CSV，并在执行前预检用户 ID、重复实例、端口余量和配置完整性。
+创建成功后页面会显示访问地址、Basic Auth 状态、OpenClaw Login Token，并支持复制或下载本次创建的 `accounts.csv`。单实例记录会写入 `/data/docker/openclaw-public/accounts/<user_id>_account.csv`；批量创建结果以 `results.csv` 保存在 `/data/docker/openclaw-public/batches/...`。
 
 管理员也可以在 `https://<服务器IP>:30015/admin/users` 对单个实例执行 Start、Stop、Restart 和 Delete。Delete 会调用 `scripts/delete_user.sh`，用户目录会进入回收站，并移除对应 Nginx 配置和端口映射。
 用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
@@ -851,6 +861,14 @@ Production deployment order matters when enabling network isolation:
 6. 验证 Nginx 可以访问 `openclaw-manager-web:8080`，用户 OpenClaw 容器不能访问。
 
 Web 创建实例时，脚本会在创建完成后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。
+
+Web 批量创建依赖以下运行时条件：
+
+- `scripts/batch_create_users.sh` 可执行
+- `/data/docker/openclaw-public/batches` 可写
+- `users.csv` 和 `ports.txt` 可写
+- Nginx 用户配置目录和 `auth/users` 可写
+- 当前执行环境可以运行 Docker 和 Docker Compose
 
 ---
 

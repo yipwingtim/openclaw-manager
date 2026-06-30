@@ -334,8 +334,18 @@ Bulk Install Skill
 - `update_skill`
 - `get_access_info`
 
-`https://<PUBLIC_HOST>:30015/admin/create-user` 已支持管理员创建单个实例。该页面用于临时补开实例；批量培训名单仍建议使用 CSV 拆分后执行批量创建脚本。
-创建成功后页面会显示访问地址、Basic Auth 状态、OpenClaw Login Token，并支持复制或下载本次创建的 `accounts.csv`。该下载记录保存在 manager-web 进程内存中，manager-web 重启后需要从 `users.csv` 或实例配置中重新查询。
+`https://<PUBLIC_HOST>:30015/admin/create-user` 已支持管理员创建单个实例和 Web 批量创建实例。单实例创建用于临时补开实例；批量创建用于培训名单，页面会上传或读取 CSV，先预检用户 ID、重复实例、端口余量和运行配置，再调用固定脚本 `scripts/batch_create_users.sh`。
+创建成功后页面会显示访问地址、Basic Auth 状态、OpenClaw Login Token，并支持复制或下载账号 CSV。单实例记录会写入 `/data/docker/openclaw-public/accounts/<user_id>_account.csv`；批量创建结果保存在 `/data/docker/openclaw-public/batches/.../results.csv`，结果 CSV 包含账号、访问地址、端口、容器名、Token 和状态。
+
+批量创建输入 CSV 表头：
+
+```csv
+user_id,basic_auth_password,basic_auth_enabled
+training01,example-password,true
+training02,,false
+```
+
+`basic_auth_password` 可留空，脚本会自动生成；`basic_auth_enabled` 可省略，默认启用。
 
 `https://<PUBLIC_HOST>:30015/admin/users` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
 用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
@@ -373,7 +383,7 @@ Bulk Install Skill
 
 `manager-web` 通过 Web 页面调用管理脚本，并需要 Docker API 管理实例容器。容器内需要 Docker CLI、Docker Compose plugin、`/var/run/docker.sock`，并挂载 OpenClaw Manager 项目目录、OpenClaw public 数据目录、Nginx conf/auth/compose 目录。`manager-web` 应只加入 `manager-net`；用户实例容器应只加入 `agent-net`；Nginx 需要同时加入两个网络。
 
-Web 创建实例时，`create_user.sh` 会在成功后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。
+Web 创建实例时，`create_user.sh` 会在成功后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。Web 批量创建还要求 `/data/docker/openclaw-public/batches`、`users.csv`、`ports.txt`、Nginx 用户配置目录和 `auth/users` 对 manager-web 执行用户可写；可通过 `scripts/check_bootstrap_readiness.sh` 做部署前检查。
 
 ## 8. 后续计划
 

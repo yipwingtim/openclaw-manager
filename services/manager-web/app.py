@@ -2211,13 +2211,13 @@ def user_detail(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return render_user_dashboard(user_id)
 
@@ -2245,13 +2245,13 @@ def refresh_devices(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return refresh_devices_for_user(user_id)
 
@@ -2262,13 +2262,13 @@ def upload_file(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return upload_file_for_user(user_id)
 
@@ -2279,13 +2279,13 @@ def user_wechat_bind_url(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return generate_wechat_bind_url_for_user(user_id)
 
@@ -2296,13 +2296,13 @@ def user_wechat_bind_cancel(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return cancel_wechat_bind_job_for_user(user_id)
 
@@ -2313,13 +2313,13 @@ def download_workspace_file(user_id, root_key, relative_path):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return download_workspace_file_for_user(user_id, root_key, relative_path)
 
@@ -2330,13 +2330,13 @@ def delete_workspace_file(user_id, root_key, relative_path):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return delete_file_for_user(user_id, root_key, relative_path)
 

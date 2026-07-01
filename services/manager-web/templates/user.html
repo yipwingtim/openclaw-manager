@@ -23,7 +23,7 @@
       {% if show_admin_links %}
         <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
       {% endif %}
-      <a class="btn btn-oc-outline" href="/">切换用户</a>
+      <a class="btn btn-oc-outline" href="/">{% if instance_mode %}返回首页{% else %}切换用户{% endif %}</a>
     </div>
   </div>
 

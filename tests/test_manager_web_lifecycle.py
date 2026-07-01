@@ -89,6 +89,33 @@ class LifecycleActionTests(unittest.TestCase):
             run_command.assert_not_called()
 
 
+class UserPageUxTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app_module = load_app_module()
+
+    def test_uploaded_file_sizes_use_human_readable_units(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            upload_dir = Path(public_dir) / "users" / "alice" / "uploads"
+            upload_dir.mkdir(parents=True)
+            (upload_dir / "report.pdf").write_bytes(b"x" * 1048576)
+
+            files = self.app_module.list_uploaded_files("alice")
+
+            self.assertEqual(files[0]["size"], "1.0 MB")
+
+    def test_user_detail_checks_access_before_user_existence(self):
+        self.app_module.request.headers = {"X-Remote-User": "bob"}
+        self.app_module.request.args = {}
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+
+            response = self.app_module.user_detail("missing-user")
+
+            self.assertEqual(response, ("", 403))
+
+
 class BatchCreatePreflightTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

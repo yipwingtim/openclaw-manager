@@ -328,6 +328,20 @@
       .table-hover tbody tr:hover {
         background-color: rgba(9, 169, 200, 0.055);
       }
+      .file-list-scroll {
+        max-height: 18rem;
+        overflow: auto;
+        border: 1px solid rgba(185, 200, 214, 0.55);
+        border-radius: 0.42rem;
+      }
+      .file-list-scroll .table {
+        margin-bottom: 0;
+      }
+      .file-list-scroll thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+      }
       .form-control,
       .form-select {
         border-color: #cfd7df;

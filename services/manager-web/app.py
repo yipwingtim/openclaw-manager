@@ -705,7 +705,7 @@ def list_uploaded_files(user_id):
         files.append(
             {
                 "name": path.name,
-                "size": stat.st_size,
+                "size": format_bytes(stat.st_size),
                 "container_path": f"{CONTAINER_UPLOAD_DIR}/{path.name}",
             }
         )
@@ -2211,13 +2211,13 @@ def user_detail(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
     denied = require_instance_access(user_id)
     if denied:
         return denied
+
+    user_dir = get_user_dir(user_id)
+    if not user_dir.is_dir():
+        return render_template("error.html", message=f"User not found: {user_id}"), 404
 
     return render_user_dashboard(user_id)
 

@@ -23,7 +23,11 @@
       {% if show_admin_links %}
         <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
       {% endif %}
-      <a class="btn btn-oc-outline" href="/">切换用户</a>
+      {% if instance_mode and not is_admin %}
+        <a class="btn btn-oc-outline" href="/me">打开我的实例</a>
+      {% else %}
+        <a class="btn btn-oc-outline" href="/">切换用户</a>
+      {% endif %}
     </div>
   </div>
 
@@ -161,7 +165,8 @@
             </div>
           </form>
             {% if uploaded_files %}
-              <div class="table-responsive">
+              <input class="form-control form-control-sm mb-2" type="search" data-file-search="uploaded-files-table" placeholder="搜索已上传文件">
+              <div class="table-responsive file-list-scroll">
                 <table class="table table-sm align-middle mb-0">
                   <thead>
                     <tr>
@@ -170,11 +175,11 @@
                       <th>容器路径</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody id="uploaded-files-table">
                     {% for file in uploaded_files %}
                       <tr>
                         <td>{{ file.name }}</td>
-                        <td>{{ file.size }} bytes</td>
+                        <td>{{ file.size }}</td>
                         <td>{{ file.container_path }}</td>
                       </tr>
                     {% endfor %}
@@ -198,7 +203,8 @@
             </div>
           </div>
           {% if downloadable_files %}
-            <div class="table-responsive">
+            <input class="form-control form-control-sm mb-2" type="search" data-file-search="downloadable-files-table" placeholder="搜索可下载文件">
+            <div class="table-responsive file-list-scroll">
               <table class="table table-sm align-middle mb-0">
                 <thead>
                   <tr>
@@ -210,7 +216,7 @@
                     <th>删除</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody id="downloadable-files-table">
                   {% for file in downloadable_files %}
                     <tr>
                       <td class="fw-semibold">{{ file.name }}</td>
@@ -285,6 +291,18 @@
         wechatBindPending.classList.remove("d-none");
       });
     }
+
+    document.querySelectorAll("[data-file-search]").forEach((input) => {
+      const tableBody = document.getElementById(input.dataset.fileSearch);
+      if (!tableBody) return;
+
+      input.addEventListener("input", () => {
+        const query = input.value.trim().toLowerCase();
+        tableBody.querySelectorAll("tr").forEach((row) => {
+          row.hidden = query && !row.textContent.toLowerCase().includes(query);
+        });
+      });
+    });
 
     {% if wechat_bind_job and wechat_bind_job.status in ["starting", "running"] %}
       window.setTimeout(() => {

@@ -705,7 +705,7 @@ def list_uploaded_files(user_id):
         files.append(
             {
                 "name": path.name,
-                "size": stat.st_size,
+                "size": format_bytes(stat.st_size),
                 "container_path": f"{CONTAINER_UPLOAD_DIR}/{path.name}",
             }
         )

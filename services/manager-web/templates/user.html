@@ -165,12 +165,16 @@
                 <table class="table table-sm align-middle mb-0">
                   <thead>
                     <tr>
-                      <th>文件名</th>
+                      <th class="oc-search-th" tabindex="0" title="点击筛选文件名">
+                        <span class="oc-search-label">文件名<span class="oc-search-icon" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></span></span>
+                        <input class="form-control form-control-sm oc-search-input" type="text" placeholder="文件名…" autocomplete="off">
+                      </th>
                       <th>大小</th>
                       <th>容器路径</th>
                     </tr>
                   </thead>
                   <tbody>
+                    <tr class="oc-no-match" style="display:none;"><td colspan="3" class="muted-small">无匹配文件。</td></tr>
                     {% for file in uploaded_files %}
                       <tr>
                         <td>{{ file.name }}</td>
@@ -202,8 +206,11 @@
               <table class="table table-sm align-middle mb-0">
                 <thead>
                   <tr>
-                    <th>文件名</th>
-                    <th>来源</th>
+                    <th class="oc-search-th" tabindex="0" title="点击筛选文件名">
+                        <span class="oc-search-label">文件名<span class="oc-search-icon" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></span></span>
+                        <input class="form-control form-control-sm oc-search-input" type="text" placeholder="文件名…" autocomplete="off">
+                      </th>
+                      <th>来源</th>
                     <th>大小</th>
                     <th>容器路径</th>
                     <th>下载</th>
@@ -211,7 +218,8 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {% for file in downloadable_files %}
+                    <tr class="oc-no-match" style="display:none;"><td colspan="6" class="muted-small">无匹配文件。</td></tr>
+                    {% for file in downloadable_files %}
                     <tr>
                       <td class="fw-semibold">{{ file.name }}</td>
                       <td>{{ file.root_label }}</td>
@@ -273,6 +281,17 @@
       </div>
     </div>
   </div>
+  <style>
+    .oc-search-th { cursor: pointer; transition: background 140ms ease; }
+    .oc-search-th:hover { background: #e2eef4; }
+    .oc-search-th:focus-visible { outline: 2px solid var(--oc-cyan); outline-offset: -2px; }
+    .oc-search-label { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .oc-search-icon { display: inline-flex; color: var(--oc-cyan); opacity: 0.5; transition: opacity 140ms ease; }
+    .oc-search-th:hover .oc-search-icon { opacity: 1; }
+    .oc-search-input { display: none; width: 12rem; max-width: 100%; text-transform: none; }
+    .oc-search-th.oc-active .oc-search-label { display: none; }
+    .oc-search-th.oc-active .oc-search-input { display: inline-block; }
+  </style>
   <script>
     const wechatBindForm = document.getElementById("wechat-bind-form");
     const wechatBindButton = document.getElementById("wechat-bind-button");
@@ -291,5 +310,52 @@
         window.location.reload();
       }, 2000);
     {% endif %}
+
+    // 文件名搜索：点击「文件名」表头 → 输入 → 回车筛选，Esc 清除
+    (function () {
+      document.querySelectorAll(".oc-search-th").forEach(function (th) {
+        var table = th.closest("table");
+        if (!table) return;
+        var input = th.querySelector(".oc-search-input");
+        var noMatch = table.querySelector(".oc-no-match");
+        if (!input) return;
+
+        function activate() {
+          th.classList.add("oc-active");
+          input.focus();
+        }
+        function deactivate() {
+          th.classList.remove("oc-active");
+        }
+        function filter() {
+          var term = input.value.trim().toLowerCase();
+          var any = false;
+          table.querySelectorAll("tbody tr").forEach(function (tr) {
+            if (tr.classList.contains("oc-no-match")) return;
+            var name = tr.cells[0] ? tr.cells[0].textContent.trim().toLowerCase() : "";
+            var show = !term || name.indexOf(term) !== -1;
+            tr.style.display = show ? "" : "none";
+            if (show) any = true;
+          });
+          if (noMatch) noMatch.style.display = any ? "none" : "";
+        }
+
+        th.addEventListener("click", function (e) {
+          if (e.target === input) return;
+          if (!th.classList.contains("oc-active")) activate();
+        });
+        th.addEventListener("keydown", function (e) {
+          if (e.target !== th) return;
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
+        });
+        input.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); filter(); }
+          else if (e.key === "Escape") { input.value = ""; filter(); deactivate(); input.blur(); }
+        });
+        input.addEventListener("blur", function () {
+          if (!input.value.trim()) deactivate();
+        });
+      });
+    })();
   </script>
 {% endblock %}

@@ -6,6 +6,7 @@
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
+      <div class="page-kicker">实例管理面板</div>
       <h1 class="page-title">{{ user_id }}</h1>
       <div class="page-subtitle">
         {% if instance_mode %}
@@ -22,14 +23,14 @@
       {% if show_admin_links %}
         <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
       {% endif %}
-      <a class="btn btn-oc-outline" href="/">{% if instance_mode %}返回首页{% else %}切换用户{% endif %}</a>
+      <a class="btn btn-oc-outline" href="/">切换用户</a>
     </div>
   </div>
 
   <div class="row g-3">
     <div class="col-12">
       <div class="row g-3">
-        <div class="col-12 col-md-4 d-flex">
+        <div class="col-12 col-md-4">
           <div class="metric">
             <div class="metric-label">运行状态</div>
             <div class="metric-value">
@@ -43,7 +44,13 @@
             </div>
           </div>
         </div>
-        <div class="col-12 col-md-4 d-flex">
+        <div class="col-6 col-md-3">
+          <div class="metric">
+            <div class="metric-label">访问端口</div>
+            <div class="metric-value">{{ port or "未知" }}</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-5">
           <div class="metric">
             <div class="metric-label">访问地址</div>
             <div class="metric-value">
@@ -53,28 +60,8 @@
                 未知
               {% endif %}
             </div>
-            {% if port %}
-              <div class="metric-sub mt-2">
-                <span class="metric-tag">端口</span>
-                <span class="fw-semibold">{{ port }}</span>
-              </div>
-            {% endif %}
           </div>
         </div>
-        {% if can_manage %}
-          <div class="col-12 col-md-4 d-flex">
-            <div class="metric">
-              <div class="metric-label">文件上传</div>
-              <form method="post" action="{{ upload_url }}" enctype="multipart/form-data" class="mt-2">
-                <div class="input-group input-group-sm">
-                  <input class="form-control form-control-sm" type="file" name="file" required>
-                  <button class="btn btn-oc btn-sm" type="submit">上传</button>
-                </div>
-              </form>
-              <div class="muted-small mt-2">单文件 ≤ {{ max_upload_mb }} MB</div>
-            </div>
-          </div>
-        {% endif %}
       </div>
     </div>
 
@@ -163,10 +150,16 @@
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
-              <div class="section-title">已上传文件</div>
-              <div class="muted-small">已上传文件保存在实例目录 {{ container_upload_dir }}，单个文件最大 {{ max_upload_mb }} MB。</div>
+              <div class="section-title">文件上传</div>
+              <div class="muted-small">上传文件到实例目录 {{ container_upload_dir }}，单个文件最大 {{ max_upload_mb }} MB。</div>
             </div>
           </div>
+          <form method="post" action="{{ upload_url }}" enctype="multipart/form-data" class="mb-3">
+            <div class="input-group">
+              <input class="form-control" type="file" name="file" required>
+              <button class="btn btn-oc" type="submit">上传</button>
+            </div>
+          </form>
             {% if uploaded_files %}
               <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0">
@@ -181,7 +174,7 @@
                     {% for file in uploaded_files %}
                       <tr>
                         <td>{{ file.name }}</td>
-                        <td>{{ file.size }}</td>
+                        <td>{{ file.size }} bytes</td>
                         <td>{{ file.container_path }}</td>
                       </tr>
                     {% endfor %}

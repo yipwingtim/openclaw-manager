@@ -118,6 +118,38 @@ class LifecycleActionTests(unittest.TestCase):
             self.assertEqual(output, "User not found: missing-user")
             run_command.assert_not_called()
 
+    def test_parse_bulk_user_ids_accepts_whitespace_commas_and_dedupes(self):
+        user_ids = self.app_module.parse_bulk_user_ids(["alice bob", "alice,bad/user,carol"])
+
+        self.assertEqual(user_ids, ["alice", "bob", "carol"])
+
+    def test_paginate_items_slices_and_clamps_page(self):
+        items = list(range(25))
+
+        page_items, pagination = self.app_module.paginate_items(items, page="3", per_page="10")
+
+        self.assertEqual(page_items, [20, 21, 22, 23, 24])
+        self.assertEqual(pagination["page"], 3)
+        self.assertEqual(pagination["total_pages"], 3)
+        self.assertEqual(pagination["start"], 21)
+        self.assertEqual(pagination["end"], 25)
+        self.assertFalse(pagination["has_next"])
+
+    def test_bulk_lifecycle_reuses_single_instance_action(self):
+        with patch.object(
+            self.app_module,
+            "run_instance_lifecycle_action",
+            side_effect=[(0, "started"), (1, "failed")],
+        ) as run_action:
+            with patch.object(self.app_module, "persist_lifecycle_metadata", return_value="") as persist_metadata:
+                summaries, errors = self.app_module.run_bulk_instance_lifecycle_action(["alice", "bob"], "start")
+
+        self.assertEqual(summaries, ["[OK] alice: Start completed"])
+        self.assertEqual(errors, ["[ERROR] bob: Start failed: failed"])
+        self.assertEqual(run_action.call_args_list[0].args, ("alice", "start"))
+        self.assertEqual(run_action.call_args_list[1].args, ("bob", "start"))
+        persist_metadata.assert_called_once_with("alice", "start", "started")
+
     def test_upload_file_rejects_unsupported_extension(self):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)

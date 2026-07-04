@@ -819,6 +819,7 @@ docker exec openclaw-nginx nginx -s reload
 创建成功后页面会显示访问地址、Basic Auth 状态、OpenClaw Login Token，并支持复制或下载本次创建的 `accounts.csv`。单实例记录会写入 `/data/docker/openclaw-public/accounts/<user_id>_account.csv`；批量创建结果以 `results.csv` 保存在 `/data/docker/openclaw-public/batches/...`。
 
 管理员也可以在 `https://<服务器IP>:30015/admin/users` 对单个实例执行 Start、Stop、Restart 和 Delete。Delete 会调用 `scripts/delete_user.sh`，用户目录会进入回收站，并移除对应 Nginx 配置和端口映射。
+The same `/admin/users` page also supports checked-row bulk Start/Stop actions and paginates the filtered instance list.
 用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
 
 重新启用：

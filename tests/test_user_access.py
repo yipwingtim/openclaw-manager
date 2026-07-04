@@ -34,8 +34,12 @@ def load_app_module():
         def route(self, *args, **kwargs):
             return lambda func: func
 
-        before_request = route
-        context_processor = route
+        def before_request(self, func):
+            return func
+
+        def context_processor(self, func):
+            return func
+
         get = route
         post = route
 
@@ -103,6 +107,28 @@ class UserDetailAccessTests(unittest.TestCase):
     def _with_actor(self, actor):
         headers = {"X-Remote-User": actor} if actor else {}
         return patch.object(self.app_module.request, "headers", headers)
+
+    def test_user_routes_require_internal_proxy_token_when_configured(self):
+        self.app_module.OPENCLAW_INTERNAL_TOKEN = "internal-secret"
+
+        with patch.object(self.app_module.request, "path", "/users/alice"):
+            with patch.object(self.app_module.request, "headers", {"X-Remote-User": "alice"}):
+                response = self.app_module.require_internal_proxy_token()
+
+        self.assertEqual(response[1], 403)
+
+    def test_user_routes_accept_matching_internal_proxy_token(self):
+        self.app_module.OPENCLAW_INTERNAL_TOKEN = "internal-secret"
+
+        with patch.object(self.app_module.request, "path", "/users/alice"):
+            with patch.object(
+                self.app_module.request,
+                "headers",
+                {"X-Remote-User": "alice", "X-OpenClaw-Internal-Token": "internal-secret"},
+            ):
+                response = self.app_module.require_internal_proxy_token()
+
+        self.assertIsNone(response)
 
     def test_all_user_endpoints_return_403_for_unauthorized_missing_user(self):
         # Core enumeration-prevention property: for every /users/<user_id>

@@ -63,10 +63,12 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 if not OPENCLAW_INTERNAL_TOKEN:
     app.logger.warning("OPENCLAW_INTERNAL_TOKEN is not configured; internal proxy token checks are disabled.")
 
+INTERNAL_PROXY_PATHS = ("/admin", "/instance-admin", "/users", "/me", "/go")
+
 
 @app.before_request
 def require_internal_proxy_token():
-    if not request.path.startswith(("/admin", "/instance-admin")):
+    if not request.path.startswith(INTERNAL_PROXY_PATHS):
         return None
     if not OPENCLAW_INTERNAL_TOKEN:
         return None

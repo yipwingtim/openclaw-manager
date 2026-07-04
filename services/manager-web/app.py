@@ -1240,6 +1240,15 @@ def run_bulk_instance_lifecycle_action(user_ids, action):
     summaries = []
     errors = []
     for user_id in user_ids:
+        status = get_container_status(user_id)
+        is_running = status.startswith("Up")
+        if action == "start" and is_running:
+            summaries.append(f"[SKIP] {user_id}: already running")
+            continue
+        if action == "stop" and status == "STOPPED":
+            summaries.append(f"[SKIP] {user_id}: already stopped")
+            continue
+
         returncode, output = run_instance_lifecycle_action(user_id, action)
         clipped_output = output[-500:] if output else ""
         if returncode == 0:

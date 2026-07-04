@@ -649,8 +649,12 @@ def save_account_record(account):
     user_id = account.get("user_id", "")
     if not user_id:
         return
-    account_records_dir().mkdir(parents=True, exist_ok=True)
-    account_record_path(user_id).write_text(account_csv(account), encoding="utf-8")
+    records_dir = account_records_dir()
+    records_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(records_dir, 0o700)
+    record_path = account_record_path(user_id)
+    record_path.write_text(account_csv(account), encoding="utf-8")
+    os.chmod(record_path, 0o600)
 
 
 def load_account_record(user_id):

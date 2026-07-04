@@ -100,7 +100,9 @@
           <table class="table table-hover mb-0 align-middle">
             <thead>
               <tr>
-                <th style="width: 52px;">&#36873;&#25321;</th>
+                <th style="width: 52px;">
+                  <input class="form-check-input" type="checkbox" id="select-current-page" checked aria-label="&#20840;&#36873;&#24403;&#21069;&#39029;">
+                </th>
                 <th>用户</th>
                 <th>状态</th>
                 <th>端口</th>
@@ -114,7 +116,7 @@
               {% for user in users %}
                 <tr>
                   <td>
-                    <input class="form-check-input" type="checkbox" name="user_ids" value="{{ user.user_id }}" form="bulk-lifecycle-form" checked>
+                    <input class="form-check-input bulk-user-checkbox" type="checkbox" name="user_ids" value="{{ user.user_id }}" form="bulk-lifecycle-form" checked>
                   </td>
                   <td class="fw-semibold">{{ user.user_id }}</td>
                   <td>
@@ -188,24 +190,46 @@
             </tbody>
           </table>
         </div>
-        {% if pagination.total_pages > 1 %}
-          <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap p-3 border-top">
-            <div class="muted-small">&#26174;&#31034; {{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }} &#20010;&#23454;&#20363;</div>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}">&#19978;&#19968;&#39029;</a>
-              <span class="muted-small">&#31532; {{ pagination.page }} / {{ pagination.total_pages }} &#39029;</span>
-              <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}">&#19979;&#19968;&#39029;</a>
-            </div>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <span class="muted-small">&#27599;&#39029;</span>
-              {% for option in page_size_options %}
-                <a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status={{ status_filter }}&page=1&per_page={{ option }}">{{ option }}</a>
-              {% endfor %}
-            </div>
+        <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap p-3 border-top">
+          <div class="muted-small">&#26174;&#31034; {{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }} &#20010;&#23454;&#20363;</div>
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}">&#19978;&#19968;&#39029;</a>
+            <span class="muted-small">&#31532; {{ pagination.page }} / {{ pagination.total_pages }} &#39029;</span>
+            <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}">&#19979;&#19968;&#39029;</a>
           </div>
-        {% endif %}
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="muted-small">&#27599;&#39029;</span>
+            {% for option in page_size_options %}
+              <a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status={{ status_filter }}&page=1&per_page={{ option }}">{{ option }}</a>
+            {% endfor %}
+          </div>
+        </div>
       {% else %}
         <div class="p-4 muted-small">当前筛选条件下没有用户实例。</div>
       {% endif %}
   </div>
+  <script>
+    (() => {
+      const selectCurrentPage = document.getElementById("select-current-page");
+      const checkboxes = Array.from(document.querySelectorAll(".bulk-user-checkbox"));
+      if (!selectCurrentPage || checkboxes.length === 0) {
+        return;
+      }
+
+      const updateSelectState = () => {
+        const checkedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+        selectCurrentPage.checked = checkedCount === checkboxes.length;
+        selectCurrentPage.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+      };
+
+      selectCurrentPage.addEventListener("change", () => {
+        checkboxes.forEach((checkbox) => {
+          checkbox.checked = selectCurrentPage.checked;
+        });
+        updateSelectState();
+      });
+      checkboxes.forEach((checkbox) => checkbox.addEventListener("change", updateSelectState));
+      updateSelectState();
+    })();
+  </script>
 {% endblock %}

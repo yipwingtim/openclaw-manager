@@ -21,6 +21,13 @@
     </div>
   {% endif %}
 
+  {% if batch_model_provider.error %}
+    <div class="alert soft-danger">
+      <div class="section-title">批量设置模型预检未通过</div>
+      <pre class="mb-0 mt-2">{{ batch_model_provider.error }}</pre>
+    </div>
+  {% endif %}
+
   {% if account %}
     <div class="alert soft-success d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
       <div>
@@ -171,6 +178,81 @@
           <button class="btn btn-oc" type="submit" data-batch-create-submit>执行批量创建</button>
         </form>
       {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="surface p-3 p-lg-4 mb-3">
+    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+      <div>
+        <div class="section-title">批量设置模型</div>
+        <div class="muted-small">上传 CSV 后先检查用户、容器和模型配置，再调用现有批处理脚本。</div>
+      </div>
+      {% if batch_model_provider.output_relative_path %}
+        <a class="btn btn-sm btn-oc-outline" href="/admin/create-user/batch-model-provider/results/{{ batch_model_provider.output_relative_path }}">下载结果 CSV</a>
+      {% endif %}
+    </div>
+
+    <form class="mb-3" method="post" action="/admin/create-user/batch-model-provider/preview" enctype="multipart/form-data">
+      <label class="form-label" for="model_provider_input_file">上传模型设置 CSV</label>
+      <input class="form-control mb-2" id="model_provider_input_file" name="input_file" type="file" accept=".csv">
+      <div class="muted-small mb-3">CSV 表头：user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias。model_base_url 和 model_api_key 保留兼容列。</div>
+
+      <label class="form-label" for="model_provider_input_csv">或使用服务器已有 CSV 路径</label>
+      <input class="form-control mb-3" id="model_provider_input_csv" name="input_csv" value="{{ batch_model_provider.input_csv }}" placeholder="/data/docker/openclaw-public/batches/20260624/set_model_provider.csv">
+
+      <button class="btn btn-oc-outline" type="submit">预检模型 CSV</button>
+    </form>
+
+    {% if batch_model_provider.rows %}
+      <div class="table-responsive mb-3">
+        <table class="table table-hover mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>行号</th>
+              <th>用户 ID</th>
+              <th>Provider</th>
+              <th>模型</th>
+              <th>别名</th>
+              <th>状态</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in batch_model_provider.rows %}
+              <tr>
+                <td>{{ row.line }}</td>
+                <td class="fw-semibold">{{ row.user_id }}</td>
+                <td>{{ row.model_provider_id }}</td>
+                <td>{{ row.model_id }}</td>
+                <td>{{ row.model_alias or "-" }}</td>
+                <td>
+                  {% if row.status == "ready" %}
+                    <span class="badge-status badge-running">ready</span>
+                  {% else %}
+                    <span class="badge-status badge-stopped">{{ row.status }}</span>
+                  {% endif %}
+                </td>
+                <td class="muted-small">{{ row.message or "-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if batch_model_provider.can_execute %}
+        <form method="post" action="/admin/create-user/batch-model-provider/run" onsubmit="const button=this.querySelector('[data-model-provider-submit]'); if (button) { button.disabled = true; button.textContent = '批量设置中...'; }">
+          <input type="hidden" name="input_csv" value="{{ batch_model_provider.input_csv }}">
+          <input type="hidden" name="output_csv" value="{{ batch_model_provider.output_csv }}">
+          <button class="btn btn-oc" type="submit" data-model-provider-submit>执行批量设置模型</button>
+        </form>
+      {% endif %}
+    {% endif %}
+
+    {% if batch_model_provider.result %}
+      <details class="mt-3">
+        <summary class="section-title">模型设置脚本输出</summary>
+        <pre class="codebox mt-3 mb-0">{{ batch_model_provider.result }}</pre>
+      </details>
     {% endif %}
   </div>
 

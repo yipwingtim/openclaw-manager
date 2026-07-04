@@ -33,6 +33,7 @@ MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 
 SKILL_INSTALL_TIMEOUT = int(os.environ.get("MANAGER_SKILL_INSTALL_TIMEOUT", "180"))
 WECHAT_BIND_TIMEOUT = int(os.environ.get("MANAGER_WECHAT_BIND_TIMEOUT", "300"))
 BATCH_CREATE_TIMEOUT = int(os.environ.get("MANAGER_BATCH_CREATE_TIMEOUT", "3600"))
+BATCH_MODEL_PROVIDER_TIMEOUT = int(os.environ.get("MANAGER_BATCH_MODEL_PROVIDER_TIMEOUT", "1800"))
 CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
 WORKSPACE_FILE_ROOTS = {
     "workspace": ("OpenClaw Workspace", "workspace", "/home/node/.openclaw/workspace"),
@@ -300,8 +301,75 @@ def parse_batch_create_csv(path):
     return rows, errors
 
 
+def parse_batch_model_provider_csv(path):
+    rows = []
+    errors = []
+    expected = [
+        "user_id",
+        "model_provider_id",
+        "model_id",
+        "model_base_url",
+        "model_api_key",
+        "model_alias",
+    ]
+
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            fieldnames = reader.fieldnames or []
+            if fieldnames != expected:
+                return [], [f"CSV header must be: {','.join(expected)}"]
+
+            for line_no, row in enumerate(reader, start=2):
+                raw_user_id = (row.get("user_id") or "").strip()
+                if not raw_user_id:
+                    continue
+
+                user_id = validate_user_id(raw_user_id)
+                model_provider_id = (row.get("model_provider_id") or "").strip()
+                model_id = (row.get("model_id") or "").strip()
+                model_base_url = (row.get("model_base_url") or "").strip()
+                model_alias = (row.get("model_alias") or "").strip()
+                item = {
+                    "line": line_no,
+                    "user_id": raw_user_id,
+                    "model_provider_id": model_provider_id,
+                    "model_id": model_id,
+                    "model_base_url": model_base_url,
+                    "model_alias": model_alias or model_id,
+                    "status": "ready",
+                    "message": "",
+                }
+
+                if not user_id:
+                    item["status"] = "invalid"
+                    item["message"] = "Invalid user_id."
+                    errors.append(f"line {line_no}: invalid user_id {raw_user_id}")
+                elif not model_provider_id or not model_id:
+                    item["user_id"] = user_id
+                    item["status"] = "invalid"
+                    item["message"] = "Missing model_provider_id or model_id."
+                    errors.append(f"line {line_no}: missing required model config for {user_id}")
+                else:
+                    item["user_id"] = user_id
+
+                rows.append(item)
+    except UnicodeDecodeError:
+        return [], ["CSV must be UTF-8 encoded."]
+
+    if not rows:
+        errors.append("CSV has no model provider rows.")
+
+    return rows, errors
+
+
 def batch_create_paths(batch_id):
     batch_dir = PUBLIC_DIR / "batches" / "web-create-users" / batch_id
+    return batch_dir, batch_dir / "input.csv", batch_dir / "results.csv"
+
+
+def batch_model_provider_paths(batch_id):
+    batch_dir = PUBLIC_DIR / "batches" / "web-set-model-provider" / batch_id
     return batch_dir, batch_dir / "input.csv", batch_dir / "results.csv"
 
 
@@ -322,6 +390,20 @@ def batch_create_context(input_csv=None, output_csv=None, rows=None, result="", 
             "result": result,
             "error": error,
             "capacity": capacity,
+            "can_execute": bool(input_csv and rows and not error),
+        }
+    }
+
+
+def batch_model_provider_context(input_csv=None, output_csv=None, rows=None, result="", error=""):
+    return {
+        "batch_model_provider": {
+            "input_csv": str(input_csv) if input_csv else "",
+            "output_csv": str(output_csv) if output_csv else "",
+            "output_relative_path": batch_relative_path(output_csv) if output_csv else "",
+            "rows": rows or [],
+            "result": result,
+            "error": error,
             "can_execute": bool(input_csv and rows and not error),
         }
     }
@@ -367,6 +449,32 @@ def preflight_batch_create(input_csv):
         errors.append(f"Runtime config not found: {config_file}")
 
     return rows, errors, capacity
+
+
+def preflight_batch_model_provider(input_csv):
+    rows, errors = parse_batch_model_provider_csv(input_csv)
+
+    script = MANAGER_DIR / "scripts" / "batch_set_model_provider.sh"
+    if not script.is_file():
+        errors.append(f"Batch model provider script not found: {script}")
+
+    for row in rows:
+        if row["status"] != "ready":
+            continue
+
+        user_id = row["user_id"]
+        if not get_user_dir(user_id).is_dir():
+            row["status"] = "missing_user"
+            row["message"] = "User directory not found."
+            errors.append(f"{user_id}: user not found")
+            continue
+
+        if get_container_status(user_id) == "STOPPED":
+            row["status"] = "container_stopped"
+            row["message"] = "Container is not running."
+            errors.append(f"{user_id}: container is not running")
+
+    return rows, errors
 
 
 def save_batch_create_account_records(output_csv):
@@ -1558,6 +1666,7 @@ def admin_create_user():
         result="",
         error="",
         **batch_create_context(),
+        **batch_model_provider_context(),
     )
 
 
@@ -1585,6 +1694,7 @@ def admin_created_user_detail(user_id):
         result=request.args.get("result", ""),
         error="",
         **batch_create_context(),
+        **batch_model_provider_context(),
     )
 
 
@@ -1608,6 +1718,7 @@ def preview_admin_batch_create_users():
                 result="",
                 error="",
                 **batch_create_context(error="Uploaded file must be a CSV."),
+                **batch_model_provider_context(),
             ), 400
         batch_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
         batch_dir, input_csv, output_csv = batch_create_paths(batch_id)
@@ -1626,6 +1737,7 @@ def preview_admin_batch_create_users():
                 result="",
                 error="",
                 **batch_create_context(error=input_error),
+                **batch_model_provider_context(),
             ), 400
         output_csv = input_csv.with_name(input_csv.stem + "_results.csv")
 
@@ -1641,6 +1753,7 @@ def preview_admin_batch_create_users():
         result="",
         error="",
         **batch_create_context(input_csv=input_csv, output_csv=output_csv, rows=rows, error=error, capacity=capacity),
+        **batch_model_provider_context(),
     ), 400 if errors else 200
 
 
@@ -1663,6 +1776,7 @@ def run_admin_batch_create_users():
             result="",
             error="",
             **batch_create_context(error=input_error or output_error),
+            **batch_model_provider_context(),
         ), 400
 
     if not input_csv.is_file():
@@ -1676,6 +1790,7 @@ def run_admin_batch_create_users():
             result="",
             error="",
             **batch_create_context(input_csv=input_csv, output_csv=output_csv, error=f"Input CSV not found: {input_csv}"),
+            **batch_model_provider_context(),
         ), 400
 
     rows, errors, capacity = preflight_batch_create(input_csv)
@@ -1696,6 +1811,7 @@ def run_admin_batch_create_users():
                 error="\n".join(errors),
                 capacity=capacity,
             ),
+            **batch_model_provider_context(),
         ), 400
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -1724,6 +1840,7 @@ def run_admin_batch_create_users():
             result=result,
             error="Batch create failed.",
             **batch_create_context(input_csv=input_csv, output_csv=output_csv, rows=rows, capacity=capacity),
+            **batch_model_provider_context(),
         ), 500
 
     result += persist_operation_metadata(
@@ -1740,11 +1857,182 @@ def run_admin_batch_create_users():
         result=result,
         error="",
         **batch_create_context(input_csv=input_csv, output_csv=output_csv, rows=rows, capacity=capacity),
+        **batch_model_provider_context(),
     )
 
 
 @app.get("/admin/create-user/batch/results/<path:relative_path>")
 def download_batch_create_results(relative_path):
+    denied = require_admin()
+    if denied:
+        return denied
+
+    output_csv, error = batch_path_from_form(relative_path)
+    if error:
+        return render_template("error.html", message=error), 400
+    if not output_csv.is_file():
+        return render_template("error.html", message="Result CSV not found."), 404
+    return send_file(output_csv, as_attachment=True, download_name=output_csv.name)
+
+
+@app.post("/admin/create-user/batch-model-provider/preview")
+def preview_admin_batch_model_provider():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    upload = request.files.get("input_file")
+    existing_input = (request.form.get("input_csv") or "").strip()
+    if upload and upload.filename:
+        if not upload.filename.lower().endswith(".csv"):
+            return render_template(
+                "admin_create_user.html",
+                user_id="",
+                basic_auth_enabled="true",
+                basic_auth_password="",
+                account=None,
+                account_csv="",
+                result="",
+                error="",
+                **batch_create_context(),
+                **batch_model_provider_context(error="Uploaded file must be a CSV."),
+            ), 400
+        batch_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        batch_dir, input_csv, output_csv = batch_model_provider_paths(batch_id)
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        upload.save(input_csv)
+    else:
+        input_csv, input_error = batch_path_from_form(existing_input)
+        if input_error:
+            return render_template(
+                "admin_create_user.html",
+                user_id="",
+                basic_auth_enabled="true",
+                basic_auth_password="",
+                account=None,
+                account_csv="",
+                result="",
+                error="",
+                **batch_create_context(),
+                **batch_model_provider_context(error=input_error),
+            ), 400
+        output_csv = input_csv.with_name(input_csv.stem + "_results.csv")
+
+    rows, errors = preflight_batch_model_provider(input_csv)
+    error = "\n".join(errors)
+    return render_template(
+        "admin_create_user.html",
+        user_id="",
+        basic_auth_enabled="true",
+        basic_auth_password="",
+        account=None,
+        account_csv="",
+        result="",
+        error="",
+        **batch_create_context(),
+        **batch_model_provider_context(input_csv=input_csv, output_csv=output_csv, rows=rows, error=error),
+    ), 400 if errors else 200
+
+
+@app.post("/admin/create-user/batch-model-provider/run")
+def run_admin_batch_model_provider():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    input_csv, input_error = batch_path_from_form(request.form.get("input_csv"))
+    output_csv, output_error = batch_path_from_form(request.form.get("output_csv"))
+    if input_error or output_error:
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result="",
+            error="",
+            **batch_create_context(),
+            **batch_model_provider_context(error=input_error or output_error),
+        ), 400
+
+    if not input_csv.is_file():
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result="",
+            error="",
+            **batch_create_context(),
+            **batch_model_provider_context(input_csv=input_csv, output_csv=output_csv, error=f"Input CSV not found: {input_csv}"),
+        ), 400
+
+    rows, errors = preflight_batch_model_provider(input_csv)
+    if errors:
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result="",
+            error="",
+            **batch_create_context(),
+            **batch_model_provider_context(input_csv=input_csv, output_csv=output_csv, rows=rows, error="\n".join(errors)),
+        ), 400
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    script = MANAGER_DIR / "scripts" / "batch_set_model_provider.sh"
+    process = subprocess.run(
+        [str(script), str(input_csv), str(output_csv)],
+        cwd=str(MANAGER_DIR),
+        text=True,
+        capture_output=True,
+        timeout=BATCH_MODEL_PROVIDER_TIMEOUT,
+        check=False,
+    )
+    command_output = (process.stdout + "\n" + process.stderr).strip()
+    result_csv = read_text_preview(output_csv, max_chars=12000)
+    result = f"{command_output}\n\nResult CSV:\n{result_csv}".strip()
+
+    if process.returncode != 0:
+        return render_template(
+            "admin_create_user.html",
+            user_id="",
+            basic_auth_enabled="true",
+            basic_auth_password="",
+            account=None,
+            account_csv="",
+            result="",
+            error="",
+            **batch_create_context(),
+            **batch_model_provider_context(input_csv=input_csv, output_csv=output_csv, rows=rows, result=result, error="Batch model provider update failed."),
+        ), 500
+
+    result += persist_operation_metadata(
+        "batch_set_model_provider",
+        message=f"input={input_csv.name} output={output_csv.name} {command_output[-500:]}".strip(),
+    )
+    return render_template(
+        "admin_create_user.html",
+        user_id="",
+        basic_auth_enabled="true",
+        basic_auth_password="",
+        account=None,
+        account_csv="",
+        result="",
+        error="",
+        **batch_create_context(),
+        **batch_model_provider_context(input_csv=input_csv, output_csv=output_csv, rows=rows, result=result, error=""),
+    )
+
+
+@app.get("/admin/create-user/batch-model-provider/results/<path:relative_path>")
+def download_batch_model_provider_results(relative_path):
     denied = require_admin()
     if denied:
         return denied
@@ -1780,6 +2068,7 @@ def run_admin_create_user():
                 result=result,
                 error=error,
                 **batch_create_context(),
+                **batch_model_provider_context(),
             ),
             status,
         )
@@ -1795,6 +2084,7 @@ def run_admin_create_user():
             result=result,
             error="",
             **batch_create_context(),
+            **batch_model_provider_context(),
         )
 
     if not user_id:

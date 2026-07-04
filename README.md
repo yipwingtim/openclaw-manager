@@ -425,6 +425,15 @@ Web 批量创建流程：
 
 上传的 CSV 会保存到 `/data/docker/openclaw-public/batches/web-create-users/<timestamp>/input.csv`，结果文件保存为同目录下的 `results.csv`。
 
+Web 批量设置模型也在同一页面执行。上传 `set_model_provider.csv` 后，页面会预检用户是否存在、容器是否运行、模型参数是否完整，再调用 `scripts/batch_set_model_provider.sh`。CSV 表头必须为：
+
+```csv
+user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias
+training01,openai,openai/gpt-4.1,,,GPT 4.1
+```
+
+`model_base_url` 和 `model_api_key` 保留为兼容列；当前实例实际使用模型代理地址和实例 token。上传的 CSV 会保存到 `/data/docker/openclaw-public/batches/web-set-model-provider/<timestamp>/input.csv`，结果文件保存为同目录下的 `results.csv`。
+
 示例：
 
 ```bash

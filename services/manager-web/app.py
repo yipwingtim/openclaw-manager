@@ -1411,6 +1411,8 @@ def upload_file_for_user(user_id, instance_mode=False):
     filename = secure_filename(uploaded.filename)
     if not filename:
         return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="Invalid filename.")
+    if Path(filename).suffix.lower() not in DOWNLOAD_EXTENSIONS:
+        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=f"Unsupported file type: {filename}")
 
     upload_dir = get_upload_dir(user_id)
     upload_dir.mkdir(parents=True, exist_ok=True)

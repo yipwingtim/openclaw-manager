@@ -68,6 +68,23 @@ class LifecycleActionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app_module = load_app_module()
 
+    def test_save_account_record_restricts_secret_file_permissions(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+
+            self.app_module.save_account_record(
+                {
+                    "user_id": "alice",
+                    "basic_auth_password": "secret",
+                    "openclaw_token": "token",
+                }
+            )
+
+            records_dir = Path(public_dir) / "accounts"
+            record_path = records_dir / "alice_account.csv"
+            self.assertEqual(records_dir.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(record_path.stat().st_mode & 0o777, 0o600)
+
     def test_delete_runs_script_when_user_dir_is_missing(self):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)

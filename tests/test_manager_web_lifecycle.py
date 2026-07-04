@@ -14,6 +14,15 @@ MANAGER_WEB_DIR = ROOT_DIR / "services" / "manager-web"
 sys.path.insert(0, str(MANAGER_WEB_DIR))
 
 
+class FakeUpload:
+    def __init__(self, filename, content="content"):
+        self.filename = filename
+        self.content = content
+
+    def save(self, target):
+        Path(target).write_text(self.content, encoding="utf-8")
+
+
 def load_app_module():
     flask_stub = types.ModuleType("flask")
 
@@ -108,6 +117,33 @@ class LifecycleActionTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(output, "User not found: missing-user")
             run_command.assert_not_called()
+
+    def test_upload_file_rejects_unsupported_extension(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            upload = FakeUpload("script.sh")
+
+            with patch.object(self.app_module.request, "files", {"file": upload}):
+                with patch.object(self.app_module, "redirect_to_user_dashboard", return_value="redirected") as redirect_dashboard:
+                    response = self.app_module.upload_file_for_user("alice")
+
+            self.assertEqual(response, "redirected")
+            self.assertIn("Unsupported file type", redirect_dashboard.call_args.kwargs["error"])
+            self.assertFalse((Path(public_dir) / "users" / "alice" / "uploads" / "script.sh").exists())
+
+    def test_upload_file_accepts_supported_extension(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            upload = FakeUpload("notes.txt")
+
+            with patch.object(self.app_module.request, "files", {"file": upload}):
+                with patch.object(self.app_module, "redirect_to_user_dashboard", return_value="redirected"):
+                    with patch.object(self.app_module, "persist_operation_metadata", return_value=""):
+                        response = self.app_module.upload_file_for_user("alice")
+
+            target = Path(public_dir) / "users" / "alice" / "uploads" / "notes.txt"
+            self.assertEqual(response, "redirected")
+            self.assertEqual(target.read_text(encoding="utf-8"), "content")
 
 
 class BatchCreatePreflightTests(unittest.TestCase):

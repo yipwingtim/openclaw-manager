@@ -224,6 +224,54 @@ class BatchCreatePreflightTests(unittest.TestCase):
             self.assertEqual(capacity["available"], 0)
             self.assertEqual(capacity["next"], 40001)
 
+    def test_parse_batch_model_provider_csv_accepts_expected_header(self):
+        with TemporaryDirectory() as public_dir:
+            input_csv = Path(public_dir) / "set_model_provider.csv"
+            input_csv.write_text(
+                "user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias\n"
+                "alice,openai,openai/gpt-4.1,,,GPT 4.1\n",
+                encoding="utf-8",
+            )
+
+            rows, errors = self.app_module.parse_batch_model_provider_csv(input_csv)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(rows[0]["user_id"], "alice")
+            self.assertEqual(rows[0]["model_provider_id"], "openai")
+            self.assertEqual(rows[0]["model_id"], "openai/gpt-4.1")
+            self.assertEqual(rows[0]["model_alias"], "GPT 4.1")
+
+    def test_preflight_batch_model_provider_blocks_missing_user_and_stopped_container(self):
+        with TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            public_dir = root / "public"
+            manager_dir = root / "manager"
+            (public_dir / "users" / "stopped").mkdir(parents=True)
+            (manager_dir / "scripts").mkdir(parents=True)
+            (manager_dir / "scripts" / "batch_set_model_provider.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+            input_csv = public_dir / "batches" / "set_model_provider.csv"
+            input_csv.parent.mkdir(parents=True)
+            input_csv.write_text(
+                "user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias\n"
+                "missing,openai,openai/gpt-4.1,,,GPT 4.1\n"
+                "stopped,openai,openai/gpt-4.1,,,GPT 4.1\n"
+                "badconfig,,openai/gpt-4.1,,,GPT 4.1\n",
+                encoding="utf-8",
+            )
+
+            self.app_module.PUBLIC_DIR = public_dir
+            self.app_module.MANAGER_DIR = manager_dir
+
+            with patch.object(self.app_module, "get_container_status", return_value="STOPPED"):
+                rows, errors = self.app_module.preflight_batch_model_provider(input_csv)
+
+            self.assertEqual(rows[0]["status"], "missing_user")
+            self.assertEqual(rows[1]["status"], "container_stopped")
+            self.assertEqual(rows[2]["status"], "invalid")
+            self.assertIn("missing: user not found", errors)
+            self.assertIn("stopped: container is not running", errors)
+            self.assertTrue(any("missing required model config" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

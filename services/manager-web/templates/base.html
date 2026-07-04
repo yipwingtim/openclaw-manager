@@ -159,15 +159,6 @@
         font-weight: 720;
         transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
       }
-      .sidebar-nav a::before {
-        content: "";
-        width: 0.38rem;
-        height: 0.38rem;
-        margin-right: 0.62rem;
-        border-radius: 999px;
-        background: rgba(9, 169, 200, 0.44);
-        box-shadow: 0 0 12px rgba(9, 169, 200, 0.35);
-      }
       .sidebar-nav a:hover {
         border-color: rgba(9, 169, 200, 0.36);
         background: linear-gradient(90deg, rgba(9, 169, 200, 0.16), rgba(255, 255, 255, 0.055));
@@ -184,6 +175,87 @@
         padding-top: 0.85rem;
         color: rgba(197, 226, 233, 0.58);
         font-size: 0.78rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .oc-nav-icon {
+        width: 1.1rem;
+        height: 1.1rem;
+        margin-right: 0.62rem;
+        flex-shrink: 0;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .sidebar-nav-extra {
+        color: rgba(234, 247, 250, 0.62);
+        font-size: 0.82rem;
+        padding: 0.3rem 0.72rem;
+        word-break: break-word;
+      }
+      .sidebar-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.8rem;
+        height: 1.8rem;
+        border: 1px solid rgba(126, 194, 217, 0.24);
+        border-radius: 0.38rem;
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(234, 247, 250, 0.82);
+        cursor: pointer;
+        transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+      }
+      .sidebar-toggle:hover {
+        border-color: rgba(9, 169, 200, 0.5);
+        background: rgba(9, 169, 200, 0.18);
+        color: #fff;
+      }
+      .oc-toggle-icon {
+        width: 1rem;
+        height: 1rem;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .oc-toggle-expand { display: none; }
+      .sidebar.collapsed .oc-toggle-collapse { display: none; }
+      .sidebar.collapsed .oc-toggle-expand { display: inline-flex; }
+      .app-layout.sidebar-collapsed {
+        grid-template-columns: 4.5rem minmax(0, 1fr);
+      }
+      .sidebar.collapsed .sidebar-brand {
+        justify-content: center;
+      }
+      .sidebar.collapsed .brand-mark {
+        margin-right: 0;
+      }
+      .sidebar.collapsed .sidebar-brand-text,
+      .sidebar.collapsed .sidebar-section,
+      .sidebar.collapsed .sidebar-nav-extra,
+      .sidebar.collapsed .sidebar-footer-text,
+      .sidebar.collapsed .sidebar-nav a > span {
+        display: none;
+      }
+      .sidebar.collapsed .sidebar-nav a {
+        justify-content: center;
+        padding-left: 0;
+        padding-right: 0;
+      }
+      .sidebar.collapsed .oc-nav-icon {
+        margin-right: 0;
+      }
+      .sidebar.collapsed .sidebar-footer {
+        justify-content: center;
+      }
+      .sidebar.collapsed .sidebar-nav a:hover {
+        transform: none;
       }
       .content-shell {
         min-width: 0;
@@ -418,6 +490,23 @@
         .sidebar-nav a {
           flex: 0 0 auto;
         }
+        .sidebar.collapsed .sidebar-brand {
+          justify-content: flex-start;
+        }
+        .sidebar.collapsed .brand-mark {
+          margin-right: 0.55rem;
+        }
+        .sidebar.collapsed .sidebar-brand-text,
+        .sidebar.collapsed .sidebar-nav-extra {
+          display: revert;
+        }
+        .sidebar.collapsed .sidebar-nav a {
+          justify-content: flex-start;
+          padding: 0.5rem 0.72rem;
+        }
+        .sidebar.collapsed .oc-nav-icon {
+          margin-right: 0.62rem;
+        }
       }
       @media (max-width: 575.98px) {
         .page-title {
@@ -430,20 +519,74 @@
     </style>
   </head>
   <body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <symbol id="oc-icon-users" viewBox="0 0 24 24">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </symbol>
+        <symbol id="oc-icon-user-plus" viewBox="0 0 24 24">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="8.5" cy="7" r="4"/>
+          <line x1="20" y1="8" x2="20" y2="14"/>
+          <line x1="23" y1="11" x2="17" y2="11"/>
+        </symbol>
+        <symbol id="oc-icon-shield-check" viewBox="0 0 24 24">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </symbol>
+        <symbol id="oc-icon-database" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/>
+          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>
+        </symbol>
+        <symbol id="oc-icon-chevron-left" viewBox="0 0 24 24">
+          <path d="m15 18-6-6 6-6"/>
+        </symbol>
+        <symbol id="oc-icon-chevron-right" viewBox="0 0 24 24">
+          <path d="m9 18 6-6-6-6"/>
+        </symbol>
+      </defs>
+    </svg>
     <div class="app-layout">
-      <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">管</span>容器实例管理与运维平台</div>
+      <aside class="sidebar" id="ocSidebar">
+        <div class="sidebar-brand">
+          <span class="brand-mark">管</span>
+          <span class="sidebar-brand-text">容器实例管理与运维平台</span>
+        </div>
         <div class="sidebar-section">功能菜单</div>
         <div class="sidebar-nav">
           {% if show_global_admin_nav %}
-            <a href="/admin/users">用户实例管理</a>
-            <a href="/admin/create-user">创建用户实例</a>
-            <a href="/admin/device-approvals">设备审批</a>
-            <a href="/admin/metadata">元数据管理</a>
+            <a href="/admin/users">
+              <svg class="oc-nav-icon"><use href="#oc-icon-users"/></svg>
+              <span>用户实例管理</span>
+            </a>
+            <a href="/admin/create-user">
+              <svg class="oc-nav-icon"><use href="#oc-icon-user-plus"/></svg>
+              <span>创建用户实例</span>
+            </a>
+            <a href="/admin/device-approvals">
+              <svg class="oc-nav-icon"><use href="#oc-icon-shield-check"/></svg>
+              <span>设备审批</span>
+            </a>
+            <a href="/admin/metadata">
+              <svg class="oc-nav-icon"><use href="#oc-icon-database"/></svg>
+              <span>元数据管理</span>
+            </a>
           {% endif %}
-          {% block nav_right %}{% endblock %}
+          <div class="sidebar-nav-extra">
+            {% block nav_right %}{% endblock %}
+          </div>
         </div>
-        <div class="sidebar-footer">多实例运维控制台</div>
+        <div class="sidebar-footer">
+          <span class="sidebar-footer-text">多实例运维控制台</span>
+          <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="折叠侧栏" aria-expanded="true">
+            <svg class="oc-toggle-icon oc-toggle-collapse"><use href="#oc-icon-chevron-left"/></svg>
+            <svg class="oc-toggle-icon oc-toggle-expand"><use href="#oc-icon-chevron-right"/></svg>
+          </button>
+        </div>
       </aside>
       <div class="content-shell">
         <main class="container page-shell py-4 py-lg-5">
@@ -451,5 +594,31 @@
         </main>
       </div>
     </div>
+    <script>
+      (function() {
+        var sidebar = document.getElementById('ocSidebar');
+        var appLayout = document.querySelector('.app-layout');
+        var toggle = document.getElementById('sidebarToggle');
+        if (!sidebar || !appLayout || !toggle) return;
+
+        var stored = localStorage.getItem('ocSidebarCollapsed');
+        var collapsed = stored === 'true';
+
+        function applyState(isCollapsed) {
+          sidebar.classList.toggle('collapsed', isCollapsed);
+          appLayout.classList.toggle('sidebar-collapsed', isCollapsed);
+          toggle.setAttribute('aria-expanded', String(!isCollapsed));
+          toggle.setAttribute('aria-label', isCollapsed ? '打开侧栏' : '折叠侧栏');
+        }
+
+        applyState(collapsed);
+
+        toggle.addEventListener('click', function() {
+          var isCollapsed = !sidebar.classList.contains('collapsed');
+          applyState(isCollapsed);
+          localStorage.setItem('ocSidebarCollapsed', isCollapsed);
+        });
+      })();
+    </script>
   </body>
 </html>

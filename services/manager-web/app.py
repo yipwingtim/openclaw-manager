@@ -34,6 +34,8 @@ SKILL_INSTALL_TIMEOUT = int(os.environ.get("MANAGER_SKILL_INSTALL_TIMEOUT", "180
 WECHAT_BIND_TIMEOUT = int(os.environ.get("MANAGER_WECHAT_BIND_TIMEOUT", "300"))
 BATCH_CREATE_TIMEOUT = int(os.environ.get("MANAGER_BATCH_CREATE_TIMEOUT", "3600"))
 BATCH_MODEL_PROVIDER_TIMEOUT = int(os.environ.get("MANAGER_BATCH_MODEL_PROVIDER_TIMEOUT", "1800"))
+DEFAULT_USERS_PER_PAGE = int(os.environ.get("MANAGER_USERS_PER_PAGE", "20"))
+USER_PAGE_SIZE_OPTIONS = (10, 20, 50, 100)
 CONTAINER_UPLOAD_DIR = "/workspaces/uploads"
 WORKSPACE_FILE_ROOTS = {
     "workspace": ("OpenClaw Workspace", "workspace", "/home/node/.openclaw/workspace"),
@@ -1212,6 +1214,74 @@ def run_instance_lifecycle_action(user_id, action):
     return returncode, output
 
 
+def parse_bulk_user_ids(raw_user_ids):
+    if isinstance(raw_user_ids, str):
+        raw_values = [raw_user_ids]
+    else:
+        raw_values = raw_user_ids or []
+
+    user_ids = []
+    seen = set()
+    for raw_value in raw_values:
+        for item in re.split(r"[\s,]+", raw_value or ""):
+            user_id = validate_user_id(item)
+            if not user_id or user_id in seen:
+                continue
+            seen.add(user_id)
+            user_ids.append(user_id)
+    return user_ids
+
+
+def run_bulk_instance_lifecycle_action(user_ids, action):
+    if action not in {"start", "stop"}:
+        return [], ["Invalid bulk instance action."]
+
+    label = action.capitalize()
+    summaries = []
+    errors = []
+    for user_id in user_ids:
+        returncode, output = run_instance_lifecycle_action(user_id, action)
+        clipped_output = output[-500:] if output else ""
+        if returncode == 0:
+            output += persist_lifecycle_metadata(user_id, action, output)
+            summaries.append(f"[OK] {user_id}: {label} completed")
+        else:
+            errors.append(f"[ERROR] {user_id}: {label} failed: {clipped_output or 'lifecycle action failed'}")
+    return summaries, errors
+
+
+def parse_positive_int(value, default):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def paginate_items(items, page=1, per_page=DEFAULT_USERS_PER_PAGE):
+    per_page = parse_positive_int(per_page, DEFAULT_USERS_PER_PAGE)
+    if per_page not in USER_PAGE_SIZE_OPTIONS:
+        per_page = DEFAULT_USERS_PER_PAGE if DEFAULT_USERS_PER_PAGE in USER_PAGE_SIZE_OPTIONS else 20
+
+    total = len(items)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = min(parse_positive_int(page, 1), total_pages)
+    start = (page - 1) * per_page
+    end = start + per_page
+    return items[start:end], {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+        "start": start + 1 if total else 0,
+        "end": min(end, total),
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_page": page - 1 if page > 1 else 1,
+        "next_page": page + 1 if page < total_pages else total_pages,
+    }
+
+
 def read_devices_cache(user_id):
     cache_file = get_user_dir(user_id) / "devices.txt"
     if not cache_file.is_file():
@@ -1612,11 +1682,20 @@ def admin_users():
     status_filter = request.args.get("status", "running").strip().lower()
     if status_filter not in {"running", "stopped", "all"}:
         status_filter = "running"
+    filtered_users = list_active_users(status_filter)
+    users, pagination = paginate_items(
+        filtered_users,
+        request.args.get("page", "1"),
+        request.args.get("per_page", DEFAULT_USERS_PER_PAGE),
+    )
     return render_template(
         "admin_users.html",
-        users=list_active_users(status_filter),
+        users=users,
+        pagination=pagination,
+        page_size_options=USER_PAGE_SIZE_OPTIONS,
         status_filter=status_filter,
         skill_presets=configured_skill_presets(),
+        bulk_skill_user_ids="\n".join(user["user_id"] for user in filtered_users if user["status"].startswith("Up")),
         result=request.args.get("result", ""),
         error=request.args.get("error", ""),
     )
@@ -2292,6 +2371,32 @@ def admin_instance_lifecycle(user_id):
     return redirect(url_for("admin_users", result=f"{label} completed: {user_id}\n{clipped_output}"))
 
 
+@app.post("/admin/users/bulk-lifecycle")
+def admin_bulk_instance_lifecycle():
+    denied = require_admin()
+    if denied:
+        return denied
+
+    action = (request.form.get("action") or "").strip().lower()
+    if action not in {"start", "stop"}:
+        return redirect(url_for("admin_users", error="Invalid bulk instance action."))
+
+    user_ids = parse_bulk_user_ids(request.form.getlist("user_ids"))
+    if not user_ids:
+        return redirect(url_for("admin_users", error="No valid user ids selected for bulk lifecycle action."))
+
+    summaries, errors = run_bulk_instance_lifecycle_action(user_ids, action)
+    message = "\n".join(summaries + errors)
+    redirect_args = {
+        "status": (request.form.get("status") or "running").strip().lower(),
+        "page": request.form.get("page") or "1",
+        "per_page": request.form.get("per_page") or DEFAULT_USERS_PER_PAGE,
+    }
+    if errors:
+        return redirect(url_for("admin_users", error=message[-1800:], **redirect_args))
+    return redirect(url_for("admin_users", result=message[-1800:], **redirect_args))
+
+
 @app.post("/admin/users/bulk-skill-install")
 def admin_bulk_skill_install():
     denied = require_admin()
@@ -2303,15 +2408,7 @@ def admin_bulk_skill_install():
     if skill_id not in presets:
         return redirect(url_for("admin_users", error="Invalid or unconfigured skill preset."))
 
-    raw_user_ids = request.form.get("user_ids", "")
-    user_ids = []
-    seen = set()
-    for item in re.split(r"[\s,]+", raw_user_ids):
-        user_id = validate_user_id(item)
-        if not user_id or user_id in seen:
-            continue
-        seen.add(user_id)
-        user_ids.append(user_id)
+    user_ids = parse_bulk_user_ids(request.form.getlist("user_ids"))
 
     if not user_ids:
         return redirect(url_for("admin_users", error="No valid user ids selected for skill installation."))

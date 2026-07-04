@@ -28,11 +28,37 @@
         <div class="muted-small">默认仅显示运行中的实例，可切换查看停止或全部实例。</div>
       </div>
       <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm {% if status_filter == 'running' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=running">运行中</a>
-        <a class="btn btn-sm {% if status_filter == 'stopped' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=stopped">已停止</a>
-        <a class="btn btn-sm {% if status_filter == 'all' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=all">全部</a>
+        <a class="btn btn-sm {% if status_filter == 'running' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=running&per_page={{ pagination.per_page }}">运行中</a>
+        <a class="btn btn-sm {% if status_filter == 'stopped' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=stopped&per_page={{ pagination.per_page }}">已停止</a>
+        <a class="btn btn-sm {% if status_filter == 'all' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=all&per_page={{ pagination.per_page }}">全部</a>
       </div>
     </div>
+  </div>
+
+  <div class="surface p-3 mb-3">
+    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+      <div>
+        <div class="section-title">&#25209;&#37327;&#21551;&#21160; / &#20572;&#27490;&#23454;&#20363;</div>
+        <div class="muted-small">&#23545;&#24403;&#21069;&#39029;&#21246;&#36873;&#30340;&#23454;&#20363;&#25209;&#37327;&#25191;&#34892; Start &#25110; Stop&#65307;&#25191;&#34892;&#36923;&#36753;&#22797;&#29992;&#21333;&#23454;&#20363;&#29983;&#21629;&#21608;&#26399;&#25805;&#20316;&#12290;</div>
+      </div>
+    </div>
+    <form id="bulk-lifecycle-form" method="post" action="/admin/users/bulk-lifecycle" onsubmit="return confirm('&#30830;&#35748;&#23545;&#21246;&#36873;&#23454;&#20363;&#25191;&#34892;&#25209;&#37327;&#25805;&#20316;&#65311;');">
+      <input type="hidden" name="status" value="{{ status_filter }}">
+      <input type="hidden" name="page" value="{{ pagination.page }}">
+      <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
+      <div class="row g-3 align-items-end">
+        <div class="col-12 col-md-4 col-lg-3">
+          <label class="form-label fw-semibold" for="bulk_lifecycle_action">&#25805;&#20316;</label>
+          <select class="form-select" id="bulk_lifecycle_action" name="action" required>
+            <option value="start">&#25209;&#37327;&#21551;&#21160;</option>
+            <option value="stop">&#25209;&#37327;&#20572;&#27490;</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-auto">
+          <button class="btn btn-oc" type="submit" {% if not users %}disabled{% endif %}>&#25191;&#34892;&#25209;&#37327;&#25805;&#20316;</button>
+        </div>
+      </div>
+    </form>
   </div>
 
   <div class="surface p-3 mb-3">
@@ -55,8 +81,7 @@
           </div>
           <div class="col-12 col-lg-8">
             <label class="form-label fw-semibold" for="user_ids">目标实例</label>
-            <textarea class="form-control" id="user_ids" name="user_ids" rows="3" required>{% for user in users if user.status.startswith("Up") %}{{ user.user_id }}{% if not loop.last %}
-{% endif %}{% endfor %}</textarea>
+            <textarea class="form-control" id="user_ids" name="user_ids" rows="3" required>{{ bulk_skill_user_ids }}</textarea>
             <div class="muted-small mt-2">默认填入当前筛选结果中的运行中实例，可按需删除或补充；支持换行、空格或逗号分隔。</div>
           </div>
         </div>
@@ -75,6 +100,7 @@
           <table class="table table-hover mb-0 align-middle">
             <thead>
               <tr>
+                <th style="width: 52px;">&#36873;&#25321;</th>
                 <th>用户</th>
                 <th>状态</th>
                 <th>端口</th>
@@ -87,6 +113,9 @@
             <tbody>
               {% for user in users %}
                 <tr>
+                  <td>
+                    <input class="form-check-input" type="checkbox" name="user_ids" value="{{ user.user_id }}" form="bulk-lifecycle-form" checked>
+                  </td>
                   <td class="fw-semibold">{{ user.user_id }}</td>
                   <td>
                     {% if user.status.startswith("Up") %}
@@ -159,6 +188,22 @@
             </tbody>
           </table>
         </div>
+        {% if pagination.total_pages > 1 %}
+          <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap p-3 border-top">
+            <div class="muted-small">&#26174;&#31034; {{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }} &#20010;&#23454;&#20363;</div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}">&#19978;&#19968;&#39029;</a>
+              <span class="muted-small">&#31532; {{ pagination.page }} / {{ pagination.total_pages }} &#39029;</span>
+              <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}">&#19979;&#19968;&#39029;</a>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="muted-small">&#27599;&#39029;</span>
+              {% for option in page_size_options %}
+                <a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status={{ status_filter }}&page=1&per_page={{ option }}">{{ option }}</a>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
       {% else %}
         <div class="p-4 muted-small">当前筛选条件下没有用户实例。</div>
       {% endif %}

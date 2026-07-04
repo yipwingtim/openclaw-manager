@@ -23,8 +23,12 @@ def load_app_module():
         def route(self, *args, **kwargs):
             return lambda func: func
 
-        before_request = route
-        context_processor = route
+        def before_request(self, func):
+            return func
+
+        def context_processor(self, func):
+            return func
+
         get = route
         post = route
 

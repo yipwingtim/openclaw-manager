@@ -109,6 +109,20 @@ Goal: support OpenClaw and other AI agent applications through a shared instance
 
 目标：通过统一实例管理层支持 OpenClaw 以及其他 AI agent 应用。
 
+Implementation order:
+
+- Extract a thin `InstanceAdapter` around the current lifecycle actions first.
+- Keep current behavior in an `OpenClawDockerAdapter`.
+- Route Web batch operations through the adapter, starting with batch set model.
+- Add a future `K8sAdapter` after the Docker adapter path is stable.
+
+实施顺序：
+
+- 先围绕当前生命周期动作抽出一层很薄的 `InstanceAdapter`。
+- 将当前行为保留在 `OpenClawDockerAdapter` 中。
+- Web 批量操作先接入 adapter，优先从批量设置模型开始。
+- Docker adapter 路径稳定后，再增加未来的 `K8sAdapter`。
+
 Scope:
 
 - Introduce application adapter definitions for image, ports, volumes, health checks, auth, and UI routes.

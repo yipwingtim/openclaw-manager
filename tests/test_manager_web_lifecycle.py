@@ -97,15 +97,13 @@ class LifecycleActionTests(unittest.TestCase):
     def test_delete_runs_script_when_user_dir_is_missing(self):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)
+            adapter = types.SimpleNamespace(delete=lambda user_id: (0, "deleted"))
 
-            with patch.object(self.app_module, "run_command", return_value=(0, "deleted")) as run_command:
+            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
                 code, output = self.app_module.run_instance_lifecycle_action("missing-user", "delete")
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "deleted")
-            command = run_command.call_args.args[0]
-            self.assertTrue(str(command[0]).endswith("scripts/delete_user.sh"))
-            self.assertEqual(command[1], "missing-user")
 
     def test_start_still_fails_when_user_dir_is_missing(self):
         with TemporaryDirectory() as public_dir:
@@ -126,15 +124,13 @@ class LifecycleActionTests(unittest.TestCase):
             (manager_dir / "scripts").mkdir(parents=True)
             self.app_module.PUBLIC_DIR = public_dir
             self.app_module.MANAGER_DIR = manager_dir
+            adapter = types.SimpleNamespace(restore=lambda user_id: (0, "restored"))
 
-            with patch.object(self.app_module, "run_command", return_value=(0, "restored")) as run_command:
+            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
                 code, output = self.app_module.run_instance_lifecycle_action("deleted-user", "restore")
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "restored")
-            command = run_command.call_args.args[0]
-            self.assertTrue(str(command[0]).endswith("scripts/restore_user.sh"))
-            self.assertEqual(command[1], "deleted-user")
 
     def test_restore_rejects_existing_user_dir(self):
         with TemporaryDirectory() as public_dir:
@@ -173,6 +169,18 @@ class LifecycleActionTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_lifecycle_start_uses_instance_adapter(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            (Path(public_dir) / "users" / "alice").mkdir(parents=True)
+            adapter = types.SimpleNamespace(start=lambda user_id: (0, f"started {user_id}"))
+
+            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
+                code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "started alice")
 
     def test_parse_bulk_user_ids_accepts_whitespace_commas_and_dedupes(self):
         user_ids = self.app_module.parse_bulk_user_ids(["alice bob", "alice,bad/user,carol"])
@@ -381,6 +389,29 @@ class BatchCreatePreflightTests(unittest.TestCase):
             self.assertIn("missing: user not found", errors)
             self.assertIn("stopped: container is not running", errors)
             self.assertTrue(any("missing required model config" in error for error in errors))
+
+    def test_batch_model_provider_adapter_writes_result(self):
+        with TemporaryDirectory() as public_dir:
+            input_csv = Path(public_dir) / "input.csv"
+            output_csv = Path(public_dir) / "results.csv"
+            input_csv.write_text("input", encoding="utf-8")
+            output_csv.write_text("result", encoding="utf-8")
+            adapter = self.app_module.OpenClawDockerAdapter(
+                manager_dir=Path(public_dir),
+                public_dir=Path(public_dir),
+                nginx_users_conf_dir=Path(public_dir) / "nginx",
+                nginx_compose_dir=Path(public_dir) / "compose",
+                nginx_container_name="nginx",
+            )
+
+            with patch.object(adapter, "run_command", return_value=(0, "updated")) as run_command:
+                code, output = adapter.batch_set_model_provider(input_csv, output_csv, timeout=123)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "updated")
+            command = run_command.call_args.args[0]
+            self.assertTrue(str(command[0]).endswith("scripts/batch_set_model_provider.sh"))
+            self.assertEqual(command[1:], [str(input_csv), str(output_csv)])
 
 
 if __name__ == "__main__":

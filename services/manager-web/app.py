@@ -16,6 +16,7 @@ from flask import Flask, Response, redirect, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
 import metadata_store
+from instance_adapters import OpenClawDockerAdapter
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -117,6 +118,18 @@ def configured_skill_presets():
 
 def get_user_dir(user_id):
     return PUBLIC_DIR / "users" / user_id
+
+
+def get_instance_adapter(product="openclaw"):
+    if product != "openclaw":
+        raise ValueError(f"Unsupported instance product: {product}")
+    return OpenClawDockerAdapter(
+        manager_dir=MANAGER_DIR,
+        public_dir=PUBLIC_DIR,
+        nginx_users_conf_dir=NGINX_USERS_CONF_DIR,
+        nginx_compose_dir=NGINX_COMPOSE_DIR,
+        nginx_container_name=NGINX_CONTAINER_NAME,
+    )
 
 
 def get_actor_user():
@@ -967,59 +980,35 @@ def is_basic_auth_enabled(user_id):
 
 
 def nginx_disabled_conf_dir():
-    return NGINX_USERS_CONF_DIR / "_disabled"
+    return get_instance_adapter().nginx_disabled_conf_dir()
 
 
 def nginx_legacy_disabled_conf_dir():
-    return Path(str(NGINX_USERS_CONF_DIR) + ".disabled")
+    return get_instance_adapter().nginx_legacy_disabled_conf_dir()
 
 
 def nginx_active_user_conf(user_id):
-    return NGINX_USERS_CONF_DIR / f"{user_id}.conf"
+    return get_instance_adapter().nginx_active_user_conf(user_id)
 
 
 def nginx_disabled_user_conf(user_id):
-    return nginx_disabled_conf_dir() / f"{user_id}.conf"
+    return get_instance_adapter().nginx_disabled_user_conf(user_id)
 
 
 def nginx_legacy_disabled_user_conf(user_id):
-    return nginx_legacy_disabled_conf_dir() / f"{user_id}.conf"
+    return get_instance_adapter().nginx_legacy_disabled_user_conf(user_id)
 
 
 def nginx_user_conf_candidates(user_id):
-    return [
-        nginx_active_user_conf(user_id),
-        nginx_disabled_user_conf(user_id),
-        nginx_legacy_disabled_user_conf(user_id),
-    ]
+    return get_instance_adapter().nginx_user_conf_candidates(user_id)
 
 
 def run_command(command, timeout=30, cwd=None):
-    result = subprocess.run(
-        command,
-        cwd=str(cwd or MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
-    )
-    output = (result.stdout + "\n" + result.stderr).strip()
-    return result.returncode, output
+    return get_instance_adapter().run_command(command, timeout=timeout, cwd=cwd)
 
 
 def reload_nginx():
-    test_code, test_output = run_command(["docker", "exec", NGINX_CONTAINER_NAME, "nginx", "-t"], timeout=30)
-    if test_code != 0:
-        return test_code, f"Nginx test failed:\n{test_output}"
-
-    reload_code, reload_output = run_command(
-        ["docker", "exec", NGINX_CONTAINER_NAME, "nginx", "-s", "reload"],
-        timeout=30,
-    )
-    if reload_code != 0:
-        return reload_code, f"Nginx reload failed:\n{reload_output}"
-
-    return 0, "\n".join(part for part in [test_output, reload_output] if part)
+    return get_instance_adapter().reload_nginx()
 
 
 def refresh_nginx_after_create(user_id, actor=None):
@@ -1059,53 +1048,11 @@ def refresh_nginx_after_create(user_id, actor=None):
 
 
 def disable_nginx_user_conf(user_id):
-    active_conf = nginx_active_user_conf(user_id)
-    disabled_conf = nginx_disabled_user_conf(user_id)
-    if not active_conf.is_file():
-        if disabled_conf.is_file():
-            return 0, f"Nginx config already disabled: {disabled_conf}"
-        return 0, f"Nginx config not found, skip disabling: {active_conf}"
-
-    disabled_conf.parent.mkdir(parents=True, exist_ok=True)
-    if disabled_conf.exists():
-        return 1, f"Disabled nginx config already exists: {disabled_conf}"
-
-    shutil.move(str(active_conf), str(disabled_conf))
-    reload_code, reload_output = reload_nginx()
-    if reload_code == 0:
-        return 0, f"Disabled nginx config: {disabled_conf}\n{reload_output}".strip()
-
-    shutil.move(str(disabled_conf), str(active_conf))
-    rollback_code, rollback_output = reload_nginx()
-    rollback_note = "\nRolled back nginx config disable."
-    if rollback_code != 0:
-        rollback_note += f"\nRollback reload failed:\n{rollback_output}"
-    return reload_code, f"{reload_output}{rollback_note}"
+    return get_instance_adapter().disable_nginx_user_conf(user_id)
 
 
 def enable_nginx_user_conf(user_id):
-    active_conf = nginx_active_user_conf(user_id)
-    disabled_conf = nginx_disabled_user_conf(user_id)
-    legacy_disabled_conf = nginx_legacy_disabled_user_conf(user_id)
-    if active_conf.is_file():
-        return 0, f"Nginx config already enabled: {active_conf}"
-    if not disabled_conf.is_file():
-        if legacy_disabled_conf.is_file():
-            disabled_conf = legacy_disabled_conf
-        else:
-            return 1, f"Disabled nginx config not found: {disabled_conf}"
-
-    shutil.move(str(disabled_conf), str(active_conf))
-    reload_code, reload_output = reload_nginx()
-    if reload_code == 0:
-        return 0, f"Enabled nginx config: {active_conf}\n{reload_output}".strip()
-
-    shutil.move(str(active_conf), str(disabled_conf))
-    rollback_code, rollback_output = reload_nginx()
-    rollback_note = "\nRolled back nginx config enable."
-    if rollback_code != 0:
-        rollback_note += f"\nRollback reload failed:\n{rollback_output}"
-    return reload_code, f"{reload_output}{rollback_note}"
+    return get_instance_adapter().enable_nginx_user_conf(user_id)
 
 
 def detect_openclaw_version(user_id):
@@ -1121,32 +1068,11 @@ def detect_openclaw_version(user_id):
 
 
 def get_container_status(user_id):
-    container_name = f"openclaw_{user_id}"
-    result = subprocess.run(
-        ["docker", "ps", "--filter", f"name=^{container_name}$", "--format", "{{.Status}}"],
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=10,
-        check=False,
-    )
-    return result.stdout.strip() or "STOPPED"
+    return get_instance_adapter().status(user_id)
 
 
 def get_container_logs(user_id, tail=120):
-    container_name = f"openclaw_{user_id}"
-    result = subprocess.run(
-        ["docker", "logs", "--tail", str(tail), container_name],
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
-        timeout=10,
-        check=False,
-    )
-    output = (result.stdout + "\n" + result.stderr).strip()
-    if result.returncode != 0:
-        return output or "Could not read container logs."
-    return output or "No recent logs."
+    return get_instance_adapter().logs(user_id, tail=tail)
 
 
 def install_skill_for_user(user_id, skill_id):
@@ -1176,53 +1102,21 @@ def run_instance_lifecycle_action(user_id, action):
     if action not in {"delete", "restore"} and not user_dir.is_dir():
         return 1, f"User not found: {user_id}"
 
-    container_name = f"openclaw_{user_id}"
+    adapter = get_instance_adapter()
     if action == "start":
-        start_code, start_output = run_command(["docker", "start", container_name], timeout=90)
-        if start_code != 0:
-            return start_code, start_output
-
-        nginx_code, nginx_output = enable_nginx_user_conf(user_id)
-        combined_output = "\n".join(part for part in [start_output, nginx_output] if part)
-        if nginx_code == 0:
-            return 0, combined_output
-
-        rollback_code, rollback_output = run_command(["docker", "stop", container_name], timeout=60)
-        rollback_note = "\nRolled back container start."
-        if rollback_code != 0:
-            rollback_note += f"\nRollback stop failed:\n{rollback_output}"
-        return nginx_code, f"{combined_output}{rollback_note}"
+        return adapter.start(user_id)
     elif action == "stop":
-        nginx_code, nginx_output = disable_nginx_user_conf(user_id)
-        if nginx_code != 0:
-            return nginx_code, nginx_output
-
-        stop_code, stop_output = run_command(["docker", "stop", container_name], timeout=60)
-        combined_output = "\n".join(part for part in [nginx_output, stop_output] if part)
-        if stop_code == 0:
-            return 0, combined_output
-
-        rollback_code, rollback_output = enable_nginx_user_conf(user_id)
-        rollback_note = "\nRolled back nginx config disable."
-        if rollback_code != 0:
-            rollback_note += f"\nRollback enable failed:\n{rollback_output}"
-        return stop_code, f"{combined_output}{rollback_note}"
+        return adapter.stop(user_id)
     elif action == "restart":
-        command = ["docker", "restart", container_name]
-        timeout = 90
+        return adapter.restart(user_id)
     elif action == "delete":
-        command = [str(MANAGER_DIR / "scripts" / "delete_user.sh"), user_id]
-        timeout = 180
+        return adapter.delete(user_id)
     elif action == "restore":
         if user_dir.is_dir():
             return 1, f"User already exists: {user_id}"
-        command = [str(MANAGER_DIR / "scripts" / "restore_user.sh"), user_id]
-        timeout = 240
-    else:
-        return 1, "Invalid lifecycle action."
+        return adapter.restore(user_id)
 
-    returncode, output = run_command(command, timeout=timeout)
-    return returncode, output
+    return 1, "Invalid lifecycle action."
 
 
 def parse_bulk_user_ids(raw_user_ids):
@@ -2115,20 +2009,15 @@ def run_admin_batch_model_provider():
         ), 400
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
-    script = MANAGER_DIR / "scripts" / "batch_set_model_provider.sh"
-    process = subprocess.run(
-        [str(script), str(input_csv), str(output_csv)],
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
+    returncode, command_output = get_instance_adapter().batch_set_model_provider(
+        input_csv,
+        output_csv,
         timeout=BATCH_MODEL_PROVIDER_TIMEOUT,
-        check=False,
     )
-    command_output = (process.stdout + "\n" + process.stderr).strip()
     result_csv = read_text_preview(output_csv, max_chars=12000)
     result = f"{command_output}\n\nResult CSV:\n{result_csv}".strip()
 
-    if process.returncode != 0:
+    if returncode != 0:
         return render_template(
             "admin_create_user.html",
             user_id="",

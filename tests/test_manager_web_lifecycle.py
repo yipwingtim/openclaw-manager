@@ -135,20 +135,42 @@ class LifecycleActionTests(unittest.TestCase):
         self.assertEqual(pagination["end"], 25)
         self.assertFalse(pagination["has_next"])
 
-    def test_bulk_lifecycle_reuses_single_instance_action(self):
-        with patch.object(
-            self.app_module,
-            "run_instance_lifecycle_action",
-            side_effect=[(0, "started"), (1, "failed")],
-        ) as run_action:
-            with patch.object(self.app_module, "persist_lifecycle_metadata", return_value="") as persist_metadata:
-                summaries, errors = self.app_module.run_bulk_instance_lifecycle_action(["alice", "bob"], "start")
+    def test_bulk_lifecycle_skips_instances_already_in_target_state(self):
+        statuses = {"alice": "Up 2 hours", "bob": "STOPPED", "carol": "STOPPED"}
 
-        self.assertEqual(summaries, ["[OK] alice: Start completed"])
-        self.assertEqual(errors, ["[ERROR] bob: Start failed: failed"])
-        self.assertEqual(run_action.call_args_list[0].args, ("alice", "start"))
-        self.assertEqual(run_action.call_args_list[1].args, ("bob", "start"))
-        persist_metadata.assert_called_once_with("alice", "start", "started")
+        with patch.object(self.app_module, "get_container_status", side_effect=lambda user_id: statuses[user_id]):
+            with patch.object(
+                self.app_module,
+                "run_instance_lifecycle_action",
+                side_effect=[(0, "started"), (1, "failed")],
+            ) as run_action:
+                with patch.object(self.app_module, "persist_lifecycle_metadata", return_value="") as persist_metadata:
+                    summaries, errors = self.app_module.run_bulk_instance_lifecycle_action(
+                        ["alice", "bob", "carol"],
+                        "start",
+                    )
+
+        self.assertEqual(
+            summaries,
+            ["[SKIP] alice: already running", "[OK] bob: Start completed"],
+        )
+        self.assertEqual(errors, ["[ERROR] carol: Start failed: failed"])
+        self.assertEqual(run_action.call_args_list[0].args, ("bob", "start"))
+        self.assertEqual(run_action.call_args_list[1].args, ("carol", "start"))
+        persist_metadata.assert_called_once_with("bob", "start", "started")
+
+    def test_bulk_stop_skips_stopped_instances(self):
+        statuses = {"alice": "STOPPED", "bob": "Up 5 minutes"}
+
+        with patch.object(self.app_module, "get_container_status", side_effect=lambda user_id: statuses[user_id]):
+            with patch.object(self.app_module, "run_instance_lifecycle_action", return_value=(0, "stopped")) as run_action:
+                with patch.object(self.app_module, "persist_lifecycle_metadata", return_value="") as persist_metadata:
+                    summaries, errors = self.app_module.run_bulk_instance_lifecycle_action(["alice", "bob"], "stop")
+
+        self.assertEqual(summaries, ["[SKIP] alice: already stopped", "[OK] bob: Stop completed"])
+        self.assertEqual(errors, [])
+        run_action.assert_called_once_with("bob", "stop")
+        persist_metadata.assert_called_once_with("bob", "stop", "stopped")
 
     def test_upload_file_rejects_unsupported_extension(self):
         with TemporaryDirectory() as public_dir:

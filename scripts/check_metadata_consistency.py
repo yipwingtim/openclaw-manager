@@ -151,6 +151,24 @@ def scan_user_dirs(public_dir):
     }
 
 
+def recycle_user_id(path):
+    match = re.match(r"^(.+)_\d{8}_\d{6}$", path.name)
+    if match:
+        return match.group(1)
+    return path.name.rsplit("_", 1)[0]
+
+
+def scan_deleted_recycle_dirs(public_dir):
+    deleted_root = public_dir / "deleted"
+    if not deleted_root.is_dir():
+        return []
+    recycle_dirs = []
+    for path in sorted(deleted_root.iterdir(), key=lambda item: item.name):
+        if path.is_dir():
+            recycle_dirs.append({"user_id": recycle_user_id(path), "path": path})
+    return recycle_dirs
+
+
 def detect_compose(path):
     result = {
         "exists": path.is_file(),
@@ -312,6 +330,8 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
         reporter.warn("metadata_missing_user", f"{user_id}: user dir exists but metadata has no instance row")
         return
 
+    if csv_status == "deleted":
+        reporter.warn("users_csv_deleted_but_dir_exists", f"{user_id}: users.csv status is deleted but user dir exists")
     if db_status == "deleted":
         reporter.warn("metadata_deleted_but_dir_exists", f"{user_id}: metadata status is deleted but user dir exists")
     if nginx["port"] is not None and db_row.get("port") is not None and int(db_row["port"]) != nginx["port"]:
@@ -352,14 +372,40 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
             )
 
 
-def check_global(users_dirs, users_csv, db_instances, reporter):
+def check_deleted_recycle_dirs(recycle_dirs, reporter):
+    for item in recycle_dirs:
+        user_id = item["user_id"]
+        recycle_dir = item["path"]
+        user_compose = recycle_dir / "user" / "docker-compose.yml"
+        nginx_conf = recycle_dir / "nginx" / f"{user_id}.conf"
+        legacy_compose = recycle_dir / "docker-compose.yml"
+
+        if not user_compose.is_file():
+            if legacy_compose.is_file():
+                reporter.warn(
+                    "deleted_recycle_legacy_layout",
+                    f"{recycle_dir}: legacy recycle layout; restore_user.sh can restore user dir but nginx config may require manual recovery",
+                )
+            else:
+                reporter.error("deleted_recycle_user_compose_missing", f"{recycle_dir}: missing user/docker-compose.yml")
+        if not nginx_conf.is_file():
+            reporter.error("deleted_recycle_nginx_conf_missing", f"{recycle_dir}: missing nginx/{user_id}.conf")
+
+
+def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
+    recycle_users = {item["user_id"] for item in recycle_dirs}
+
     for user_id, row in users_csv.items():
         if row["status"] != "deleted" and user_id not in users_dirs:
             reporter.warn("users_csv_dir_missing", f"{user_id}: users.csv row exists but user dir is missing")
+        if row["status"] != "deleted" and user_id not in users_dirs and user_id in recycle_users:
+            reporter.warn("users_csv_active_but_only_deleted_recycle", f"{user_id}: users.csv status is active but only deleted recycle dir exists")
 
     for user_id, row in db_instances.items():
         if row.get("status") != "deleted" and user_id not in users_dirs:
             reporter.warn("metadata_dir_missing", f"{user_id}: active metadata row exists but user dir is missing")
+        if row.get("status") != "deleted" and user_id not in users_dirs and user_id in recycle_users:
+            reporter.warn("metadata_active_but_only_deleted_recycle", f"{user_id}: metadata status is active but only deleted recycle dir exists")
 
     if NGINX_COMPOSE_FILE.is_file():
         text = read_text(NGINX_COMPOSE_FILE)
@@ -405,6 +451,7 @@ def main():
     reporter = Reporter()
     users_csv = parse_users_csv(USERS_CSV, reporter)
     users_dirs = scan_user_dirs(OPENCLAW_PUBLIC_DIR)
+    recycle_dirs = scan_deleted_recycle_dirs(OPENCLAW_PUBLIC_DIR)
     db_instances, db_ports = load_db(METADATA_DB_FILE, reporter)
 
     if args.user_id:
@@ -423,7 +470,8 @@ def main():
     else:
         for user_id, user_dir in sorted(users_dirs.items()):
             check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, verbose=args.verbose)
-        check_global(users_dirs, users_csv, db_instances, reporter)
+        check_deleted_recycle_dirs(recycle_dirs, reporter)
+        check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter)
 
     if not args.quiet:
         print(f"[INFO] OpenClaw public dir: {OPENCLAW_PUBLIC_DIR}")
@@ -431,6 +479,7 @@ def main():
         print(f"[INFO] metadata db: {METADATA_DB_FILE}")
         print(f"[INFO] nginx conf dir: {NGINX_USERS_CONF_DIR}")
         print(f"[INFO] checked user dirs: {len(users_dirs)}")
+        print(f"[INFO] checked deleted recycle dirs: {len(recycle_dirs)}")
 
     errors = reporter.print()
     return 1 if errors else 0

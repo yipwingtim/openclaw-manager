@@ -323,6 +323,10 @@ Start / Stop / Restart Instance
 Delete Instance
   -> scripts/delete_user.sh <user_id>
 
+Restore Instance
+  -> scripts/restore_user.sh <user_id>
+  -> restores deleted/<user_id>_<timestamp>/user and nginx/<user_id>.conf, then re-adds the Nginx port mapping and marks metadata active
+
 Bulk Install Skill
   -> docker exec openclaw_<user_id> openclaw skills install <skill_id>
 ```

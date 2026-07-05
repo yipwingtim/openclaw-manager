@@ -644,6 +644,8 @@ https://<服务器IP>:<PORT>
 ./scripts/restore_user.sh <user_id>
 ```
 
+Restore reads `config/openclaw-manager.env`, finds the latest `deleted/<user_id>_<timestamp>/` recycle entry, restores `user/` back to `users/<user_id>`, restores `nginx/<user_id>.conf`, re-adds the Nginx port mapping, starts the instance and Nginx compose stacks, reloads Nginx, and marks the user active in `users.csv` and metadata.
+
 用户数据不会立即删除。
 
 ## ⚙️ Usage | 使用方式
@@ -731,6 +733,8 @@ docker exec -it openclaw_<user_id> openclaw devices approve <requestId>
 #### 4️⃣ 恢复用户
 
 ./scripts/restore_user.sh <user_id>
+
+The restore script expects the current recycle layout produced by `delete_user.sh`: `deleted/<user_id>_<timestamp>/user/` and `deleted/<user_id>_<timestamp>/nginx/<user_id>.conf`. It restores the user directory, Nginx config, Nginx compose port mapping, `users.csv` status, and metadata port allocation.
 
 ---
 

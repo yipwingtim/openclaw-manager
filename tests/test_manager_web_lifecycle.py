@@ -118,6 +118,62 @@ class LifecycleActionTests(unittest.TestCase):
             self.assertEqual(output, "User not found: missing-user")
             run_command.assert_not_called()
 
+    def test_restore_runs_script_when_user_dir_is_missing(self):
+        with TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            public_dir = root / "public"
+            manager_dir = root / "manager"
+            (manager_dir / "scripts").mkdir(parents=True)
+            self.app_module.PUBLIC_DIR = public_dir
+            self.app_module.MANAGER_DIR = manager_dir
+
+            with patch.object(self.app_module, "run_command", return_value=(0, "restored")) as run_command:
+                code, output = self.app_module.run_instance_lifecycle_action("deleted-user", "restore")
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "restored")
+            command = run_command.call_args.args[0]
+            self.assertTrue(str(command[0]).endswith("scripts/restore_user.sh"))
+            self.assertEqual(command[1], "deleted-user")
+
+    def test_restore_rejects_existing_user_dir(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            (Path(public_dir) / "users" / "alice").mkdir(parents=True)
+
+            with patch.object(self.app_module, "run_command") as run_command:
+                code, output = self.app_module.run_instance_lifecycle_action("alice", "restore")
+
+            self.assertEqual(code, 1)
+            self.assertEqual(output, "User already exists: alice")
+            run_command.assert_not_called()
+
+    def test_list_deleted_users_reads_metadata_instances(self):
+        instances = [
+            {"user_id": "alice", "port": 41001, "openclaw_version": "1.2.3"},
+            {"user_id": "bad/user", "port": 41002, "openclaw_version": "1.2.3"},
+        ]
+
+        with patch.object(self.app_module.metadata_store, "initialize") as initialize:
+            with patch.object(self.app_module.metadata_store, "list_instances", return_value=instances) as list_instances:
+                users = self.app_module.list_active_users("deleted")
+
+        initialize.assert_called_once()
+        list_instances.assert_called_once_with(status="deleted")
+        self.assertEqual(
+            users,
+            [
+                {
+                    "user_id": "alice",
+                    "status": "DELETED",
+                    "port": 41001,
+                    "openclaw_version": "1.2.3",
+                    "access_url": "",
+                    "basic_auth_enabled": None,
+                }
+            ],
+        )
+
     def test_parse_bulk_user_ids_accepts_whitespace_commas_and_dedupes(self):
         user_ids = self.app_module.parse_bulk_user_ids(["alice bob", "alice,bad/user,carol"])
 

@@ -31,6 +31,7 @@
         <a class="btn btn-sm {% if status_filter == 'running' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=running&per_page={{ pagination.per_page }}">运行中</a>
         <a class="btn btn-sm {% if status_filter == 'stopped' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=stopped&per_page={{ pagination.per_page }}">已停止</a>
         <a class="btn btn-sm {% if status_filter == 'all' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=all&per_page={{ pagination.per_page }}">全部</a>
+        <a class="btn btn-sm {% if status_filter == 'deleted' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=deleted&per_page={{ pagination.per_page }}">&#24050;&#21024;&#38500;</a>
       </div>
     </div>
   </div>
@@ -55,7 +56,7 @@
           </select>
         </div>
         <div class="col-12 col-md-auto">
-          <button class="btn btn-oc" type="submit" {% if not users %}disabled{% endif %}>&#25191;&#34892;&#25209;&#37327;&#25805;&#20316;</button>
+          <button class="btn btn-oc" type="submit" {% if not users or status_filter == 'deleted' %}disabled{% endif %}>&#25191;&#34892;&#25209;&#37327;&#25805;&#20316;</button>
         </div>
       </div>
     </form>
@@ -116,7 +117,7 @@
               {% for user in users %}
                 <tr>
                   <td>
-                    <input class="form-check-input bulk-user-checkbox" type="checkbox" name="user_ids" value="{{ user.user_id }}" form="bulk-lifecycle-form">
+                    <input class="form-check-input bulk-user-checkbox" type="checkbox" name="user_ids" value="{{ user.user_id }}" form="bulk-lifecycle-form" {% if user.status == "DELETED" %}disabled{% endif %}>
                   </td>
                   <td class="fw-semibold">{{ user.user_id }}</td>
                   <td>
@@ -166,23 +167,30 @@
                   </td>
                   <td>
                     <div class="d-flex gap-2 flex-wrap">
-                      <a class="btn btn-sm btn-oc-outline" href="/users/{{ user.user_id }}">查看</a>
-                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
-                        <input type="hidden" name="action" value="start">
-                        <button class="btn btn-sm btn-oc-outline" type="submit">启动</button>
-                      </form>
-                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
-                        <input type="hidden" name="action" value="stop">
-                        <button class="btn btn-sm btn-oc-outline" type="submit">停止</button>
-                      </form>
-                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
-                        <input type="hidden" name="action" value="restart">
-                        <button class="btn btn-sm btn-oc-outline" type="submit">重启</button>
-                      </form>
-                      <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle" onsubmit="return confirm('确认删除 {{ user.user_id }}？用户数据将移动到回收目录，并移除 Nginx 端口映射。');">
-                        <input type="hidden" name="action" value="delete">
-                        <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
-                      </form>
+                      {% if user.status == "DELETED" %}
+                        <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle" onsubmit="return confirm('&#30830;&#35748;&#24674;&#22797; {{ user.user_id }}&#65311;&#35813;&#25805;&#20316;&#20250;&#24674;&#22797;&#29992;&#25143;&#30446;&#24405;&#12289;Nginx &#37197;&#32622;&#24182;&#21551;&#21160;&#23454;&#20363;&#12290;');">
+                          <input type="hidden" name="action" value="restore">
+                          <button class="btn btn-sm btn-oc" type="submit">&#24674;&#22797;</button>
+                        </form>
+                      {% else %}
+                        <a class="btn btn-sm btn-oc-outline" href="/users/{{ user.user_id }}">&#26597;&#30475;</a>
+                        <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                          <input type="hidden" name="action" value="start">
+                          <button class="btn btn-sm btn-oc-outline" type="submit">&#21551;&#21160;</button>
+                        </form>
+                        <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                          <input type="hidden" name="action" value="stop">
+                          <button class="btn btn-sm btn-oc-outline" type="submit">&#20572;&#27490;</button>
+                        </form>
+                        <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
+                          <input type="hidden" name="action" value="restart">
+                          <button class="btn btn-sm btn-oc-outline" type="submit">&#37325;&#21551;</button>
+                        </form>
+                        <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle" onsubmit="return confirm('&#30830;&#35748;&#21024;&#38500; {{ user.user_id }}&#65311;&#29992;&#25143;&#25968;&#25454;&#23558;&#31227;&#21160;&#21040;&#22238;&#25910;&#30446;&#24405;&#65292;&#24182;&#31227;&#38500; Nginx &#31471;&#21475;&#26144;&#23556;&#12290;');">
+                          <input type="hidden" name="action" value="delete">
+                          <button class="btn btn-sm btn-outline-danger" type="submit">&#21024;&#38500;</button>
+                        </form>
+                      {% endif %}
                     </div>
                   </td>
                 </tr>

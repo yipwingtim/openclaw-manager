@@ -598,6 +598,7 @@ def persist_lifecycle_metadata(user_id, action, output=""):
         "stop": "stopped",
         "restart": "active",
         "delete": "deleted",
+        "restore": "active",
     }
     status = status_by_action.get(action)
     if status is None:
@@ -615,7 +616,12 @@ def persist_lifecycle_metadata(user_id, action, output=""):
 
         access_url = existing.get("access_url") or build_access_url(port_text)
         admin_url = existing.get("admin_url") or (access_url.rstrip("/") + "/admin/" if access_url else "")
-        deleted_at = metadata_store.utc_now() if action == "delete" else existing.get("deleted_at")
+        if action == "delete":
+            deleted_at = metadata_store.utc_now()
+        elif action == "restore":
+            deleted_at = None
+        else:
+            deleted_at = existing.get("deleted_at")
         detected_basic_auth_enabled = is_basic_auth_enabled(user_id)
         if detected_basic_auth_enabled is None:
             basic_auth_enabled = existing.get("basic_auth_enabled", 1) != 0
@@ -1167,7 +1173,7 @@ def install_skill_for_user(user_id, skill_id):
 
 def run_instance_lifecycle_action(user_id, action):
     user_dir = get_user_dir(user_id)
-    if action != "delete" and not user_dir.is_dir():
+    if action not in {"delete", "restore"} and not user_dir.is_dir():
         return 1, f"User not found: {user_id}"
 
     container_name = f"openclaw_{user_id}"
@@ -1207,6 +1213,11 @@ def run_instance_lifecycle_action(user_id, action):
     elif action == "delete":
         command = [str(MANAGER_DIR / "scripts" / "delete_user.sh"), user_id]
         timeout = 180
+    elif action == "restore":
+        if user_dir.is_dir():
+            return 1, f"User already exists: {user_id}"
+        command = [str(MANAGER_DIR / "scripts" / "restore_user.sh"), user_id]
+        timeout = 240
     else:
         return 1, "Invalid lifecycle action."
 
@@ -1305,12 +1316,42 @@ def build_access_url(port):
     return f"https://{host}:{port}"
 
 
+def list_deleted_users():
+    try:
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        instances = metadata_store.list_instances(status="deleted")
+    except Exception as exc:
+        app.logger.warning("Could not list deleted users from metadata: %s", exc)
+        return []
+
+    users = []
+    for instance in instances:
+        user_id = validate_user_id(instance.get("user_id") or "")
+        if not user_id:
+            continue
+        port = instance.get("port") or ""
+        users.append(
+            {
+                "user_id": user_id,
+                "status": "DELETED",
+                "port": port,
+                "openclaw_version": instance.get("openclaw_version") or "",
+                "access_url": "",
+                "basic_auth_enabled": None,
+            }
+        )
+    return users
+
+
 def list_active_users(status_filter="running"):
+    if status_filter == "deleted":
+        return list_deleted_users()
+
     users_dir = PUBLIC_DIR / "users"
     if not users_dir.is_dir():
         return []
 
-    if status_filter not in {"running", "stopped", "all"}:
+    if status_filter not in {"running", "stopped", "all", "deleted"}:
         status_filter = "running"
 
     users = []
@@ -1689,7 +1730,7 @@ def admin_users():
     if denied:
         return denied
     status_filter = request.args.get("status", "running").strip().lower()
-    if status_filter not in {"running", "stopped", "all"}:
+    if status_filter not in {"running", "stopped", "all", "deleted"}:
         status_filter = "running"
     filtered_users = list_active_users(status_filter)
     users, pagination = paginate_items(
@@ -2366,7 +2407,7 @@ def admin_instance_lifecycle(user_id):
         return render_template("error.html", message="Invalid user id."), 400
 
     action = (request.form.get("action") or "").strip().lower()
-    if action not in {"start", "stop", "restart", "delete"}:
+    if action not in {"start", "stop", "restart", "delete", "restore"}:
         return redirect(url_for("admin_users", error="Invalid instance action."))
 
     returncode, output = run_instance_lifecycle_action(user_id, action)

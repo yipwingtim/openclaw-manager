@@ -105,6 +105,7 @@
                   <input class="form-check-input" type="checkbox" id="select-current-page" aria-label="&#20840;&#36873;&#24403;&#21069;&#39029;">
                 </th>
                 <th>用户</th>
+                <th>类型</th>
                 <th>状态</th>
                 <th>端口</th>
                 <th>版本</th>
@@ -120,6 +121,7 @@
                     <input class="form-check-input bulk-user-checkbox" type="checkbox" name="user_ids" value="{{ user.user_id }}" form="bulk-lifecycle-form" {% if user.status == "DELETED" %}disabled{% endif %}>
                   </td>
                   <td class="fw-semibold">{{ user.user_id }}</td>
+                  <td><span class="badge-status badge-neutral">{{ user.product or "openclaw" }}</span></td>
                   <td>
                     {% if user.status.startswith("Up") %}
                       <span class="badge-status badge-running">{{ user.status }}</span>

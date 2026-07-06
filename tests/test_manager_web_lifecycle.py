@@ -146,7 +146,7 @@ class LifecycleActionTests(unittest.TestCase):
 
     def test_list_deleted_users_reads_metadata_instances(self):
         instances = [
-            {"user_id": "alice", "port": 41001, "openclaw_version": "1.2.3"},
+            {"user_id": "alice", "product": "openclaw", "port": 41001, "openclaw_version": "1.2.3"},
             {"user_id": "bad/user", "port": 41002, "openclaw_version": "1.2.3"},
         ]
 
@@ -161,6 +161,7 @@ class LifecycleActionTests(unittest.TestCase):
             [
                 {
                     "user_id": "alice",
+                    "product": "openclaw",
                     "status": "DELETED",
                     "port": 41001,
                     "openclaw_version": "1.2.3",
@@ -181,6 +182,31 @@ class LifecycleActionTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "started alice")
+
+    def test_lifecycle_uses_metadata_product_for_adapter_selection(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            (Path(public_dir) / "users" / "alice").mkdir(parents=True)
+            adapter = types.SimpleNamespace(start=lambda user_id: (0, f"started {user_id}"))
+
+            with patch.object(self.app_module, "get_instance_product", return_value="openclaw"):
+                with patch.object(self.app_module, "get_instance_adapter", return_value=adapter) as get_adapter:
+                    code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
+
+            get_adapter.assert_called_once_with("openclaw")
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "started alice")
+
+    def test_lifecycle_rejects_unsupported_product(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            (Path(public_dir) / "users" / "alice").mkdir(parents=True)
+
+            with patch.object(self.app_module, "get_instance_product", return_value="hermes"):
+                code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
+
+            self.assertEqual(code, 1)
+            self.assertEqual(output, "Unsupported instance product: hermes")
 
     def test_parse_bulk_user_ids_accepts_whitespace_commas_and_dedupes(self):
         user_ids = self.app_module.parse_bulk_user_ids(["alice bob", "alice,bad/user,carol"])

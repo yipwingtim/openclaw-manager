@@ -132,6 +132,16 @@ def get_instance_adapter(product="openclaw"):
     )
 
 
+def get_instance_product(user_id):
+    try:
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        instance = metadata_store.get_instance(user_id) or {}
+    except Exception as exc:
+        app.logger.warning("Could not read instance product for %s: %s", user_id, exc)
+        return "openclaw"
+    return (instance.get("product") or "openclaw").strip() or "openclaw"
+
+
 def get_actor_user():
     return (request.headers.get("X-Remote-User") or request.headers.get("X-Forwarded-User") or "").strip()
 
@@ -1102,7 +1112,12 @@ def run_instance_lifecycle_action(user_id, action):
     if action not in {"delete", "restore"} and not user_dir.is_dir():
         return 1, f"User not found: {user_id}"
 
-    adapter = get_instance_adapter()
+    product = get_instance_product(user_id)
+    try:
+        adapter = get_instance_adapter(product)
+    except ValueError as exc:
+        return 1, str(exc)
+
     if action == "start":
         return adapter.start(user_id)
     elif action == "stop":
@@ -1227,6 +1242,7 @@ def list_deleted_users():
         users.append(
             {
                 "user_id": user_id,
+                "product": instance.get("product") or "openclaw",
                 "status": "DELETED",
                 "port": port,
                 "openclaw_version": instance.get("openclaw_version") or "",
@@ -1256,6 +1272,7 @@ def list_active_users(status_filter="running"):
         if not user_id:
             continue
         port = detect_port(user_id)
+        product = get_instance_product(user_id)
         status = get_container_status(user_id)
         is_stopped = status == "STOPPED"
         if status_filter == "running" and is_stopped:
@@ -1265,6 +1282,7 @@ def list_active_users(status_filter="running"):
         users.append(
             {
                 "user_id": user_id,
+                "product": product,
                 "status": status,
                 "port": port,
                 "openclaw_version": detect_openclaw_version(user_id),

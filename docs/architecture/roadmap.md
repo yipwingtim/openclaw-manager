@@ -113,6 +113,7 @@ Implementation order:
 
 - Extract a thin `InstanceAdapter` around the current lifecycle actions first.
 - Keep current behavior in an `OpenClawDockerAdapter`.
+- Route lifecycle actions by the instance `product` metadata field, defaulting existing instances to `openclaw`.
 - Route Web batch operations through the adapter, starting with batch set model.
 - Add a future `K8sAdapter` after the Docker adapter path is stable.
 
@@ -120,6 +121,7 @@ Implementation order:
 
 - 先围绕当前生命周期动作抽出一层很薄的 `InstanceAdapter`。
 - 将当前行为保留在 `OpenClawDockerAdapter` 中。
+- 生命周期操作按实例元数据里的 `product` 字段选择 adapter，既有实例默认视为 `openclaw`。
 - Web 批量操作先接入 adapter，优先从批量设置模型开始。
 - Docker adapter 路径稳定后，再增加未来的 `K8sAdapter`。
 

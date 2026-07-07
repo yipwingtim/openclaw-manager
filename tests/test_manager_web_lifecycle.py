@@ -450,6 +450,46 @@ class BatchCreatePreflightTests(unittest.TestCase):
             self.assertTrue(str(command[0]).endswith("scripts/batch_set_model_provider.sh"))
             self.assertEqual(command[1:], [str(input_csv), str(output_csv)])
 
+    def test_adapter_create_runs_create_script(self):
+        with TemporaryDirectory() as public_dir:
+            adapter = self.app_module.OpenClawDockerAdapter(
+                manager_dir=Path(public_dir),
+                public_dir=Path(public_dir),
+                nginx_users_conf_dir=Path(public_dir) / "nginx",
+                nginx_compose_dir=Path(public_dir) / "compose",
+                nginx_container_name="nginx",
+            )
+
+            with patch.object(adapter, "run_command", return_value=(0, "created")) as run_command:
+                code, output = adapter.create("alice", "true", "secret", timeout=123)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "created")
+            command = run_command.call_args.args[0]
+            self.assertTrue(str(command[0]).endswith("scripts/create_user.sh"))
+            self.assertEqual(command[1:], ["alice", "--basic-auth-enabled", "true", "--skip-nginx-reload", "--password", "secret"])
+
+    def test_adapter_batch_create_runs_batch_create_script(self):
+        with TemporaryDirectory() as public_dir:
+            input_csv = Path(public_dir) / "input.csv"
+            output_csv = Path(public_dir) / "results.csv"
+            adapter = self.app_module.OpenClawDockerAdapter(
+                manager_dir=Path(public_dir),
+                public_dir=Path(public_dir),
+                nginx_users_conf_dir=Path(public_dir) / "nginx",
+                nginx_compose_dir=Path(public_dir) / "compose",
+                nginx_container_name="nginx",
+            )
+
+            with patch.object(adapter, "run_command", return_value=(0, "created")) as run_command:
+                code, output = adapter.batch_create(input_csv, output_csv, timeout=123)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "created")
+            command = run_command.call_args.args[0]
+            self.assertTrue(str(command[0]).endswith("scripts/batch_create_users.sh"))
+            self.assertEqual(command[1:], [str(input_csv), str(output_csv)])
+
 
 if __name__ == "__main__":
     unittest.main()

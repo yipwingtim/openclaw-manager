@@ -44,6 +44,8 @@ OPENCLAW_INTERNAL_TOKEN=<replace-with-generated-token>
 /data/docker/openclaw-manager/config/openclaw-manager.env
 ```
 
+`manager-web` 通过 Compose `env_file` 读取该文件；不要在 `environment` 中用空默认值覆盖 `OPENCLAW_INTERNAL_TOKEN`。
+
 3. 更新所有代理到 `manager-web` 的 Nginx 配置，在对应 `location` 中加入：
 
 ```nginx

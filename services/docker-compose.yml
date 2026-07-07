@@ -9,7 +9,6 @@ services:
       OPENCLAW_MANAGER_DIR: /opt/openclaw-manager
       OPENCLAW_PUBLIC_DIR: ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
       NGINX_USERS_CONF_DIR: ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
-      OPENCLAW_INTERNAL_TOKEN: ${OPENCLAW_INTERNAL_TOKEN:-}
     ports:
       - "127.0.0.1:18082:8080"
     volumes:

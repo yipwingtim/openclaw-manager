@@ -1293,6 +1293,13 @@ def list_active_users(status_filter="running"):
     return users
 
 
+def filter_users_by_user_id(users, user_id_filter):
+    user_id_filter = (user_id_filter or "").strip().lower()
+    if not user_id_filter:
+        return users
+    return [user for user in users if user_id_filter in user["user_id"].lower()]
+
+
 def render_user_dashboard(user_id, instance_mode=False):
     port = detect_port(user_id)
     current_user = get_actor_user() or (user_id if instance_mode else "")
@@ -1644,7 +1651,9 @@ def admin_users():
     status_filter = request.args.get("status", "running").strip().lower()
     if status_filter not in {"running", "stopped", "all", "deleted"}:
         status_filter = "running"
+    user_id_filter = request.args.get("user_id", "").strip()
     filtered_users = list_active_users(status_filter)
+    filtered_users = filter_users_by_user_id(filtered_users, user_id_filter)
     users, pagination = paginate_items(
         filtered_users,
         request.args.get("page", "1"),
@@ -1656,6 +1665,7 @@ def admin_users():
         pagination=pagination,
         page_size_options=USER_PAGE_SIZE_OPTIONS,
         status_filter=status_filter,
+        user_id_filter=user_id_filter,
         skill_presets=configured_skill_presets(),
         bulk_skill_user_ids="\n".join(user["user_id"] for user in filtered_users if user["status"].startswith("Up")),
         result=request.args.get("result", ""),
@@ -2348,6 +2358,7 @@ def admin_bulk_instance_lifecycle():
         "status": (request.form.get("status") or "running").strip().lower(),
         "page": request.form.get("page") or "1",
         "per_page": request.form.get("per_page") or DEFAULT_USERS_PER_PAGE,
+        "user_id": request.form.get("user_id") or "",
     }
     if errors:
         return redirect(url_for("admin_users", error=message[-1800:], **redirect_args))

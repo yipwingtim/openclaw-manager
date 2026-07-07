@@ -25,13 +25,22 @@
     <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap">
       <div>
         <div class="section-title">实例筛选</div>
-        <div class="muted-small">默认仅显示运行中的实例，可切换查看停止或全部实例。</div>
+        <div class="muted-small">默认仅显示运行中的实例，可按状态或用户 ID 筛选。</div>
       </div>
-      <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm {% if status_filter == 'running' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=running&per_page={{ pagination.per_page }}">运行中</a>
-        <a class="btn btn-sm {% if status_filter == 'stopped' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=stopped&per_page={{ pagination.per_page }}">已停止</a>
-        <a class="btn btn-sm {% if status_filter == 'all' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=all&per_page={{ pagination.per_page }}">全部</a>
-        <a class="btn btn-sm {% if status_filter == 'deleted' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=deleted&per_page={{ pagination.per_page }}">&#24050;&#21024;&#38500;</a>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <a class="btn btn-sm {% if status_filter == 'running' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=running&per_page={{ pagination.per_page }}&user_id={{ user_id_filter|urlencode }}">运行中</a>
+        <a class="btn btn-sm {% if status_filter == 'stopped' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=stopped&per_page={{ pagination.per_page }}&user_id={{ user_id_filter|urlencode }}">已停止</a>
+        <a class="btn btn-sm {% if status_filter == 'all' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=all&per_page={{ pagination.per_page }}&user_id={{ user_id_filter|urlencode }}">全部</a>
+        <a class="btn btn-sm {% if status_filter == 'deleted' %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status=deleted&per_page={{ pagination.per_page }}&user_id={{ user_id_filter|urlencode }}">&#24050;&#21024;&#38500;</a>
+        <form class="d-flex gap-2 align-items-center" method="get" action="/admin/users">
+          <input type="hidden" name="status" value="{{ status_filter }}">
+          <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
+          <input class="form-control form-control-sm" style="width: 180px;" type="search" name="user_id" value="{{ user_id_filter }}" placeholder="用户 ID">
+          <button class="btn btn-sm btn-oc-outline" type="submit">筛选</button>
+          {% if user_id_filter %}
+            <a class="btn btn-sm btn-outline-secondary" href="/admin/users?status={{ status_filter }}&per_page={{ pagination.per_page }}">清除</a>
+          {% endif %}
+        </form>
       </div>
     </div>
   </div>
@@ -47,6 +56,7 @@
       <input type="hidden" name="status" value="{{ status_filter }}">
       <input type="hidden" name="page" value="{{ pagination.page }}">
       <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
+      <input type="hidden" name="user_id" value="{{ user_id_filter }}">
       <div class="row g-3 align-items-end">
         <div class="col-12 col-md-4 col-lg-3">
           <label class="form-label fw-semibold" for="bulk_lifecycle_action">&#25805;&#20316;</label>
@@ -203,14 +213,14 @@
         <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap p-3 border-top">
           <div class="muted-small">&#26174;&#31034; {{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }} &#20010;&#23454;&#20363;</div>
           <div class="d-flex align-items-center gap-2 flex-wrap">
-            <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}">&#19978;&#19968;&#39029;</a>
+            <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}&user_id={{ user_id_filter|urlencode }}">&#19978;&#19968;&#39029;</a>
             <span class="muted-small">&#31532; {{ pagination.page }} / {{ pagination.total_pages }} &#39029;</span>
-            <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}">&#19979;&#19968;&#39029;</a>
+            <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/users?status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}&user_id={{ user_id_filter|urlencode }}">&#19979;&#19968;&#39029;</a>
           </div>
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <span class="muted-small">&#27599;&#39029;</span>
             {% for option in page_size_options %}
-              <a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status={{ status_filter }}&page=1&per_page={{ option }}">{{ option }}</a>
+              <a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/users?status={{ status_filter }}&page=1&per_page={{ option }}&user_id={{ user_id_filter|urlencode }}">{{ option }}</a>
             {% endfor %}
           </div>
         </div>

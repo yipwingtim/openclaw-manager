@@ -213,6 +213,17 @@ class LifecycleActionTests(unittest.TestCase):
 
         self.assertEqual(user_ids, ["alice", "bob", "carol"])
 
+    def test_filter_users_by_user_id_matches_case_insensitive_substring(self):
+        users = [
+            {"user_id": "testcreate001"},
+            {"user_id": "TestCreate002"},
+            {"user_id": "alice"},
+        ]
+
+        filtered = self.app_module.filter_users_by_user_id(users, "CREATE")
+
+        self.assertEqual([user["user_id"] for user in filtered], ["testcreate001", "TestCreate002"])
+
     def test_paginate_items_slices_and_clamps_page(self):
         items = list(range(25))
 

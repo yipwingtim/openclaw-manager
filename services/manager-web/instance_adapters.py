@@ -173,6 +173,25 @@ class OpenClawDockerAdapter:
     def restart(self, user_id):
         return self.run_command(["docker", "restart", self.container_name(user_id)], timeout=90)
 
+    def create(self, user_id, basic_auth_enabled, basic_auth_password="", skip_nginx_reload=True, timeout=420):
+        command = [
+            str(self.manager_dir / "scripts" / "create_user.sh"),
+            user_id,
+            "--basic-auth-enabled",
+            basic_auth_enabled,
+        ]
+        if skip_nginx_reload:
+            command.append("--skip-nginx-reload")
+        if basic_auth_password:
+            command.extend(["--password", basic_auth_password])
+        return self.run_command(command, timeout=timeout)
+
+    def batch_create(self, input_csv, output_csv, timeout):
+        return self.run_command(
+            [str(self.manager_dir / "scripts" / "batch_create_users.sh"), str(input_csv), str(output_csv)],
+            timeout=timeout,
+        )
+
     def delete(self, user_id):
         return self.run_command([str(self.manager_dir / "scripts" / "delete_user.sh"), user_id], timeout=180)
 

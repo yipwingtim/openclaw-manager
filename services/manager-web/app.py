@@ -1866,21 +1866,16 @@ def run_admin_batch_create_users():
         ), 400
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
-    script = MANAGER_DIR / "scripts" / "batch_create_users.sh"
-    process = subprocess.run(
-        [str(script), str(input_csv), str(output_csv)],
-        cwd=str(MANAGER_DIR),
-        text=True,
-        capture_output=True,
+    returncode, command_output = get_instance_adapter("openclaw").batch_create(
+        input_csv,
+        output_csv,
         timeout=BATCH_CREATE_TIMEOUT,
-        check=False,
     )
-    command_output = (process.stdout + "\n" + process.stderr).strip()
     result_csv = read_text_preview(output_csv, max_chars=12000)
     saved_count = save_batch_create_account_records(output_csv)
     result = f"{command_output}\n\nResult CSV:\n{result_csv}".strip()
 
-    if process.returncode != 0:
+    if returncode != 0:
         return render_template(
             "admin_create_user.html",
             user_id="",
@@ -2170,27 +2165,15 @@ def run_admin_create_user():
             )
         return render_create_form(error=f"Create request is already running: {user_id}", status=409)
 
-    command = [
-        str(MANAGER_DIR / "scripts" / "create_user.sh"),
-        user_id,
-        "--basic-auth-enabled",
-        basic_auth_enabled,
-        "--skip-nginx-reload",
-    ]
-    if basic_auth_password:
-        command.extend(["--password", basic_auth_password])
-
     try:
-        process = subprocess.run(
-            command,
-            cwd=str(MANAGER_DIR),
-            text=True,
-            capture_output=True,
+        returncode, output = get_instance_adapter("openclaw").create(
+            user_id,
+            basic_auth_enabled,
+            basic_auth_password,
+            skip_nginx_reload=True,
             timeout=420,
-            check=False,
         )
-        output = (process.stdout + "\n" + process.stderr).strip()
-        if process.returncode != 0:
+        if returncode != 0:
             return render_create_form(result=output, error="Create instance failed.", status=500)
 
         account = parse_create_user_output(output, user_id, basic_auth_enabled, basic_auth_password)

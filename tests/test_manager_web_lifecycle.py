@@ -23,6 +23,26 @@ class FakeUpload:
         Path(target).write_text(self.content, encoding="utf-8")
 
 
+class FakeThread:
+    calls = []
+
+    def __init__(self, target=None, args=(), daemon=None):
+        self.target = target
+        self.args = args
+        self.daemon = daemon
+        self.started = False
+        FakeThread.calls.append(self)
+
+    def start(self):
+        self.started = True
+
+
+class FakeForm(dict):
+    def getlist(self, key):
+        value = self.get(key, [])
+        return value if isinstance(value, list) else [value]
+
+
 def load_app_module():
     flask_stub = types.ModuleType("flask")
 
@@ -272,6 +292,51 @@ class LifecycleActionTests(unittest.TestCase):
         self.assertEqual(errors, [])
         run_action.assert_called_once_with("bob", "stop")
         persist_metadata.assert_called_once_with("bob", "stop", "stopped")
+
+    def test_admin_lifecycle_starts_background_job(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            FakeThread.calls = []
+
+            with patch.object(self.app_module, "require_admin", return_value=None):
+                with patch.object(self.app_module.request, "form", {"action": "delete"}):
+                    with patch.object(self.app_module, "get_actor_user", return_value="openclaw"):
+                        with patch.object(self.app_module.threading, "Thread", FakeThread):
+                            with patch.object(self.app_module, "redirect", lambda value: value):
+                                response = self.app_module.admin_instance_lifecycle("alice")
+
+            self.assertEqual(response, "admin_users")
+            self.assertEqual(len(FakeThread.calls), 1)
+            self.assertTrue(FakeThread.calls[0].started)
+            self.assertEqual(FakeThread.calls[0].target, self.app_module.run_lifecycle_action_job)
+            self.assertEqual(FakeThread.calls[0].args, ("alice", "delete", "openclaw"))
+
+    def test_admin_bulk_lifecycle_starts_background_job(self):
+        FakeThread.calls = []
+
+        with patch.object(self.app_module, "require_admin", return_value=None):
+            with patch.object(
+                self.app_module.request,
+                "form",
+                FakeForm({
+                    "action": "start",
+                    "status": "all",
+                    "page": "1",
+                    "per_page": "20",
+                    "user_id": "",
+                    "user_ids": ["alice", "bob"],
+                }),
+            ):
+                with patch.object(self.app_module, "get_actor_user", return_value="openclaw"):
+                    with patch.object(self.app_module.threading, "Thread", FakeThread):
+                        with patch.object(self.app_module, "redirect", lambda value: value):
+                            response = self.app_module.admin_bulk_instance_lifecycle()
+
+        self.assertEqual(response, "admin_users")
+        self.assertEqual(len(FakeThread.calls), 1)
+        self.assertTrue(FakeThread.calls[0].started)
+        self.assertEqual(FakeThread.calls[0].target, self.app_module.run_bulk_lifecycle_action_job)
+        self.assertEqual(FakeThread.calls[0].args, (["alice", "bob"], "start", "openclaw"))
 
     def test_upload_file_rejects_unsupported_extension(self):
         with TemporaryDirectory() as public_dir:

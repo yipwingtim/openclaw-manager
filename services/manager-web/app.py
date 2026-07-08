@@ -1179,6 +1179,32 @@ def run_bulk_instance_lifecycle_action(user_ids, action):
     return summaries, errors
 
 
+def run_lifecycle_action_job(user_id, action, actor=None):
+    returncode, output = run_instance_lifecycle_action(user_id, action)
+    status = "success" if returncode == 0 else "failed"
+    if returncode == 0:
+        output += persist_lifecycle_metadata(user_id, action, output)
+    else:
+        persist_operation_metadata(
+            f"{action}_instance",
+            user_id=user_id,
+            status=status,
+            actor=actor,
+            message=(output or "")[-800:] or None,
+        )
+    return returncode, output
+
+
+def run_bulk_lifecycle_action_job(user_ids, action, actor=None):
+    summaries, errors = run_bulk_instance_lifecycle_action(user_ids, action)
+    persist_operation_metadata(
+        f"bulk_{action}_instances",
+        status="failed" if errors else "success",
+        actor=actor,
+        message="\n".join(summaries + errors)[-1200:] or None,
+    )
+
+
 def parse_positive_int(value, default):
     try:
         parsed = int(value)
@@ -2317,15 +2343,14 @@ def admin_instance_lifecycle(user_id):
     if action not in {"start", "stop", "restart", "delete", "restore"}:
         return redirect(url_for("admin_users", error="Invalid instance action."))
 
-    returncode, output = run_instance_lifecycle_action(user_id, action)
-    clipped_output = output[-1200:] if output else ""
     label = action.capitalize()
-    if returncode != 0:
-        return redirect(url_for("admin_users", error=f"{label} failed: {user_id}\n{clipped_output}"))
-
-    output += persist_lifecycle_metadata(user_id, action, output)
-    clipped_output = output[-1200:] if output else ""
-    return redirect(url_for("admin_users", result=f"{label} completed: {user_id}\n{clipped_output}"))
+    actor = get_actor_user() or None
+    threading.Thread(
+        target=run_lifecycle_action_job,
+        args=(user_id, action, actor),
+        daemon=True,
+    ).start()
+    return redirect(url_for("admin_users", result=f"{label} started: {user_id}. Refresh the list in a few seconds."))
 
 
 @app.post("/admin/users/bulk-lifecycle")
@@ -2342,17 +2367,19 @@ def admin_bulk_instance_lifecycle():
     if not user_ids:
         return redirect(url_for("admin_users", error="No valid user ids selected for bulk lifecycle action."))
 
-    summaries, errors = run_bulk_instance_lifecycle_action(user_ids, action)
-    message = "\n".join(summaries + errors)
     redirect_args = {
         "status": (request.form.get("status") or "running").strip().lower(),
         "page": request.form.get("page") or "1",
         "per_page": request.form.get("per_page") or DEFAULT_USERS_PER_PAGE,
         "user_id": request.form.get("user_id") or "",
     }
-    if errors:
-        return redirect(url_for("admin_users", error=message[-1800:], **redirect_args))
-    return redirect(url_for("admin_users", result=message[-1800:], **redirect_args))
+    actor = get_actor_user() or None
+    threading.Thread(
+        target=run_bulk_lifecycle_action_job,
+        args=(user_ids, action, actor),
+        daemon=True,
+    ).start()
+    return redirect(url_for("admin_users", result=f"Bulk {action} started for {len(user_ids)} instance(s). Refresh the list in a few seconds.", **redirect_args))
 
 
 @app.post("/admin/users/bulk-skill-install")

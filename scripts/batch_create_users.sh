@@ -49,7 +49,9 @@ NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
 PAUSE_EVERY="${BATCH_CREATE_PAUSE_EVERY:-5}"
 PAUSE_SECONDS="${BATCH_CREATE_PAUSE_SECONDS:-30}"
 
-sudo -v
+if command -v sudo >/dev/null 2>&1; then
+  sudo -v
+fi
 
 mkdir -p "$(dirname "$OUTPUT_CSV")"
 

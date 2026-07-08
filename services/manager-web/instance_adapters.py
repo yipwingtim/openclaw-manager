@@ -201,6 +201,12 @@ class OpenClawDockerAdapter:
     def restore(self, user_id):
         return self.run_command([str(self.manager_dir / "scripts" / "restore_user.sh"), user_id], timeout=240)
 
+    def update_version(self, user_id, version, restore_model_provider=False, timeout=600):
+        command = [str(self.manager_dir / "scripts" / "update_instance_version.sh"), user_id, version]
+        if restore_model_provider:
+            command.append("--restore-model-provider")
+        return self.run_command(command, timeout=timeout)
+
     def batch_set_model_provider(self, input_csv, output_csv, timeout):
         return self.run_command(
             [str(self.manager_dir / "scripts" / "batch_set_model_provider.sh"), str(input_csv), str(output_csv)],

@@ -338,6 +338,26 @@ class LifecycleActionTests(unittest.TestCase):
         self.assertEqual(FakeThread.calls[0].target, self.app_module.run_bulk_lifecycle_action_job)
         self.assertEqual(FakeThread.calls[0].args, (["alice", "bob"], "start", "openclaw"))
 
+    def test_admin_version_update_starts_background_job(self):
+        FakeThread.calls = []
+
+        with patch.object(self.app_module, "require_admin", return_value=None):
+            with patch.object(
+                self.app_module.request,
+                "form",
+                {"version": "2026.5.26", "restore_model_provider": "true"},
+            ):
+                with patch.object(self.app_module, "get_actor_user", return_value="openclaw"):
+                    with patch.object(self.app_module.threading, "Thread", FakeThread):
+                        with patch.object(self.app_module, "redirect", lambda value: value):
+                            response = self.app_module.admin_update_instance_version("alice")
+
+        self.assertEqual(response, "admin_users")
+        self.assertEqual(len(FakeThread.calls), 1)
+        self.assertTrue(FakeThread.calls[0].started)
+        self.assertEqual(FakeThread.calls[0].target, self.app_module.run_instance_version_update_job)
+        self.assertEqual(FakeThread.calls[0].args, ("alice", "2026.5.26", True, "openclaw"))
+
     def test_upload_file_rejects_unsupported_extension(self):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)
@@ -554,6 +574,26 @@ class BatchCreatePreflightTests(unittest.TestCase):
             command = run_command.call_args.args[0]
             self.assertTrue(str(command[0]).endswith("scripts/batch_create_users.sh"))
             self.assertEqual(command[1:], [str(input_csv), str(output_csv), "--skip-nginx-refresh"])
+
+    def test_adapter_update_version_runs_update_script(self):
+        with TemporaryDirectory() as public_dir:
+            adapter = self.app_module.OpenClawDockerAdapter(
+                manager_dir=Path(public_dir),
+                public_dir=Path(public_dir),
+                nginx_users_conf_dir=Path(public_dir) / "nginx",
+                nginx_compose_dir=Path(public_dir) / "compose",
+                nginx_container_name="nginx",
+            )
+
+            with patch.object(adapter, "run_command", return_value=(0, "updated")) as run_command:
+                code, output = adapter.update_version("alice", "2026.5.26", restore_model_provider=True, timeout=123)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "updated")
+            command = run_command.call_args.args[0]
+            self.assertTrue(str(command[0]).endswith("scripts/update_instance_version.sh"))
+            self.assertEqual(command[1:], ["alice", "2026.5.26", "--restore-model-provider"])
+            self.assertEqual(run_command.call_args.kwargs["timeout"], 123)
 
 
 if __name__ == "__main__":

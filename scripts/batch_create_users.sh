@@ -6,7 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
 
-if [ "$#" -ne 2 ]; then
+SKIP_NGINX_REFRESH=false
+
+if [ "$#" -lt 2 ]; then
   echo "Usage: $0 <input.csv> <output.csv>"
   echo
   echo "Input CSV columns:"
@@ -16,6 +18,20 @@ fi
 
 INPUT_CSV="$1"
 OUTPUT_CSV="$2"
+shift 2
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip-nginx-refresh)
+      SKIP_NGINX_REFRESH=true
+      shift
+      ;;
+    *)
+      echo "[ERROR] Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [ ! -f "$INPUT_CSV" ]; then
   echo "[ERROR] Input CSV not found: $INPUT_CSV" >&2
@@ -189,6 +205,12 @@ while IFS=, read -r raw_user_id raw_password raw_basic_auth_enabled _rest; do
     sleep "$PAUSE_SECONDS"
   fi
 done < "$INPUT_CSV"
+
+if [ "$SKIP_NGINX_REFRESH" = "true" ]; then
+  echo "[INFO] Skip nginx refresh requested."
+  echo "[INFO] Batch create completed: $OUTPUT_CSV"
+  exit 0
+fi
 
 if ! cd "$NGINX_COMPOSE_DIR"; then
   echo "[ERROR] Failed to enter nginx compose directory: $NGINX_COMPOSE_DIR" >&2

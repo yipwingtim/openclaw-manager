@@ -482,13 +482,13 @@ class BatchCreatePreflightTests(unittest.TestCase):
             )
 
             with patch.object(adapter, "run_command", return_value=(0, "created")) as run_command:
-                code, output = adapter.batch_create(input_csv, output_csv, timeout=123)
+                code, output = adapter.batch_create(input_csv, output_csv, timeout=123, skip_nginx_refresh=True)
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "created")
             command = run_command.call_args.args[0]
             self.assertTrue(str(command[0]).endswith("scripts/batch_create_users.sh"))
-            self.assertEqual(command[1:], [str(input_csv), str(output_csv)])
+            self.assertEqual(command[1:], [str(input_csv), str(output_csv), "--skip-nginx-refresh"])
 
 
 if __name__ == "__main__":

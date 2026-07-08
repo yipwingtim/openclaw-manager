@@ -1870,6 +1870,7 @@ def run_admin_batch_create_users():
         input_csv,
         output_csv,
         timeout=BATCH_CREATE_TIMEOUT,
+        skip_nginx_refresh=True,
     )
     result_csv = read_text_preview(output_csv, max_chars=12000)
     saved_count = save_batch_create_account_records(output_csv)
@@ -1893,6 +1894,12 @@ def run_admin_batch_create_users():
         "batch_create_users",
         message=f"input={input_csv.name} output={output_csv.name} saved_accounts={saved_count} {command_output[-500:]}".strip(),
     )
+    actor = get_actor_user() or None
+    threading.Thread(
+        target=refresh_nginx_after_create,
+        args=(f"batch:{input_csv.parent.name}", actor),
+        daemon=True,
+    ).start()
     return render_template(
         "admin_create_user.html",
         user_id="",

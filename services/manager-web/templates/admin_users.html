@@ -198,6 +198,14 @@
                           <input type="hidden" name="action" value="restart">
                           <button class="btn btn-sm btn-oc-outline" type="submit">&#37325;&#21551;</button>
                         </form>
+                        <form class="d-flex gap-2 flex-wrap align-items-center" method="post" action="/admin/users/{{ user.user_id }}/version" onsubmit="return confirm('确认升级 {{ user.user_id }} 到目标版本？该操作会拉取镜像并重建实例容器。');">
+                          <input class="form-control form-control-sm" style="width: 120px;" type="text" name="version" placeholder="目标版本" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}">
+                          <label class="form-check-label muted-small d-flex align-items-center gap-1">
+                            <input class="form-check-input" type="checkbox" name="restore_model_provider" value="true">
+                            恢复模型
+                          </label>
+                          <button class="btn btn-sm btn-oc-outline" type="submit">升级</button>
+                        </form>
                         <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle" onsubmit="return confirm('&#30830;&#35748;&#21024;&#38500; {{ user.user_id }}&#65311;&#29992;&#25143;&#25968;&#25454;&#23558;&#31227;&#21160;&#21040;&#22238;&#25910;&#30446;&#24405;&#65292;&#24182;&#31227;&#38500; Nginx &#31471;&#21475;&#26144;&#23556;&#12290;');">
                           <input type="hidden" name="action" value="delete">
                           <button class="btn btn-sm btn-outline-danger" type="submit">&#21024;&#38500;</button>

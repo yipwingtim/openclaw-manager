@@ -30,6 +30,7 @@ OPENCLAW_INTERNAL_TOKEN = os.environ.get("OPENCLAW_INTERNAL_TOKEN", "").strip()
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
+INSTANCE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MAX_UPLOAD_BYTES = int(os.environ.get("MANAGER_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
 SKILL_INSTALL_TIMEOUT = int(os.environ.get("MANAGER_SKILL_INSTALL_TIMEOUT", "180"))
 WECHAT_BIND_TIMEOUT = int(os.environ.get("MANAGER_WECHAT_BIND_TIMEOUT", "300"))
@@ -1205,6 +1206,23 @@ def run_bulk_lifecycle_action_job(user_ids, action, actor=None):
     )
 
 
+def run_instance_version_update_job(user_id, version, restore_model_provider=False, actor=None):
+    product = get_instance_product(user_id)
+    returncode, output = get_instance_adapter(product).update_version(
+        user_id,
+        version,
+        restore_model_provider=restore_model_provider,
+    )
+    persist_operation_metadata(
+        "update_version",
+        user_id=user_id,
+        status="success" if returncode == 0 else "failed",
+        actor=actor,
+        message=(output or "")[-1200:] or None,
+    )
+    return returncode, output
+
+
 def parse_positive_int(value, default):
     try:
         parsed = int(value)
@@ -2351,6 +2369,30 @@ def admin_instance_lifecycle(user_id):
         daemon=True,
     ).start()
     return redirect(url_for("admin_users", result=f"{label} started: {user_id}. Refresh the list in a few seconds."))
+
+
+@app.post("/admin/users/<user_id>/version")
+def admin_update_instance_version(user_id):
+    denied = require_admin()
+    if denied:
+        return denied
+
+    user_id = validate_user_id(user_id)
+    if not user_id:
+        return render_template("error.html", message="Invalid user id."), 400
+
+    version = (request.form.get("version") or "").strip()
+    if not INSTANCE_VERSION_RE.fullmatch(version):
+        return redirect(url_for("admin_users", error="Invalid target version."))
+
+    restore_model_provider = request.form.get("restore_model_provider") == "true"
+    actor = get_actor_user() or None
+    threading.Thread(
+        target=run_instance_version_update_job,
+        args=(user_id, version, restore_model_provider, actor),
+        daemon=True,
+    ).start()
+    return redirect(url_for("admin_users", result=f"Version update started: {user_id} -> {version}. Refresh the list in a few minutes."))
 
 
 @app.post("/admin/users/bulk-lifecycle")

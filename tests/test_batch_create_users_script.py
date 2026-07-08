@@ -62,7 +62,10 @@ EOF
             target = bin_dir / name
             target.symlink_to(shutil.which(name))
         docker = bin_dir / "docker"
-        docker.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        docker.write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\nexit 0\n",
+            encoding="utf-8",
+        )
         docker.chmod(0o755)
         return bin_dir
 
@@ -96,6 +99,7 @@ EOF
 
             env = os.environ.copy()
             env["PATH"] = str(bin_dir)
+            env["DOCKER_LOG"] = str(root / "docker.log")
             result = subprocess.run(
                 ["bash", str(manager / "scripts" / "batch_create_users.sh"), str(input_csv), str(output_csv)],
                 text=True,
@@ -107,6 +111,56 @@ EOF
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("alice", output_csv.read_text(encoding="utf-8"))
             self.assertIn("created", output_csv.read_text(encoding="utf-8"))
+
+    def test_batch_create_can_skip_nginx_refresh(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            bin_dir = self.write_fake_commands(root)
+            public_dir = root / "public"
+            nginx_conf_dir = root / "nginx-conf"
+            nginx_compose_dir = root / "nginx-compose"
+            public_dir.mkdir()
+            nginx_conf_dir.mkdir()
+            nginx_compose_dir.mkdir()
+            (manager / "config" / "openclaw-manager.env").write_text(
+                textwrap.dedent(
+                    f"""
+                    OPENCLAW_PUBLIC_DIR={public_dir}
+                    PUBLIC_HOST=example.test
+                    NGINX_COMPOSE_DIR={nginx_compose_dir}
+                    NGINX_USERS_CONF_DIR={nginx_conf_dir}
+                    NGINX_CONTAINER_NAME=openclaw-nginx
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            input_csv = root / "input.csv"
+            output_csv = root / "results.csv"
+            docker_log = root / "docker.log"
+            input_csv.write_text("user_id,basic_auth_password,basic_auth_enabled\nalice,,true\n", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir)
+            env["DOCKER_LOG"] = str(docker_log)
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(manager / "scripts" / "batch_create_users.sh"),
+                    str(input_csv),
+                    str(output_csv),
+                    "--skip-nginx-refresh",
+                ],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Skip nginx refresh requested", result.stdout)
+            self.assertFalse(docker_log.exists())
 
 
 if __name__ == "__main__":

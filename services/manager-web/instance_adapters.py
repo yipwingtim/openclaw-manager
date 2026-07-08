@@ -186,9 +186,12 @@ class OpenClawDockerAdapter:
             command.extend(["--password", basic_auth_password])
         return self.run_command(command, timeout=timeout)
 
-    def batch_create(self, input_csv, output_csv, timeout):
+    def batch_create(self, input_csv, output_csv, timeout, skip_nginx_refresh=False):
+        command = [str(self.manager_dir / "scripts" / "batch_create_users.sh"), str(input_csv), str(output_csv)]
+        if skip_nginx_refresh:
+            command.append("--skip-nginx-refresh")
         return self.run_command(
-            [str(self.manager_dir / "scripts" / "batch_create_users.sh"), str(input_csv), str(output_csv)],
+            command,
             timeout=timeout,
         )
 

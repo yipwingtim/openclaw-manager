@@ -120,6 +120,33 @@ post_check_reports_missing_model_provider() {
   [ -f "$POST_CHECK_FILE" ] && grep -Eiq 'Model providers missing|Primary model missing' "$POST_CHECK_FILE"
 }
 
+compose_service_name() {
+  (
+    cd "$USER_DIR"
+    docker compose config --services 2>/dev/null | head -n 1
+  )
+}
+
+remove_legacy_compose_container_if_needed() {
+  if ! docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER_NAME"; then
+    return 0
+  fi
+
+  local current_service
+  local container_service
+  current_service="$(compose_service_name)"
+  container_service="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$CONTAINER_NAME" 2>/dev/null || true)"
+
+  if [ -z "$current_service" ] || [ -z "$container_service" ] || [ "$current_service" = "$container_service" ]; then
+    return 0
+  fi
+
+  echo "[WARN] Existing container uses legacy compose service: $container_service"
+  echo "[INFO] Removing legacy container before recreate: $CONTAINER_NAME"
+  docker stop "$CONTAINER_NAME"
+  docker rm "$CONTAINER_NAME"
+}
+
 if [ -x "$CHECK_SCRIPT" ]; then
   echo "[INFO] Running pre-upgrade check: $PRE_CHECK_FILE"
   set +e
@@ -170,6 +197,8 @@ path.write_text(updated, encoding="utf-8")
 PY
 
 cd "$USER_DIR"
+
+remove_legacy_compose_container_if_needed
 
 echo "[INFO] Recreating instance container..."
 if ! docker compose up -d; then

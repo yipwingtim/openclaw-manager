@@ -87,6 +87,13 @@ if [ "$CURRENT_IMAGE" = "$TARGET_IMAGE" ]; then
   exit 0
 fi
 
+if ! docker image inspect "$TARGET_IMAGE" >/dev/null 2>&1; then
+  echo "[ERROR] Target image is not available locally: $TARGET_IMAGE" >&2
+  echo "[ERROR] Pull it manually first, then run the upgrade again:" >&2
+  echo "  docker pull '$TARGET_IMAGE'" >&2
+  exit 1
+fi
+
 mkdir -p "$BACKUP_DIR"
 cp "$COMPOSE_FILE" "$BACKUP_FILE"
 
@@ -102,7 +109,6 @@ print_rollback() {
   echo "Rollback commands:"
   echo "  cp '$BACKUP_FILE' '$COMPOSE_FILE'"
   echo "  cd '$USER_DIR'"
-  echo "  docker compose pull"
   echo "  docker compose up -d"
   echo ""
   echo "Persistent backup:"
@@ -164,13 +170,6 @@ path.write_text(updated, encoding="utf-8")
 PY
 
 cd "$USER_DIR"
-
-echo "[INFO] Pulling target image..."
-if ! docker compose pull; then
-  echo "[ERROR] Failed to pull target image." >&2
-  print_rollback
-  exit 1
-fi
 
 echo "[INFO] Recreating instance container..."
 if ! docker compose up -d; then

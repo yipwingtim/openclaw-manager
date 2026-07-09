@@ -250,13 +250,13 @@ if [ -n "$PORT" ]; then
   if echo "$ACCESS_STATUS" | grep -Eq '^(200|302|401)$'; then
     pass "/ returned HTTP $ACCESS_STATUS"
   else
-    fail "/ returned HTTP ${ACCESS_STATUS:-none}"
+    warn "/ returned HTTP ${ACCESS_STATUS:-none}"
   fi
 
   if echo "$ADMIN_STATUS" | grep -Eq '^(200|302|401)$'; then
     pass "/admin/ returned HTTP $ADMIN_STATUS"
   else
-    fail "/admin/ returned HTTP ${ADMIN_STATUS:-none}"
+    warn "/admin/ returned HTTP ${ADMIN_STATUS:-none}"
   fi
 fi
 

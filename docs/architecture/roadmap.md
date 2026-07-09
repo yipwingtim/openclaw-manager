@@ -102,6 +102,10 @@ Scope:
 - 迁移期间保留 shell wrapper 方便运维使用。
 - Add tests around create, delete, restore, Basic Auth, and version update flows.
 - 为创建、删除、恢复、Basic Auth 和版本升级流程增加测试。
+- Reload Nginx automatically after version upgrades that recreate containers, so upstream container IP changes do not leave instances behind a 502.
+- 版本升级重建容器后自动 reload Nginx，避免容器 IP 变化导致实例访问 502。
+- Track and diagnose occasional OpenClaw session initialization conflicts after version upgrades before deciding whether an extra stabilization step is needed.
+- 跟踪并诊断版本升级后偶发的 OpenClaw session 初始化冲突，再决定是否需要增加额外稳定化步骤。
 
 ## Priority 5: AI Application Adapter Model | 优先级 5：AI 应用适配器模型
 

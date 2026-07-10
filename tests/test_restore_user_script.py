@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 RESTORE_SCRIPT = ROOT_DIR / "scripts" / "restore_user.sh"
+MIGRATE_NGINX_UPSTREAMS_SCRIPT = ROOT_DIR / "scripts" / "migrate_nginx_upstreams.sh"
 
 
 class RestoreUserScriptTests(unittest.TestCase):
@@ -21,6 +22,7 @@ class RestoreUserScriptTests(unittest.TestCase):
         scripts.mkdir(parents=True)
         config.mkdir(parents=True)
         shutil.copy2(RESTORE_SCRIPT, scripts / "restore_user.sh")
+        shutil.copy2(MIGRATE_NGINX_UPSTREAMS_SCRIPT, scripts / "migrate_nginx_upstreams.sh")
         (scripts / "metadata_cli.py").write_text(
             """
 import os
@@ -96,7 +98,15 @@ exit 0
             nginx_compose_dir.mkdir(parents=True)
 
             (recycle_dir / "user" / "docker-compose.yml").write_text("services:\n  app:\n", encoding="utf-8")
-            (recycle_dir / "nginx" / "alice.conf").write_text("server {\n  listen 30123 ssl;\n}\n", encoding="utf-8")
+            (recycle_dir / "nginx" / "alice.conf").write_text(
+                "server {\n"
+                "  listen 30123 ssl;\n"
+                "  location / {\n"
+                "    proxy_pass http://172.20.0.7:18789;\n"
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
             (public_dir / "users.csv").write_text(
                 "user_id,port,created_at,status\nalice,30123,2026-07-05,deleted\n",
                 encoding="utf-8",
@@ -112,6 +122,9 @@ exit 0
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue((users_dir / "alice" / "docker-compose.yml").is_file())
             self.assertTrue((nginx_conf_dir / "alice.conf").is_file())
+            restored_nginx = (nginx_conf_dir / "alice.conf").read_text(encoding="utf-8")
+            self.assertIn('set $openclaw_upstream "openclaw_alice:18789";', restored_nginx)
+            self.assertIn("proxy_pass http://$openclaw_upstream;", restored_nginx)
             self.assertIn('      - "30123:30123"', nginx_compose_file.read_text(encoding="utf-8"))
             self.assertIn("alice,30123,2026-07-05,active", (public_dir / "users.csv").read_text(encoding="utf-8"))
             self.assertTrue(any(path.name.startswith("restore-backup-") for path in recycle_dir.iterdir()))
@@ -179,6 +192,40 @@ exit 0
             self.assertFalse((public_dir / "users" / "alice").exists())
             self.assertFalse((root / "docker.log").exists())
 
+    def test_restore_legacy_layout_without_nginx_conf_still_succeeds(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            self.write_fake_docker(root)
+
+            public_dir = root / "public"
+            recycle_dir = public_dir / "deleted" / "alice_20260705_010203"
+            nginx_conf_dir = root / "nginx" / "conf"
+            nginx_compose_dir = root / "nginx" / "compose"
+            nginx_compose_file = nginx_compose_dir / "docker-compose.yml"
+            recycle_dir.mkdir(parents=True)
+            (public_dir / "users").mkdir(parents=True)
+            nginx_conf_dir.mkdir(parents=True)
+            nginx_compose_dir.mkdir(parents=True)
+            (recycle_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            (public_dir / "users.csv").write_text(
+                "user_id,port,created_at,status\nalice,30123,2026-07-05,deleted\n",
+                encoding="utf-8",
+            )
+            nginx_compose_file.write_text(
+                "services:\n  nginx:\n    ports:\n      - \"30015:30015\"\n",
+                encoding="utf-8",
+            )
+            self.write_config(manager, public_dir, nginx_compose_file, nginx_compose_dir, nginx_conf_dir)
+
+            result = self.run_restore(manager, "alice", root)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((public_dir / "users" / "alice" / "docker-compose.yml").is_file())
+            self.assertIn(
+                "nginx access may require manual config restore",
+                result.stdout + result.stderr,
+            )
 
 if __name__ == "__main__":
     unittest.main()

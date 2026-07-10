@@ -344,7 +344,9 @@ $NGINX_INTERNAL_TOKEN_HEADER
 
     location / {
 $NGINX_AUTH_BLOCK
-        proxy_pass http://openclaw_${USER_ID}:18789;
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set \$openclaw_upstream "openclaw_${USER_ID}:18789";
+        proxy_pass http://\$openclaw_upstream;
 
         proxy_buffering off;
         proxy_request_buffering off;

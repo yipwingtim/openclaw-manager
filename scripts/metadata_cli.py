@@ -249,7 +249,6 @@ def update_version(args):
     with metadata_store.connect() as conn:
         upsert_instance(
             user_id=args.user_id,
-            status="active",
             openclaw_version=args.openclaw_version,
             conn=conn,
         )

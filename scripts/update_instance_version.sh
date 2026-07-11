@@ -77,12 +77,24 @@ fi
 CURRENT_IMAGE="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*(ghcr\.io\/openclaw\/openclaw:[^[:space:]]+)[[:space:]]*$/\1/p' "$COMPOSE_FILE" | head -n1)"
 TARGET_IMAGE="ghcr.io/openclaw/openclaw:$TARGET_VERSION"
 
+sync_metadata_version() {
+  if ! python3 "$SCRIPT_DIR/metadata_cli.py" update-version \
+    --user-id "$USER_ID" \
+    --openclaw-version "$TARGET_VERSION"; then
+    echo "[ERROR] Metadata update failed for version update: $USER_ID" >&2
+    return 1
+  fi
+}
+
 if [ -z "$CURRENT_IMAGE" ]; then
   echo "[ERROR] Could not detect OpenClaw image in: $COMPOSE_FILE" >&2
   exit 1
 fi
 
 if [ "$CURRENT_IMAGE" = "$TARGET_IMAGE" ]; then
+  if ! sync_metadata_version; then
+    exit 1
+  fi
   echo "[INFO] Instance already uses target image: $TARGET_IMAGE"
   exit 0
 fi
@@ -222,6 +234,8 @@ for _ in $(seq 1 30); do
 
       if [ "$POST_CHECK_STATUS" -eq 2 ]; then
         echo "[ERROR] Post-upgrade check failed. Review: $POST_CHECK_FILE" >&2
+        print_rollback
+        exit 1
       elif [ "$POST_CHECK_STATUS" -eq 1 ]; then
         echo "[WARN] Post-upgrade check has warnings. Review: $POST_CHECK_FILE"
       else
@@ -232,7 +246,11 @@ for _ in $(seq 1 30); do
         if [ "$RESTORE_MODEL_PROVIDER" -eq 1 ]; then
           if [ -x "$SET_MODEL_PROVIDER_SCRIPT" ]; then
             echo "[INFO] Model provider appears missing. Restoring via set_model_provider.sh..."
-            "$SET_MODEL_PROVIDER_SCRIPT" "$USER_ID"
+            if ! "$SET_MODEL_PROVIDER_SCRIPT" "$USER_ID"; then
+              echo "[ERROR] Model provider restore failed: $USER_ID" >&2
+              print_rollback
+              exit 1
+            fi
 
             echo "[INFO] Running post-restore check: $POST_RESTORE_CHECK_FILE"
             set +e
@@ -242,6 +260,8 @@ for _ in $(seq 1 30); do
 
             if [ "$POST_RESTORE_CHECK_STATUS" -eq 2 ]; then
               echo "[ERROR] Post-restore check failed. Review: $POST_RESTORE_CHECK_FILE" >&2
+              print_rollback
+              exit 1
             elif [ "$POST_RESTORE_CHECK_STATUS" -eq 1 ]; then
               echo "[WARN] Post-restore check has warnings. Review: $POST_RESTORE_CHECK_FILE"
             else
@@ -249,12 +269,20 @@ for _ in $(seq 1 30); do
             fi
           else
             echo "[ERROR] Model provider restore requested, but script is not executable: $SET_MODEL_PROVIDER_SCRIPT" >&2
+            print_rollback
+            exit 1
           fi
         else
           echo "[WARN] Model provider may be missing. Restore manually or rerun with --restore-model-provider:"
           echo "  ./scripts/set_model_provider.sh '$USER_ID'"
         fi
       fi
+    fi
+
+    if ! sync_metadata_version; then
+      echo "[ERROR] Container upgrade completed, but metadata synchronization failed." >&2
+      print_rollback
+      exit 1
     fi
 
     echo ""
@@ -275,10 +303,6 @@ for _ in $(seq 1 30); do
     echo "Post-update checks:"
     echo "  ./scripts/approve_device.sh '$USER_ID' --list-only"
     echo "  ./scripts/set_model_provider.sh '$USER_ID'  # run if model provider config is missing"
-    python3 "$SCRIPT_DIR/metadata_cli.py" update-version \
-      --user-id "$USER_ID" \
-      --openclaw-version "$TARGET_VERSION" \
-      || echo "[WARN] Metadata update failed for version update: $USER_ID"
     print_rollback
     exit 0
   fi

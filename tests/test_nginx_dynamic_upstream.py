@@ -105,10 +105,71 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
                 self.assertIn("proxy_pass http://$openclaw_upstream;\n}", text)
             backups = list((conf_dir / ".dynamic-upstream-backups").glob("*"))
             self.assertEqual(len(backups), 1)
-            self.assertTrue((backups[0] / "alice.conf").is_file())
+            self.assertTrue((backups[0] / "active" / "alice.conf").is_file())
             docker_log = (root / "docker.log").read_text(encoding="utf-8")
             self.assertIn("exec openclaw-nginx nginx -t", docker_log)
             self.assertIn("exec openclaw-nginx nginx -s reload", docker_log)
+
+    def test_migrates_active_and_disabled_user_configs(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            conf_dir = root / "nginx" / "conf"
+            disabled_dir = conf_dir / "_disabled"
+            legacy_disabled_dir = Path(f"{conf_dir}.disabled")
+            disabled_dir.mkdir(parents=True)
+            legacy_disabled_dir.mkdir(parents=True)
+            self.write_config(manager, conf_dir)
+            self.write_fake_docker(root)
+
+            configs = {
+                conf_dir / "active.conf": "172.20.0.7",
+                disabled_dir / "stopped.conf": "172.20.0.8",
+                legacy_disabled_dir / "legacy.conf": "172.20.0.9",
+            }
+            for path, upstream in configs.items():
+                path.write_text(
+                    f"location / {{\n    proxy_pass http://{upstream}:18789;\n}}\n",
+                    encoding="utf-8",
+                )
+
+            result = self.run_migration(manager, root)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for path in configs:
+                user_id = path.stem
+                text = path.read_text(encoding="utf-8")
+                self.assertIn(f'set $openclaw_upstream "openclaw_{user_id}:18789";', text)
+                self.assertIn("proxy_pass http://$openclaw_upstream;", text)
+
+            backup_dir = next((conf_dir / ".dynamic-upstream-backups").iterdir())
+            self.assertTrue((backup_dir / "active" / "active.conf").is_file())
+            self.assertTrue((backup_dir / "disabled" / "stopped.conf").is_file())
+            self.assertTrue((backup_dir / "legacy-disabled" / "legacy.conf").is_file())
+
+    def test_named_user_migration_finds_disabled_config(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            conf_dir = root / "nginx" / "conf"
+            disabled_dir = conf_dir / "_disabled"
+            disabled_dir.mkdir(parents=True)
+            self.write_config(manager, conf_dir)
+            self.write_fake_docker(root)
+            config = disabled_dir / "stopped.conf"
+            config.write_text(
+                "location / {\n    proxy_pass http://172.20.0.8:18789;\n}\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_migration(manager, root, "stopped")
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            text = config.read_text(encoding="utf-8")
+            self.assertIn(
+                'set $openclaw_upstream "openclaw_stopped:18789";',
+                text,
+            )
 
     def test_restores_original_configs_when_nginx_test_fails(self):
         with TemporaryDirectory() as temp_dir:

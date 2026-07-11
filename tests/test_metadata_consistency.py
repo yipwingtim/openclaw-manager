@@ -119,7 +119,7 @@ class MetadataConsistencyTests(unittest.TestCase):
             self.assertEqual(len(nginx_issues), 1)
             self.assertEqual(nginx_issues[0].level, "WARN")
 
-    def test_current_recycle_missing_nginx_remains_error(self):
+    def test_current_recycle_missing_nginx_is_warning(self):
         with TemporaryDirectory() as temp_dir:
             recycle_dir = Path(temp_dir) / "alice_20260711_120000"
             user_dir = recycle_dir / "user"
@@ -140,7 +140,44 @@ class MetadataConsistencyTests(unittest.TestCase):
                 if issue.code == "deleted_recycle_nginx_conf_missing"
             ]
             self.assertEqual(len(nginx_issues), 1)
-            self.assertEqual(nginx_issues[0].level, "ERROR")
+            self.assertEqual(nginx_issues[0].level, "WARN")
+
+    def test_consumed_recycle_with_restore_backup_is_ignored(self):
+        with TemporaryDirectory() as temp_dir:
+            recycle_dir = Path(temp_dir) / "alice_20260711_120000"
+            backup_dir = recycle_dir / "restore-backup-20260711_121000"
+            backup_dir.mkdir(parents=True)
+            (backup_dir / "docker-compose.yml").write_text(
+                "services:\n  nginx:\n",
+                encoding="utf-8",
+            )
+            (recycle_dir / "nginx").mkdir()
+            reporter = Reporter()
+
+            check_deleted_recycle_dirs(
+                [{"user_id": "alice", "path": recycle_dir}],
+                reporter,
+            )
+
+            self.assertEqual(reporter.issues, [])
+
+    def test_empty_recycle_reports_one_incomplete_warning(self):
+        with TemporaryDirectory() as temp_dir:
+            recycle_dir = Path(temp_dir) / "alice_20260711_120000"
+            recycle_dir.mkdir()
+            reporter = Reporter()
+
+            check_deleted_recycle_dirs(
+                [{"user_id": "alice", "path": recycle_dir}],
+                reporter,
+            )
+
+            self.assertEqual(len(reporter.issues), 1)
+            self.assertEqual(reporter.issues[0].level, "WARN")
+            self.assertEqual(
+                reporter.issues[0].code,
+                "deleted_recycle_incomplete",
+            )
 
 
 if __name__ == "__main__":

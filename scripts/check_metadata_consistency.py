@@ -442,22 +442,42 @@ def check_deleted_recycle_dirs(recycle_dirs, reporter):
         user_compose = recycle_dir / "user" / "docker-compose.yml"
         nginx_conf = recycle_dir / "nginx" / f"{user_id}.conf"
         legacy_compose = recycle_dir / "docker-compose.yml"
-        legacy_layout = not user_compose.is_file() and legacy_compose.is_file()
 
-        if not user_compose.is_file():
-            if legacy_compose.is_file():
+        if user_compose.is_file():
+            if not nginx_conf.is_file():
                 reporter.warn(
-                    "deleted_recycle_legacy_layout",
-                    f"{recycle_dir}: legacy recycle layout; restore_user.sh can restore user dir but nginx config may require manual recovery",
+                    "deleted_recycle_nginx_conf_missing",
+                    f"{recycle_dir}: missing nginx/{user_id}.conf; automatic restore requires manual nginx recovery",
                 )
-            else:
-                reporter.error("deleted_recycle_user_compose_missing", f"{recycle_dir}: missing user/docker-compose.yml")
-        if not nginx_conf.is_file():
-            report = reporter.warn if legacy_layout else reporter.error
-            report(
-                "deleted_recycle_nginx_conf_missing",
-                f"{recycle_dir}: missing nginx/{user_id}.conf",
+            continue
+
+        if legacy_compose.is_file():
+            reporter.warn(
+                "deleted_recycle_legacy_layout",
+                f"{recycle_dir}: legacy recycle layout; restore_user.sh can restore user dir but nginx config may require manual recovery",
             )
+            if not nginx_conf.is_file():
+                reporter.warn(
+                    "deleted_recycle_nginx_conf_missing",
+                    f"{recycle_dir}: missing nginx/{user_id}.conf",
+                )
+            continue
+
+        restore_backups = [
+            path
+            for path in recycle_dir.iterdir()
+            if path.is_dir() and path.name.startswith("restore-backup-")
+        ]
+        if restore_backups:
+            continue
+
+        reporter.warn(
+            "deleted_recycle_incomplete",
+            (
+                f"{recycle_dir}: no restorable user/docker-compose.yml or "
+                "legacy docker-compose.yml; historical recycle directory may be incomplete"
+            ),
+        )
 
 
 def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):

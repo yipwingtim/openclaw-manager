@@ -61,6 +61,7 @@ USERS_CSV="$BASE_DIR/users.csv"
 USER_DIR="$USERS_DIR/$USER_ID"
 NGINX_TARGET_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+MIGRATE_NGINX_UPSTREAMS_SCRIPT="$SCRIPT_DIR/migrate_nginx_upstreams.sh"
 
 find_latest_recycle_dir() {
   local latest=""
@@ -256,6 +257,9 @@ fi
 if [ ! -d "$NGINX_COMPOSE_DIR" ]; then
   fail "Nginx compose dir not found: $NGINX_COMPOSE_DIR"
 fi
+if [ ! -x "$MIGRATE_NGINX_UPSTREAMS_SCRIPT" ]; then
+  fail "Nginx upstream migration script not found or not executable: $MIGRATE_NGINX_UPSTREAMS_SCRIPT"
+fi
 
 PORT=""
 if [ -n "$RECYCLE_NGINX_CONF" ] && [ -f "$RECYCLE_NGINX_CONF" ]; then
@@ -309,6 +313,14 @@ docker compose up -d
 log "Updating nginx container..."
 cd "$NGINX_COMPOSE_DIR"
 docker compose up -d
+
+if [ -n "$MOVED_NGINX_CONF" ]; then
+  log "Ensuring restored nginx upstream uses Docker DNS..."
+  if ! "$MIGRATE_NGINX_UPSTREAMS_SCRIPT" "$USER_ID"; then
+    rollback_nginx_config "$BACKUP_COMPOSE_FILE" "$MOVED_NGINX_CONF" "$RECYCLE_NGINX_CONF"
+    fail "Failed to migrate restored nginx upstream. Restored nginx compose/config backup."
+  fi
+fi
 
 log "Testing nginx configuration..."
 if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then

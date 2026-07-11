@@ -202,17 +202,29 @@ def detect_nginx_conf(path):
         "basic_auth_enabled": None,
         "admin_htpasswd": None,
         "root_proxy": None,
+        "dynamic_upstream": False,
     }
     if not path.is_file():
         return result
     text = read_text(path)
     listen = re.search(r"(?m)^\s*listen\s+([0-9]+)\b", text)
-    proxy_user = re.search(r"proxy_pass\s+http://openclaw_([^:;]+):18789;", text)
     admin_block = extract_block(text, "location /admin/ {")
     root_block = extract_block(text, "location / {")
+    root_text = root_block or ""
+    dynamic_proxy_user = re.search(
+        r"""set\s+\$openclaw_upstream\s+["']?openclaw_([^:;"']+):18789["']?;""",
+        root_text,
+    )
+    static_proxy_user = re.search(r"proxy_pass\s+http://openclaw_([^:;]+):18789;", root_text)
+    proxy_user = dynamic_proxy_user or static_proxy_user
     result["port"] = int(listen.group(1)) if listen else None
     result["proxy_user"] = proxy_user.group(1) if proxy_user else None
     result["root_proxy"] = f"openclaw_{result['proxy_user']}" if result["proxy_user"] else None
+    result["dynamic_upstream"] = bool(
+        dynamic_proxy_user
+        and re.search(r"resolver\s+127\.0\.0\.11\b", root_text)
+        and re.search(r"proxy_pass\s+http://\$openclaw_upstream;", root_text)
+    )
     if root_block is not None:
         if "auth_basic off;" in root_block:
             result["basic_auth_enabled"] = False
@@ -308,6 +320,11 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
         reporter.error("nginx_conf_missing", f"{user_id}: nginx conf missing: {nginx_conf}")
     if nginx["proxy_user"] and nginx["proxy_user"] != user_id:
         reporter.error("nginx_proxy_mismatch", f"{user_id}: proxy target user={nginx['proxy_user']}")
+    if nginx["exists"] and not is_deleted and not nginx["dynamic_upstream"]:
+        reporter.warn(
+            "nginx_upstream_not_dynamic",
+            f"{user_id}: nginx upstream does not use runtime Docker DNS; run scripts/migrate_nginx_upstreams.sh {user_id}",
+        )
     if nginx["admin_htpasswd"] and nginx["admin_htpasswd"] != expected_htpasswd:
         reporter.error(
             "admin_htpasswd_mismatch",

@@ -15,6 +15,8 @@ source "$CONFIG_FILE"
 
 NGINX_USERS_CONF_DIR="${NGINX_USERS_CONF_DIR:?Missing NGINX_USERS_CONF_DIR in config}"
 NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:?Missing NGINX_CONTAINER_NAME in config}"
+NGINX_DISABLED_USERS_CONF_DIR="$NGINX_USERS_CONF_DIR/_disabled"
+LEGACY_NGINX_DISABLED_USERS_CONF_DIR="${NGINX_USERS_CONF_DIR}.disabled"
 
 if [ ! -d "$NGINX_USERS_CONF_DIR" ]; then
   echo "[ERROR] Nginx user config directory not found: $NGINX_USERS_CONF_DIR" >&2
@@ -23,23 +25,52 @@ fi
 
 declare -a config_files=()
 
+find_user_config() {
+  local user_id="$1"
+  local candidates=(
+    "$NGINX_USERS_CONF_DIR/${user_id}.conf"
+    "$NGINX_DISABLED_USERS_CONF_DIR/${user_id}.conf"
+    "$LEGACY_NGINX_DISABLED_USERS_CONF_DIR/${user_id}.conf"
+  )
+  local matches=()
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -f "$candidate" ]; then
+      matches+=("$candidate")
+    fi
+  done
+  if [ "${#matches[@]}" -eq 0 ]; then
+    echo "[ERROR] Nginx config not found for user: $user_id" >&2
+    return 1
+  fi
+  if [ "${#matches[@]}" -gt 1 ]; then
+    echo "[ERROR] Multiple Nginx configs found for user $user_id: ${matches[*]}" >&2
+    return 1
+  fi
+  config_files+=("${matches[0]}")
+}
+
 if [ "$#" -gt 0 ]; then
   for user_id in "$@"; do
     if ! [[ "$user_id" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
       echo "[ERROR] Invalid user_id: $user_id" >&2
       exit 1
     fi
-    config_file="$NGINX_USERS_CONF_DIR/${user_id}.conf"
-    if [ ! -f "$config_file" ]; then
-      echo "[ERROR] Nginx config not found: $config_file" >&2
-      exit 1
-    fi
-    config_files+=("$config_file")
+    find_user_config "$user_id"
   done
 else
-  while IFS= read -r -d '' config_file; do
-    config_files+=("$config_file")
-  done < <(find "$NGINX_USERS_CONF_DIR" -maxdepth 1 -type f -name '*.conf' -print0)
+  config_dirs=(
+    "$NGINX_USERS_CONF_DIR"
+    "$NGINX_DISABLED_USERS_CONF_DIR"
+    "$LEGACY_NGINX_DISABLED_USERS_CONF_DIR"
+  )
+  for config_dir in "${config_dirs[@]}"; do
+    if [ -d "$config_dir" ]; then
+      while IFS= read -r -d '' config_file; do
+        config_files+=("$config_file")
+      done < <(find "$config_dir" -maxdepth 1 -type f -name '*.conf' -print0)
+    fi
+  done
 fi
 
 if [ "${#config_files[@]}" -eq 0 ]; then
@@ -55,13 +86,19 @@ backup_dir="$(mktemp -d "$backup_root/${timestamp}_XXXXXX")"
 migration_active=1
 
 restore_backups() {
-  local backups=()
-  shopt -s nullglob
-  backups=("$backup_dir"/*.conf)
-  shopt -u nullglob
-  if [ "${#backups[@]}" -gt 0 ]; then
-    cp "${backups[@]}" "$NGINX_USERS_CONF_DIR/"
-  fi
+  local category source_dir target_dir
+  for category in active disabled legacy-disabled; do
+    source_dir="$backup_dir/$category"
+    case "$category" in
+      active) target_dir="$NGINX_USERS_CONF_DIR" ;;
+      disabled) target_dir="$NGINX_DISABLED_USERS_CONF_DIR" ;;
+      legacy-disabled) target_dir="$LEGACY_NGINX_DISABLED_USERS_CONF_DIR" ;;
+    esac
+    if [ -d "$source_dir" ]; then
+      mkdir -p "$target_dir"
+      cp "$source_dir"/*.conf "$target_dir/"
+    fi
+  done
 }
 
 rollback_on_exit() {
@@ -69,7 +106,7 @@ rollback_on_exit() {
   trap - EXIT INT TERM
   if [ "$migration_active" -eq 1 ]; then
     restore_backups
-    if compgen -G "$backup_dir/*.conf" >/dev/null; then
+    if find "$backup_dir" -type f -name '*.conf' -print -quit | grep -q .; then
       echo "[WARN] Migration interrupted or failed; restored original configs from $backup_dir" >&2
       docker exec "$NGINX_CONTAINER_NAME" nginx -t >/dev/null 2>&1 || true
       docker exec "$NGINX_CONTAINER_NAME" nginx -s reload >/dev/null 2>&1 || true
@@ -81,14 +118,22 @@ rollback_on_exit() {
 trap 'rollback_on_exit $?' EXIT
 trap 'exit 130' INT TERM
 
-changed_count="$(python3 - "$backup_dir" "${config_files[@]}" <<'PY'
+changed_count="$(python3 - \
+  "$backup_dir" \
+  "$NGINX_USERS_CONF_DIR" \
+  "$NGINX_DISABLED_USERS_CONF_DIR" \
+  "$LEGACY_NGINX_DISABLED_USERS_CONF_DIR" \
+  "${config_files[@]}" <<'PY'
 import re
 import shutil
 import sys
 from pathlib import Path
 
 backup_dir = Path(sys.argv[1])
-config_files = [Path(value) for value in sys.argv[2:]]
+active_dir = Path(sys.argv[2])
+disabled_dir = Path(sys.argv[3])
+legacy_disabled_dir = Path(sys.argv[4])
+config_files = [Path(value) for value in sys.argv[5:]]
 user_id_pattern = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 root_location = re.compile(
     r"(?ms)(?P<open>^\s*location\s+/\s*\{\s*\n)(?P<body>.*?)(?P<close>^\s*\})"
@@ -132,8 +177,22 @@ for path in config_files:
 
     updates.append((path, updated))
 
+backup_categories = {
+    active_dir: "active",
+    disabled_dir: "disabled",
+    legacy_disabled_dir: "legacy-disabled",
+}
 for path, updated in updates:
-    shutil.copy2(path, backup_dir / path.name)
+    try:
+        category = backup_categories[path.parent]
+    except KeyError:
+        raise SystemExit(f"Unsupported Nginx config location: {path}")
+    category_dir = backup_dir / category
+    category_dir.mkdir(parents=True, exist_ok=True)
+    backup_path = category_dir / path.name
+    if backup_path.exists():
+        raise SystemExit(f"Duplicate Nginx config backup target: {backup_path}")
+    shutil.copy2(path, backup_path)
     path.write_text(updated, encoding="utf-8")
 
 print(len(updates))

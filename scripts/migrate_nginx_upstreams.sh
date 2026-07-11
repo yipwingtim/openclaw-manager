@@ -66,9 +66,15 @@ else
   )
   for config_dir in "${config_dirs[@]}"; do
     if [ -d "$config_dir" ]; then
-      while IFS= read -r -d '' config_file; do
-        config_files+=("$config_file")
-      done < <(find "$config_dir" -maxdepth 1 -type f -name '*.conf' -print0)
+      if [ "$config_dir" = "$NGINX_USERS_CONF_DIR" ]; then
+        while IFS= read -r -d '' config_file; do
+          config_files+=("$config_file")
+        done < <(find "$config_dir" -maxdepth 1 -type f -name '*.conf' ! -name 'manager-web.conf' -print0)
+      else
+        while IFS= read -r -d '' config_file; do
+          config_files+=("$config_file")
+        done < <(find "$config_dir" -maxdepth 1 -type f -name '*.conf' -print0)
+      fi
     fi
   done
 fi

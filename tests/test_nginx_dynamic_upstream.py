@@ -171,6 +171,37 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
                 text,
             )
 
+    def test_bulk_migration_skips_manager_web_config(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            conf_dir = root / "nginx" / "conf"
+            conf_dir.mkdir(parents=True)
+            self.write_config(manager, conf_dir)
+            self.write_fake_docker(root)
+            manager_config = conf_dir / "manager-web.conf"
+            manager_text = (
+                "location / {\n"
+                "    proxy_pass http://openclaw-manager-web:8080;\n"
+                "}\n"
+            )
+            manager_config.write_text(manager_text, encoding="utf-8")
+            user_config = conf_dir / "alice.conf"
+            user_config.write_text(
+                "location / {\n    proxy_pass http://172.20.0.7:18789;\n}\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_migration(manager, root)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(manager_config.read_text(encoding="utf-8"), manager_text)
+            self.assertIn(
+                'set $openclaw_upstream "openclaw_alice:18789";',
+                user_config.read_text(encoding="utf-8"),
+            )
+            self.assertIn("Migrated 1 Nginx user config(s)", result.stdout)
+
     def test_restores_original_configs_when_nginx_test_fails(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -72,9 +72,13 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
     def test_create_user_renders_runtime_resolved_container_upstream(self):
         script = CREATE_USER_SCRIPT.read_text(encoding="utf-8")
 
+        self.assertIn("upstream openclaw_backend_${PORT} {", script)
+        self.assertIn("zone openclaw_backend_${PORT} 64k;", script)
         self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", script)
-        self.assertIn('set \\$openclaw_upstream "openclaw_${USER_ID}:18789";', script)
-        self.assertIn("proxy_pass http://\\$openclaw_upstream;", script)
+        self.assertIn("server openclaw_${USER_ID}:18789 resolve;", script)
+        self.assertIn("proxy_pass http://openclaw_backend_${PORT};", script)
+        self.assertIn("server openclaw-manager-web:8080 resolve;", script)
+        self.assertIn("proxy_pass http://manager_web_backend_${PORT}/instance-admin/;", script)
         self.assertNotIn("proxy_pass http://openclaw_${USER_ID}:18789;", script)
 
     def test_migrates_ip_and_static_container_upstreams_then_reloads(self):
@@ -100,9 +104,9 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             for user_id in ("alice", "bob"):
                 text = (conf_dir / f"{user_id}.conf").read_text(encoding="utf-8")
                 self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", text)
-                self.assertIn(f'set $openclaw_upstream "openclaw_{user_id}:18789";', text)
-                self.assertIn("proxy_pass http://$openclaw_upstream;", text)
-                self.assertIn("proxy_pass http://$openclaw_upstream;\n}", text)
+                self.assertIn(f"server openclaw_{user_id}:18789 resolve;", text)
+                self.assertIn(f"proxy_pass http://agent_{user_id}_1;", text)
+                self.assertIn(f"proxy_pass http://agent_{user_id}_1;\n}}", text)
             backups = list((conf_dir / ".dynamic-upstream-backups").glob("*"))
             self.assertEqual(len(backups), 1)
             self.assertTrue((backups[0] / "active" / "alice.conf").is_file())
@@ -139,8 +143,8 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             for path in configs:
                 user_id = path.stem
                 text = path.read_text(encoding="utf-8")
-                self.assertIn(f'set $openclaw_upstream "openclaw_{user_id}:18789";', text)
-                self.assertIn("proxy_pass http://$openclaw_upstream;", text)
+                self.assertIn(f"server openclaw_{user_id}:18789 resolve;", text)
+                self.assertIn(f"proxy_pass http://agent_{user_id}_1;", text)
 
             backup_dir = next((conf_dir / ".dynamic-upstream-backups").iterdir())
             self.assertTrue((backup_dir / "active" / "active.conf").is_file())
@@ -166,10 +170,12 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             text = config.read_text(encoding="utf-8")
-            self.assertIn(
-                'set $openclaw_upstream "openclaw_stopped:18789";',
-                text,
-            )
+            self.assertIn("server openclaw_stopped:18789 resolve;", text)
+            self.assertIn("proxy_pass http://agent_stopped_1;", text)
+            repeated = self.run_migration(manager, root, "stopped")
+            self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+            self.assertIn("already use Docker DNS", repeated.stdout)
+
 
     def test_bulk_migration_skips_manager_web_config(self):
         with TemporaryDirectory() as temp_dir:
@@ -196,11 +202,54 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(manager_config.read_text(encoding="utf-8"), manager_text)
-            self.assertIn(
-                'set $openclaw_upstream "openclaw_alice:18789";',
-                user_config.read_text(encoding="utf-8"),
-            )
+            migrated_user = user_config.read_text(encoding="utf-8")
+            self.assertIn("server openclaw_alice:18789 resolve;", migrated_user)
+            self.assertIn("proxy_pass http://agent_alice_1;", migrated_user)
             self.assertIn("Migrated 1 Nginx user config(s)", result.stdout)
+
+    def test_bulk_migration_converts_evoscientist_multi_port_config(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            conf_dir = root / "nginx" / "conf"
+            conf_dir.mkdir(parents=True)
+            self.write_config(manager, conf_dir)
+            self.write_fake_docker(root)
+            evoscientist_config = conf_dir / "evosci-test001.conf"
+            evoscientist_text = textwrap.dedent(
+                """
+                server {
+                    location = /api/workspace/upload { proxy_pass http://evoscientist_evosci-test001:4716; }
+                    location /api/ { proxy_pass http://evoscientist_evosci-test001:6175/; }
+                    location / {
+                        proxy_pass http://evoscientist_evosci-test001:4716;
+                    }
+                }
+                """
+            ).lstrip()
+            evoscientist_config.write_text(evoscientist_text, encoding="utf-8")
+            user_config = conf_dir / "alice.conf"
+            user_config.write_text(
+                "location / {\n    proxy_pass http://172.20.0.7:18789;\n}\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_migration(manager, root)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            migrated = evoscientist_config.read_text(encoding="utf-8")
+            self.assertIn(
+                "server evoscientist_evosci-test001:4716 resolve;",
+                migrated,
+            )
+            self.assertIn(
+                "server evoscientist_evosci-test001:6175 resolve;",
+                migrated,
+            )
+            self.assertEqual(migrated.count("evoscientist_evosci-test001:4716 resolve;"), 1)
+            self.assertIn("proxy_pass http://agent_evosci_test001_1;", migrated)
+            self.assertIn("proxy_pass http://agent_evosci_test001_2/;", migrated)
+            self.assertIn("Migrated 2 Nginx user config(s)", result.stdout)
 
     def test_restores_original_configs_when_nginx_test_fails(self):
         with TemporaryDirectory() as temp_dir:
@@ -245,6 +294,37 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
 
             self.assertFalse(detected["dynamic_upstream"])
 
+    def test_consistency_check_accepts_resolved_upstream_block(self):
+        with TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "alice.conf"
+            config.write_text(
+                textwrap.dedent(
+                    """
+                    upstream agent_alice_1 {
+                        zone agent_alice_1 64k;
+                        resolver 127.0.0.11 valid=10s ipv6=off;
+                        resolver_timeout 5s;
+                        server openclaw_alice:18789 resolve;
+                    }
+
+                    server {
+                        listen 30123 ssl;
+                        location / {
+                            proxy_pass http://agent_alice_1;
+                        }
+                    }
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+
+            detected = detect_nginx_conf(config)
+
+            self.assertTrue(detected["dynamic_upstream"])
+            self.assertEqual(detected["proxy_user"], "alice")
+            self.assertEqual(detected["root_proxy"], "openclaw_alice")
+
+
     def test_preflight_failure_does_not_partially_modify_configs(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -257,7 +337,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             alice = conf_dir / "alice.conf"
             alice.write_text(original, encoding="utf-8")
             (conf_dir / "bob.conf").write_text(
-                "location / {\n    proxy_pass http://unsupported:18789;\n}\n",
+                "location / {\n    proxy_pass http://172.20.0.8:4716;\n}\n",
                 encoding="utf-8",
             )
 

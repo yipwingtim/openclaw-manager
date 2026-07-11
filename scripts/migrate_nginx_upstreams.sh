@@ -51,6 +51,7 @@ find_user_config() {
 }
 
 if [ "$#" -gt 0 ]; then
+  scan_mode="explicit"
   for user_id in "$@"; do
     if ! [[ "$user_id" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
       echo "[ERROR] Invalid user_id: $user_id" >&2
@@ -59,6 +60,7 @@ if [ "$#" -gt 0 ]; then
     find_user_config "$user_id"
   done
 else
+  scan_mode="bulk"
   config_dirs=(
     "$NGINX_USERS_CONF_DIR"
     "$NGINX_DISABLED_USERS_CONF_DIR"
@@ -129,6 +131,7 @@ changed_count="$(python3 - \
   "$NGINX_USERS_CONF_DIR" \
   "$NGINX_DISABLED_USERS_CONF_DIR" \
   "$LEGACY_NGINX_DISABLED_USERS_CONF_DIR" \
+  "$scan_mode" \
   "${config_files[@]}" <<'PY'
 import re
 import shutil
@@ -139,15 +142,17 @@ backup_dir = Path(sys.argv[1])
 active_dir = Path(sys.argv[2])
 disabled_dir = Path(sys.argv[3])
 legacy_disabled_dir = Path(sys.argv[4])
-config_files = [Path(value) for value in sys.argv[5:]]
+scan_mode = sys.argv[5]
+config_files = [Path(value) for value in sys.argv[6:]]
 user_id_pattern = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 root_location = re.compile(
     r"(?ms)(?P<open>^\s*location\s+/\s*\{\s*\n)(?P<body>.*?)(?P<close>^\s*\})"
 )
 static_proxy = re.compile(
-    r"(?m)^(?P<indent>\s*)proxy_pass\s+http://"
-    r"(?:openclaw_[A-Za-z0-9_.-]+|(?:[0-9]{1,3}\.){3}[0-9]{1,3}):18789;[ \t]*$"
+    r"(?P<prefix>proxy_pass\s+http://)"
+    r"(?P<host>[A-Za-z0-9_.-]+):(?P<port>[0-9]+)(?P<uri>/[^;\s]*)?;"
 )
+ipv4_address = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
 
 updates = []
 for path in config_files:
@@ -156,30 +161,66 @@ for path in config_files:
         raise SystemExit(f"Invalid user config filename: {path.name}")
 
     text = path.read_text(encoding="utf-8")
-    match = root_location.search(text)
-    if not match:
-        raise SystemExit(f"Could not find root location in {path}")
-
-    body = match.group("body")
+    root_match = root_location.search(text)
+    root_body = root_match.group("body") if root_match else ""
     if (
-        "resolver 127.0.0.11" in body
-        and f'set $openclaw_upstream "openclaw_{user_id}:18789";' in body
-        and "proxy_pass http://$openclaw_upstream;" in body
+        "resolver 127.0.0.11" in root_body
+        and f'set $openclaw_upstream "openclaw_{user_id}:18789";' in root_body
+        and "proxy_pass http://$openclaw_upstream;" in root_body
+        and not static_proxy.search(text)
     ):
         continue
 
-    proxy_match = static_proxy.search(body)
-    if not proxy_match:
-        raise SystemExit(f"Could not find a supported OpenClaw upstream in {path}")
+    endpoints = {}
+    for proxy_match in static_proxy.finditer(text):
+        original_host = proxy_match.group("host")
+        port = proxy_match.group("port")
+        resolved_host = original_host
+        if ipv4_address.fullmatch(original_host):
+            if port != "18789":
+                continue
+            resolved_host = f"openclaw_{user_id}"
+        key = (original_host, port)
+        if key not in endpoints:
+            index = len(endpoints) + 1
+            endpoints[key] = {
+                "name": f"agent_{user_id.replace('-', '_').replace('.', '_')}_{index}",
+                "host": resolved_host,
+                "port": port,
+            }
 
-    indent = proxy_match.group("indent")
-    replacement = (
-        f"{indent}resolver 127.0.0.11 valid=10s ipv6=off;\n"
-        f'{indent}set $openclaw_upstream "openclaw_{user_id}:18789";\n'
-        f"{indent}proxy_pass http://$openclaw_upstream;"
-    )
-    updated_body = static_proxy.sub(replacement, body, count=1)
-    updated = text[: match.start("body")] + updated_body + text[match.end("body") :]
+    if not endpoints:
+        generic_dynamic = bool(
+            "resolver 127.0.0.11" in text
+            and re.search(r"server\s+[A-Za-z0-9_.-]+:[0-9]+\s+resolve;", text)
+            and re.search(r"proxy_pass\s+http://[A-Za-z0-9_.-]+(?:[/;])", text)
+        )
+        if generic_dynamic:
+            continue
+        if scan_mode == "bulk":
+            continue
+        raise SystemExit(f"Could not find a supported container upstream in {path}")
+
+    upstream_blocks = []
+    for endpoint in endpoints.values():
+        name = endpoint["name"]
+        upstream_blocks.append(
+            f"upstream {name} {{\n"
+            f"    zone {name} 64k;\n"
+            f"    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+            f"    resolver_timeout 5s;\n"
+            f'    server {endpoint["host"]}:{endpoint["port"]} resolve;\n'
+            f"}}\n"
+        )
+
+    def replace_proxy(match):
+        endpoint = endpoints.get((match.group("host"), match.group("port")))
+        if endpoint is None:
+            return match.group(0)
+        uri = match.group("uri") or ""
+        return f'{match.group("prefix")}{endpoint["name"]}{uri};'
+
+    updated = "\n".join(upstream_blocks) + "\n" + static_proxy.sub(replace_proxy, text)
 
     updates.append((path, updated))
 

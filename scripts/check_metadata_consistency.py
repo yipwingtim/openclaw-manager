@@ -305,6 +305,26 @@ def host_htpasswd_path(user_id):
     return NGINX_AUTH_DIR / "users" / user_id / ".htpasswd"
 
 
+def nginx_user_conf_candidates(user_id):
+    return [
+        NGINX_USERS_CONF_DIR / f"{user_id}.conf",
+        NGINX_USERS_CONF_DIR / "_disabled" / f"{user_id}.conf",
+        Path(f"{NGINX_USERS_CONF_DIR}.disabled") / f"{user_id}.conf",
+    ]
+
+
+def resolve_nginx_user_conf(user_id, reporter=None):
+    candidates = nginx_user_conf_candidates(user_id)
+    existing = [path for path in candidates if path.is_file()]
+    if len(existing) > 1 and reporter is not None:
+        reporter.error(
+            "nginx_conf_multiple_locations",
+            f"{user_id}: nginx config exists in multiple locations: "
+            + ", ".join(str(path) for path in existing),
+        )
+    return existing[0] if existing else candidates[0]
+
+
 def verbose_check(enabled, user_id, label):
     if enabled:
         print(f"[CHECK] {user_id}: {label}")
@@ -312,7 +332,7 @@ def verbose_check(enabled, user_id, label):
 
 def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, verbose=False):
     compose_file = user_dir / "docker-compose.yml"
-    nginx_conf = NGINX_USERS_CONF_DIR / f"{user_id}.conf"
+    nginx_conf = resolve_nginx_user_conf(user_id, reporter)
     verbose_check(verbose, user_id, "compose file")
     compose = detect_compose(compose_file)
     verbose_check(verbose, user_id, "nginx conf")
@@ -422,6 +442,7 @@ def check_deleted_recycle_dirs(recycle_dirs, reporter):
         user_compose = recycle_dir / "user" / "docker-compose.yml"
         nginx_conf = recycle_dir / "nginx" / f"{user_id}.conf"
         legacy_compose = recycle_dir / "docker-compose.yml"
+        legacy_layout = not user_compose.is_file() and legacy_compose.is_file()
 
         if not user_compose.is_file():
             if legacy_compose.is_file():
@@ -432,7 +453,11 @@ def check_deleted_recycle_dirs(recycle_dirs, reporter):
             else:
                 reporter.error("deleted_recycle_user_compose_missing", f"{recycle_dir}: missing user/docker-compose.yml")
         if not nginx_conf.is_file():
-            reporter.error("deleted_recycle_nginx_conf_missing", f"{recycle_dir}: missing nginx/{user_id}.conf")
+            report = reporter.warn if legacy_layout else reporter.error
+            report(
+                "deleted_recycle_nginx_conf_missing",
+                f"{recycle_dir}: missing nginx/{user_id}.conf",
+            )
 
 
 def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
@@ -457,7 +482,7 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
             for match in re.finditer(r'["\']?([0-9]+):\1["\']?', text)
         }
         for user_id, user_dir in users_dirs.items():
-            port = detect_nginx_conf(NGINX_USERS_CONF_DIR / f"{user_id}.conf")["port"]
+            port = detect_nginx_conf(resolve_nginx_user_conf(user_id))["port"]
             if port is not None and port not in mapped_ports:
                 reporter.warn("nginx_compose_port_missing", f"{user_id}: port {port} missing from nginx compose")
     else:
@@ -466,7 +491,7 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
     if PORT_FILE.is_file():
         current = parse_int(read_text(PORT_FILE).strip())
         used_ports = [
-            detect_nginx_conf(NGINX_USERS_CONF_DIR / f"{user_id}.conf")["port"]
+            detect_nginx_conf(resolve_nginx_user_conf(user_id))["port"]
             for user_id in users_dirs
         ]
         used_ports = [port for port in used_ports if port is not None]

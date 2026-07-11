@@ -309,6 +309,20 @@ if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
 fi
 
 cat > "$NGINX_USER_CONF" <<EOF
+upstream openclaw_backend_${PORT} {
+    zone openclaw_backend_${PORT} 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    server openclaw_${USER_ID}:18789 resolve;
+}
+
+upstream manager_web_backend_${PORT} {
+    zone manager_web_backend_${PORT} 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    server openclaw-manager-web:8080 resolve;
+}
+
 server {
     listen $PORT ssl;
     server_name _;
@@ -324,7 +338,7 @@ server {
 
     location /admin/ {
 $NGINX_ADMIN_AUTH_BLOCK
-        proxy_pass http://openclaw-manager-web:8080/instance-admin/;
+        proxy_pass http://manager_web_backend_${PORT}/instance-admin/;
 
         proxy_buffering off;
         proxy_request_buffering off;
@@ -344,9 +358,7 @@ $NGINX_INTERNAL_TOKEN_HEADER
 
     location / {
 $NGINX_AUTH_BLOCK
-        resolver 127.0.0.11 valid=10s ipv6=off;
-        set \$openclaw_upstream "openclaw_${USER_ID}:18789";
-        proxy_pass http://\$openclaw_upstream;
+        proxy_pass http://openclaw_backend_${PORT};
 
         proxy_buffering off;
         proxy_request_buffering off;

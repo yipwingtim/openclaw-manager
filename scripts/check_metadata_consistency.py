@@ -216,15 +216,41 @@ def detect_nginx_conf(path):
         root_text,
     )
     static_proxy_user = re.search(r"proxy_pass\s+http://openclaw_([^:;]+):18789;", root_text)
-    proxy_user = dynamic_proxy_user or static_proxy_user
+    generic_dynamic_user = None
+    for upstream_match in re.finditer(
+        r"(?ms)^\s*upstream\s+(?P<name>[A-Za-z0-9_.-]+)\s*\{(?P<body>.*?)^\s*\}",
+        text,
+    ):
+        upstream_body = upstream_match.group("body")
+        server_match = re.search(
+            r"server\s+openclaw_([^:;\s]+):18789\s+resolve;",
+            upstream_body,
+        )
+        if not server_match:
+            continue
+        if not re.search(r"resolver\s+127\.0\.0\.11\b", upstream_body):
+            continue
+        if not re.search(r"zone\s+[A-Za-z0-9_.-]+\s+[^;]+;", upstream_body):
+            continue
+        upstream_name = upstream_match.group("name")
+        if not re.search(
+            rf"proxy_pass\s+http://{re.escape(upstream_name)}(?:[/;])",
+            root_text,
+        ):
+            continue
+        generic_dynamic_user = server_match
+        break
+
+    proxy_user = generic_dynamic_user or dynamic_proxy_user or static_proxy_user
     result["port"] = int(listen.group(1)) if listen else None
     result["proxy_user"] = proxy_user.group(1) if proxy_user else None
     result["root_proxy"] = f"openclaw_{result['proxy_user']}" if result["proxy_user"] else None
-    result["dynamic_upstream"] = bool(
+    variable_dynamic = bool(
         dynamic_proxy_user
         and re.search(r"resolver\s+127\.0\.0\.11\b", root_text)
         and re.search(r"proxy_pass\s+http://\$openclaw_upstream;", root_text)
     )
+    result["dynamic_upstream"] = bool(generic_dynamic_user or variable_dynamic)
     if root_block is not None:
         if "auth_basic off;" in root_block:
             result["basic_auth_enabled"] = False

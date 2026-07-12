@@ -179,6 +179,48 @@ class MetadataConsistencyTests(unittest.TestCase):
                 "deleted_recycle_incomplete",
             )
 
+    def test_evoscientist_user_uses_product_specific_checks(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            conf_dir = self.configure_paths(root)
+            user_dir = root / "users" / "alice"
+            (user_dir / "workspace").mkdir(parents=True)
+            (user_dir / "evoscientist-data").mkdir()
+            (conf_dir / "alice.conf").write_text(
+                "upstream agent_alice_1 {\n"
+                "    zone agent_alice_1 64k;\n"
+                "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+                "    server evoscientist_alice:4716 resolve;\n"
+                "}\n"
+                "server {\n"
+                "    listen 40062 ssl;\n"
+                "    location / { proxy_pass http://agent_alice_1; }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            reporter = Reporter()
+
+            check_user(
+                "alice",
+                user_dir,
+                {},
+                {
+                    "alice": {
+                        "product": "evoscientist",
+                        "status": "active",
+                        "port": 40062,
+                        "container_name": "evoscientist_alice",
+                    }
+                },
+                {40062: {"status": "allocated", "user_id": "alice"}},
+                reporter,
+            )
+
+            codes = {issue.code for issue in reporter.issues}
+            self.assertNotIn("container_name_mismatch", codes)
+            self.assertNotIn("compose_missing_agent_net", codes)
+            self.assertNotIn("nginx_upstream_not_dynamic", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

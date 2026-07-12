@@ -194,6 +194,7 @@ Nginx 运行时配置不放在项目目录内，而是由脚本生成到 `/data/
 ## 📚 Documentation | 文档索引
 
 - [Agent Hosting Platform Architecture / 架构规划](docs/architecture/agent-hosting-platform.md)
+- [EvoScientist Existing Instance Adapter](docs/evoscientist-adapter.md)
 - [Roadmap / 后续规划](docs/architecture/roadmap.md)
 - [Fresh Environment Bootstrap / 全新环境初始化](docs/deployment/bootstrap.md)
 - [Runtime Security Checks / 运行时安全检查](docs/deployment/runtime-security-checks.md)

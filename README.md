@@ -125,4 +125,4 @@ This project is under active development and is best suited to controlled self-h
 
 ## License
 
-No open-source license file is currently included. Until one is added, copyright remains with the repository owner and reuse rights are not automatically granted.
+Licensed under the [Apache License 2.0](LICENSE). Copyright 2026 yipwingtim and OpenClaw Manager contributors.

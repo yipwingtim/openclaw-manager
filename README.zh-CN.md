@@ -125,4 +125,4 @@ OpenClaw Manager 会协调高权限容器操作和反向代理配置。生产部
 
 ## 许可证
 
-仓库目前没有包含开源许可证文件。在正式添加许可证之前，版权归仓库所有者所有，其他人不会自动获得复制、修改或分发许可。
+本项目采用 [Apache License 2.0](LICENSE) 开源许可证。Copyright 2026 yipwingtim and OpenClaw Manager contributors.

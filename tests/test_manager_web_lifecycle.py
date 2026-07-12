@@ -182,6 +182,7 @@ class LifecycleActionTests(unittest.TestCase):
                 {
                     "user_id": "alice",
                     "product": "openclaw",
+                    "capabilities": self.app_module.get_instance_capabilities("openclaw"),
                     "status": "DELETED",
                     "port": 41001,
                     "openclaw_version": "1.2.3",
@@ -227,6 +228,16 @@ class LifecycleActionTests(unittest.TestCase):
 
             self.assertEqual(code, 1)
             self.assertEqual(output, "Unsupported instance product: hermes")
+
+    def test_registry_returns_evoscientist_adapter(self):
+        adapter = self.app_module.get_instance_adapter("evoscientist")
+
+        self.assertIsInstance(
+            adapter,
+            self.app_module.EvoScientistDockerAdapter,
+        )
+        self.assertTrue(adapter.supports("restart"))
+        self.assertFalse(adapter.supports("delete"))
 
     def test_parse_bulk_user_ids_accepts_whitespace_commas_and_dedupes(self):
         user_ids = self.app_module.parse_bulk_user_ids(["alice bob", "alice,bad/user,carol"])

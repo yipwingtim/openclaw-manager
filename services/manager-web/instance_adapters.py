@@ -4,6 +4,17 @@ from pathlib import Path
 
 
 class OpenClawDockerAdapter:
+    CAPABILITIES = frozenset(
+        {
+            "status", "logs", "start", "stop", "restart", "create",
+            "batch_create", "delete", "restore", "update_version",
+            "batch_set_model_provider", "basic_auth", "dashboard",
+        }
+    )
+
+    def supports(self, action):
+        return action in self.CAPABILITIES
+
     def __init__(self, manager_dir, public_dir, nginx_users_conf_dir, nginx_compose_dir, nginx_container_name):
         self.manager_dir = Path(manager_dir)
         self.public_dir = Path(public_dir)
@@ -210,5 +221,116 @@ class OpenClawDockerAdapter:
     def batch_set_model_provider(self, input_csv, output_csv, timeout):
         return self.run_command(
             [str(self.manager_dir / "scripts" / "batch_set_model_provider.sh"), str(input_csv), str(output_csv)],
+
             timeout=timeout,
         )
+
+class EvoScientistDockerAdapter(OpenClawDockerAdapter):
+    CAPABILITIES = frozenset({"status", "logs", "start", "stop", "restart"})
+
+    def supports(self, action):
+        return action in self.CAPABILITIES
+
+    def container_name(self, user_id):
+        return f"evoscientist_{user_id}"
+
+    def proxy_container_name(self, user_id):
+        return f"{self.container_name(user_id)}-proxy"
+
+    def container_names(self, user_id):
+        return [self.container_name(user_id), self.proxy_container_name(user_id)]
+
+    def _container_status(self, container_name):
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Status}}", container_name],
+            cwd=str(self.manager_dir),
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            return "MISSING"
+        status = result.stdout.strip()
+        return "Up" if status == "running" else "STOPPED"
+
+    def status(self, user_id):
+        statuses = {
+            name: self._container_status(name)
+            for name in self.container_names(user_id)
+        }
+        if all(value.startswith("Up") for value in statuses.values()):
+            return "Up (" + "; ".join(f"{name}={value}" for name, value in statuses.items()) + ")"
+        if all(value == "STOPPED" for value in statuses.values()):
+            return "STOPPED"
+        return "DEGRADED (" + "; ".join(f"{name}={value}" for name, value in statuses.items()) + ")"
+
+    def logs(self, user_id, tail=120):
+        outputs = []
+        failed = False
+        for container_name in self.container_names(user_id):
+            code, output = self.run_command(
+                ["docker", "logs", "--tail", str(tail), container_name],
+                timeout=10,
+            )
+            failed = failed or code != 0
+            outputs.append(f"===== {container_name} =====\n{output or 'No recent logs.'}")
+        combined = "\n".join(outputs)
+        return combined if not failed else f"{combined}\n[WARN] One or more container logs could not be read."
+
+    def start(self, user_id):
+        started = []
+        for container_name in self.container_names(user_id):
+            code, output = self.run_command(["docker", "start", container_name], timeout=90)
+            if code != 0:
+                for started_name in reversed(started):
+                    self.run_command(["docker", "stop", started_name], timeout=60)
+                return code, output
+            started.append(container_name)
+
+        nginx_code, nginx_output = self.enable_nginx_user_conf(user_id)
+        if nginx_code == 0:
+            return 0, nginx_output
+
+        for container_name in reversed(started):
+            self.run_command(["docker", "stop", container_name], timeout=60)
+        return nginx_code, nginx_output
+
+    def stop(self, user_id):
+        nginx_code, nginx_output = self.disable_nginx_user_conf(user_id)
+        if nginx_code != 0:
+            return nginx_code, nginx_output
+
+        outputs = [nginx_output]
+        stopped = []
+        for container_name in reversed(self.container_names(user_id)):
+            code, output = self.run_command(["docker", "stop", container_name], timeout=60)
+            outputs.append(output)
+            if code != 0:
+                for stopped_name in reversed(stopped):
+                    self.run_command(["docker", "start", stopped_name], timeout=90)
+                self.enable_nginx_user_conf(user_id)
+                return code, "\n".join(part for part in outputs if part)
+            stopped.append(container_name)
+        return 0, "\n".join(part for part in outputs if part)
+
+    def restart(self, user_id):
+        outputs = []
+        for container_name in self.container_names(user_id):
+            code, output = self.run_command(["docker", "restart", container_name], timeout=90)
+            outputs.append(output)
+            if code != 0:
+                return code, "\n".join(part for part in outputs if part)
+        return 0, "\n".join(part for part in outputs if part)
+
+    def create(self, *args, **kwargs):
+        return 1, "EvoScientist create is not supported yet."
+
+    def delete(self, user_id):
+        return 1, "EvoScientist delete is not supported yet."
+
+    def restore(self, user_id):
+        return 1, "EvoScientist restore is not supported yet."
+
+    def update_version(self, *args, **kwargs):
+        return 1, "EvoScientist version update is not supported yet."

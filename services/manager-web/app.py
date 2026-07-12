@@ -16,7 +16,7 @@ from flask import Flask, Response, redirect, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
 import metadata_store
-from instance_adapters import OpenClawDockerAdapter
+from instance_adapters import EvoScientistDockerAdapter, OpenClawDockerAdapter
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -122,9 +122,14 @@ def get_user_dir(user_id):
 
 
 def get_instance_adapter(product="openclaw"):
-    if product != "openclaw":
+    adapter_types = {
+        "openclaw": OpenClawDockerAdapter,
+        "evoscientist": EvoScientistDockerAdapter,
+    }
+    adapter_type = adapter_types.get(product)
+    if adapter_type is None:
         raise ValueError(f"Unsupported instance product: {product}")
-    return OpenClawDockerAdapter(
+    return adapter_type(
         manager_dir=MANAGER_DIR,
         public_dir=PUBLIC_DIR,
         nginx_users_conf_dir=NGINX_USERS_CONF_DIR,
@@ -638,8 +643,11 @@ def persist_lifecycle_metadata(user_id, action, output=""):
         except (TypeError, ValueError):
             port = None
 
+        product = existing.get("product") or "openclaw"
         access_url = existing.get("access_url") or build_access_url(port_text)
-        admin_url = existing.get("admin_url") or (access_url.rstrip("/") + "/admin/" if access_url else "")
+        admin_url = existing.get("admin_url")
+        if admin_url is None and product == "openclaw" and access_url:
+            admin_url = access_url.rstrip("/") + "/admin/"
         if action == "delete":
             deleted_at = metadata_store.utc_now()
         elif action == "restore":
@@ -655,7 +663,7 @@ def persist_lifecycle_metadata(user_id, action, output=""):
         with metadata_store.connect() as conn:
             metadata_store.upsert_instance(
                 user_id=user_id,
-                product=existing.get("product") or "openclaw",
+                product=product,
                 port=port,
                 status=status,
                 openclaw_version=existing.get("openclaw_version") or detect_openclaw_version(user_id),
@@ -1078,12 +1086,18 @@ def detect_openclaw_version(user_id):
     return match.group(1).strip().strip('"').strip("'")
 
 
-def get_container_status(user_id):
-    return get_instance_adapter().status(user_id)
+def get_instance_capabilities(product):
+    return sorted(get_instance_adapter(product).CAPABILITIES)
 
 
-def get_container_logs(user_id, tail=120):
-    return get_instance_adapter().logs(user_id, tail=tail)
+def get_container_status(user_id, product=None):
+    resolved_product = product or get_instance_product(user_id)
+    return get_instance_adapter(resolved_product).status(user_id)
+
+
+def get_container_logs(user_id, tail=120, product=None):
+    resolved_product = product or get_instance_product(user_id)
+    return get_instance_adapter(resolved_product).logs(user_id, tail=tail)
 
 
 def install_skill_for_user(user_id, skill_id):
@@ -1118,6 +1132,10 @@ def run_instance_lifecycle_action(user_id, action):
         adapter = get_instance_adapter(product)
     except ValueError as exc:
         return 1, str(exc)
+
+    supports = getattr(adapter, "supports", None)
+    if supports is not None and not supports(action):
+        return 1, f"{product} does not support lifecycle action: {action}"
 
     if action == "start":
         return adapter.start(user_id)
@@ -1283,10 +1301,12 @@ def list_deleted_users():
         if not user_id:
             continue
         port = instance.get("port") or ""
+        product = instance.get("product") or "openclaw"
         users.append(
             {
                 "user_id": user_id,
-                "product": instance.get("product") or "openclaw",
+                "product": product,
+                "capabilities": get_instance_capabilities(product),
                 "status": "DELETED",
                 "port": port,
                 "openclaw_version": instance.get("openclaw_version") or "",
@@ -1317,7 +1337,8 @@ def list_active_users(status_filter="running"):
             continue
         port = detect_port(user_id)
         product = get_instance_product(user_id)
-        status = get_container_status(user_id)
+        adapter = get_instance_adapter(product)
+        status = get_container_status(user_id, product=product)
         is_stopped = status == "STOPPED"
         if status_filter == "running" and is_stopped:
             continue
@@ -1327,9 +1348,10 @@ def list_active_users(status_filter="running"):
             {
                 "user_id": user_id,
                 "product": product,
+                "capabilities": sorted(adapter.CAPABILITIES),
                 "status": status,
                 "port": port,
-                "openclaw_version": detect_openclaw_version(user_id),
+                "openclaw_version": detect_openclaw_version(user_id) if product == "openclaw" else "",
                 "access_url": build_access_url(port),
                 "basic_auth_enabled": is_basic_auth_enabled(user_id),
             }
@@ -1345,6 +1367,10 @@ def filter_users_by_user_id(users, user_id_filter):
 
 
 def render_user_dashboard(user_id, instance_mode=False):
+    product = get_instance_product(user_id)
+    if not get_instance_adapter(product).supports("dashboard"):
+        return redirect(build_access_url(detect_port(user_id)) or url_for("admin_users"))
+
     port = detect_port(user_id)
     current_user = get_actor_user() or (user_id if instance_mode else "")
     current_is_admin = False if instance_mode else is_admin_user(current_user)
@@ -1382,9 +1408,9 @@ def render_user_dashboard(user_id, instance_mode=False):
         instance_mode=instance_mode,
         port=port,
         access_url=build_access_url(port),
-        status=get_container_status(user_id),
+        status=get_container_status(user_id, product=product),
         devices_cache=read_devices_cache(user_id),
-        recent_logs=get_container_logs(user_id),
+        recent_logs=get_container_logs(user_id, product=product),
         uploaded_files=list_uploaded_files(user_id),
         downloadable_files=list_downloadable_files(user_id),
         download_extensions=", ".join(sorted(DOWNLOAD_EXTENSIONS)),
@@ -2281,6 +2307,10 @@ def admin_set_basic_auth(user_id):
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
 
+    product = get_instance_product(user_id)
+    if not get_instance_adapter(product).supports("basic_auth"):
+        return redirect(url_for("admin_users", error=f"Basic Auth is not supported for {product}."))
+
     enabled = request.form.get("enabled", "").strip().lower()
     if enabled not in {"true", "false"}:
         return redirect(url_for("admin_users", error="Invalid Basic Auth state."))
@@ -2380,6 +2410,10 @@ def admin_update_instance_version(user_id):
     user_id = validate_user_id(user_id)
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
+
+    product = get_instance_product(user_id)
+    if not get_instance_adapter(product).supports("update_version"):
+        return redirect(url_for("admin_users", error=f"Version update is not supported for {product}."))
 
     version = (request.form.get("version") or "").strip()
     if not INSTANCE_VERSION_RE.fullmatch(version):

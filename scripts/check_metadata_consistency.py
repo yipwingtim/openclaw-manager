@@ -147,7 +147,7 @@ def scan_user_dirs(public_dir):
     return {
         path.name: path
         for path in users_root.iterdir()
-        if path.is_dir() and (path / "docker-compose.yml").is_file()
+        if path.is_dir()
     }
 
 
@@ -250,7 +250,13 @@ def detect_nginx_conf(path):
         and re.search(r"resolver\s+127\.0\.0\.11\b", root_text)
         and re.search(r"proxy_pass\s+http://\$openclaw_upstream;", root_text)
     )
-    result["dynamic_upstream"] = bool(generic_dynamic_user or variable_dynamic)
+    generic_dynamic = bool(
+        re.search(r"resolver\s+127\.0\.0\.11\b", text)
+        and re.search(r"zone\s+[A-Za-z0-9_.-]+\s+[^;]+;", text)
+        and re.search(r"server\s+[A-Za-z0-9_.-]+:[0-9]+\s+resolve;", text)
+        and re.search(r"proxy_pass\s+http://[A-Za-z0-9_.-]+(?:[/;])", text)
+    )
+    result["dynamic_upstream"] = bool(generic_dynamic_user or variable_dynamic or generic_dynamic)
     if root_block is not None:
         if "auth_basic off;" in root_block:
             result["basic_auth_enabled"] = False
@@ -330,6 +336,48 @@ def verbose_check(enabled, user_id, label):
         print(f"[CHECK] {user_id}: {label}")
 
 
+
+def check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter):
+    nginx_conf = resolve_nginx_user_conf(user_id, reporter)
+    nginx = detect_nginx_conf(nginx_conf)
+    expected_container = f"evoscientist_{user_id}"
+
+    if not (user_dir / "workspace").is_dir():
+        reporter.error("evoscientist_workspace_missing", f"{user_id}: workspace directory missing")
+    if not (user_dir / "evoscientist-data").is_dir():
+        reporter.error("evoscientist_data_missing", f"{user_id}: evoscientist-data directory missing")
+    if not nginx["exists"]:
+        reporter.error("nginx_conf_missing", f"{user_id}: nginx conf missing: {nginx_conf}")
+    elif not nginx["dynamic_upstream"]:
+        reporter.warn(
+            "nginx_upstream_not_dynamic",
+            f"{user_id}: nginx upstream does not use runtime Docker DNS",
+        )
+
+    if db_row is None:
+        reporter.warn("metadata_missing_user", f"{user_id}: EvoScientist user dir exists but metadata has no instance row")
+        return
+    if db_row.get("container_name") != expected_container:
+        reporter.error(
+            "metadata_container_mismatch",
+            f"{user_id}: metadata container={db_row.get('container_name')} expected={expected_container}",
+        )
+    if nginx["port"] is not None and db_row.get("port") is not None and int(db_row["port"]) != nginx["port"]:
+        reporter.error(
+            "metadata_port_mismatch",
+            f"{user_id}: metadata port={db_row['port']} nginx port={nginx['port']}",
+        )
+
+    port = nginx["port"] if nginx["port"] is not None else db_row.get("port")
+    if port is not None:
+        port_row = db_ports.get(int(port))
+        if port_row is None:
+            reporter.warn("metadata_port_row_missing", f"{user_id}: ports table missing port={port}")
+        elif port_row.get("user_id") != user_id or port_row.get("status") != "allocated":
+            reporter.warn(
+                "metadata_port_row_mismatch",
+                f"{user_id}: ports row port={port} user_id={port_row.get('user_id')} status={port_row.get('status')}",
+            )
 def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, verbose=False):
     compose_file = user_dir / "docker-compose.yml"
     nginx_conf = resolve_nginx_user_conf(user_id, reporter)
@@ -339,6 +387,10 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     nginx = detect_nginx_conf(nginx_conf)
     csv_row = users_csv.get(user_id)
     db_row = db_instances.get(user_id)
+    product = (db_row or {}).get("product") or "openclaw"
+    if product == "evoscientist":
+        check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter)
+        return
     csv_status = (csv_row or {}).get("status")
     db_status = (db_row or {}).get("status")
     is_deleted = csv_status == "deleted" or db_status == "deleted"

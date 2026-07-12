@@ -102,10 +102,12 @@ def initialize_metadata():
 def upsert_instance(
     *,
     user_id,
+    product=None,
     status=None,
     port=None,
     openclaw_version=None,
     basic_auth_enabled=None,
+    container_name=None,
     deleted_at=None,
     conn=None,
 ):
@@ -122,17 +124,20 @@ def upsert_instance(
         else:
             basic_auth_enabled = detected_basic_auth
 
+    resolved_product = product or existing.get("product") or "openclaw"
     access_url = existing.get("access_url") or build_access_url(resolved_port)
-    admin_url = existing.get("admin_url") or (access_url.rstrip("/") + "/admin/" if access_url else None)
+    admin_url = existing.get("admin_url")
+    if admin_url is None and resolved_product == "openclaw" and access_url:
+        admin_url = access_url.rstrip("/") + "/admin/"
 
     metadata_store.upsert_instance(
         user_id=user_id,
-        product=existing.get("product") or "openclaw",
+        product=resolved_product,
         port=resolved_port,
         status=status or existing.get("status") or "active",
         openclaw_version=resolved_version,
         basic_auth_enabled=basic_auth_enabled,
-        container_name=existing.get("container_name") or f"openclaw_{user_id}",
+        container_name=container_name or existing.get("container_name") or f"openclaw_{user_id}",
         access_url=access_url,
         admin_url=admin_url,
         data_path=existing.get("data_path") or str(OPENCLAW_PUBLIC_DIR / "users" / user_id),
@@ -182,6 +187,37 @@ def create_instance(args):
             actor=args.actor,
             user_id=args.user_id,
             message=args.message,
+            finished_at=metadata_store.utc_now(),
+            conn=conn,
+        )
+
+
+def register_instance(args):
+    initialize_metadata()
+    with metadata_store.connect() as conn:
+        port = upsert_instance(
+            user_id=args.user_id,
+            product=args.product,
+            status=args.status,
+            port=args.port,
+            basic_auth_enabled=args.basic_auth_enabled,
+            container_name=args.container_name,
+            deleted_at=None,
+            conn=conn,
+        )
+        if port is not None:
+            metadata_store.record_port(
+                port,
+                user_id=args.user_id,
+                status="allocated",
+                conn=conn,
+            )
+        metadata_store.record_operation(
+            action="register_instance",
+            status="success",
+            actor=args.actor,
+            user_id=args.user_id,
+            message=f"product={args.product} container={args.container_name}",
             finished_at=metadata_store.utc_now(),
             conn=conn,
         )
@@ -285,6 +321,16 @@ def build_parser():
     create.add_argument("--actor")
     create.add_argument("--message")
     create.set_defaults(func=create_instance)
+
+    register = subparsers.add_parser("register-instance")
+    register.add_argument("--user-id", required=True)
+    register.add_argument("--product", required=True, choices=["openclaw", "evoscientist"])
+    register.add_argument("--status", default="active", choices=["active", "stopped"])
+    register.add_argument("--port", type=int)
+    register.add_argument("--container-name", required=True)
+    register.add_argument("--basic-auth-enabled", type=bool_arg)
+    register.add_argument("--actor")
+    register.set_defaults(func=register_instance)
 
     status = subparsers.add_parser("set-instance-status")
     status.add_argument("--user-id", required=True)

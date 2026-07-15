@@ -9,6 +9,7 @@ MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
 LIB_NGINX_AUTH="$SCRIPT_DIR/lib_nginx_auth.sh"
 LIB_PORT_ALLOCATOR="$SCRIPT_DIR/lib_port_allocator.sh"
+LIB_TENANT_NETWORK="$SCRIPT_DIR/lib_tenant_network.sh"
 
 # ===== 读取统一配置 =====
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -19,6 +20,7 @@ fi
 source "$CONFIG_FILE"
 source "$LIB_NGINX_AUTH"
 source "$LIB_PORT_ALLOCATOR"
+source "$LIB_TENANT_NETWORK"
 
 # ===== 参数 =====
 USER_ID="${1:-}"
@@ -113,6 +115,7 @@ USER_DIR="$BASE_DIR/users/$USER_ID"
 LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
 TEMPLATE="$MANAGER_DIR/templates/docker-compose.tpl.yml"
 SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+TENANT_NETWORK=""
 
 # ===== 创建基础目录 =====
 mkdir -p "$BASE_DIR/users"
@@ -153,6 +156,10 @@ cleanup_on_exit() {
   restore_host_owner
 
   if [ -d "$USER_DIR" ]; then
+    if [ -n "${TENANT_NETWORK:-}" ]; then
+      disconnect_container_from_network "$NGINX_CONTAINER_NAME" "$TENANT_NETWORK" || true
+      disconnect_container_from_network "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}" "$TENANT_NETWORK" || true
+    fi
     cd "$USER_DIR" 2>/dev/null || true
     docker compose down >/dev/null 2>&1 || true
   fi
@@ -233,6 +240,8 @@ if [ -z "$SERVICE_ID" ]; then
   exit 1
 fi
 
+TENANT_NETWORK="$(tenant_network_name "$SERVICE_ID")"
+
 # ===== 检查模板 =====
 if [ ! -f "$TEMPLATE" ]; then
   fail "Template not found: $TEMPLATE"
@@ -293,6 +302,7 @@ sed -i "s#{{VERSION}}#$VERSION#g" "$TARGET_COMPOSE"
 sed -i "s#{{BASE_DIR}}#$BASE_DIR#g" "$TARGET_COMPOSE"
 sed -i "s#{{TZ}}#$TZ#g" "$TARGET_COMPOSE"
 sed -i "s#{{GATEWAY_TOKEN}}#$GATEWAY_TOKEN#g" "$TARGET_COMPOSE"
+sed -i "s#{{TENANT_NETWORK}}#$TENANT_NETWORK#g" "$TARGET_COMPOSE"
 
 # ===== 生成 nginx 用户配置 =====
 mkdir -p "$NGINX_USERS_CONF_DIR"
@@ -494,6 +504,10 @@ if ! docker compose up -d; then
   exit 1
 fi
 
+log "Connecting shared services to tenant network: $TENANT_NETWORK"
+connect_container_to_network "$NGINX_CONTAINER_NAME" "$TENANT_NETWORK"
+connect_container_to_network "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}" "$TENANT_NETWORK"
+
 if [ "$SKIP_NGINX_RELOAD" -eq 1 ]; then
   log "Skip nginx update/reload; caller must reload nginx after batch operations"
 else
@@ -507,6 +521,10 @@ else
     fail "Failed to update nginx container"
     exit 1
   fi
+
+  connect_shared_services_to_tenant_networks \
+    "$NGINX_CONTAINER_NAME" \
+    "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 
   log "Testing nginx configuration"
 

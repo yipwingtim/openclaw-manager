@@ -56,6 +56,7 @@ fi
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
 source "$SCRIPT_DIR/lib_nginx_auth.sh"
+source "$SCRIPT_DIR/lib_tenant_network.sh"
 
 BASE_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 PUBLIC_HOST="${PUBLIC_HOST:?Missing PUBLIC_HOST in config}"
@@ -221,6 +222,10 @@ if ! docker compose up -d; then
   echo "[ERROR] Failed to update nginx container" >&2
   exit 1
 fi
+
+connect_shared_services_to_tenant_networks \
+  "$NGINX_CONTAINER_NAME" \
+  "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 
 if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
   echo "[ERROR] Nginx configuration test failed" >&2

@@ -6,6 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+LIB_TENANT_NETWORK="$SCRIPT_DIR/lib_tenant_network.sh"
 
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "[ERROR] Config file not found: $CONFIG_FILE"
@@ -13,6 +14,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 source "$CONFIG_FILE"
+source "$LIB_TENANT_NETWORK"
 
 # ===== 参数 =====
 USER_ID=$1
@@ -57,6 +59,8 @@ done
 
 BASE_DIR="$OPENCLAW_PUBLIC_DIR"
 USER_DIR="$BASE_DIR/users/$USER_ID"
+SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+TENANT_NETWORK="$(tenant_network_name "$SERVICE_ID")"
 DELETED_DIR="$BASE_DIR/deleted"
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
 NGINX_DISABLED_USERS_CONF_DIR="$NGINX_USERS_CONF_DIR/_disabled"
@@ -108,6 +112,8 @@ RECYCLE_DIR="$DELETED_DIR/${USER_ID}_$TIMESTAMP"
 
 echo "[INFO] Stopping OpenClaw container..."
 if [ "$USER_DIR_EXISTS" -eq 1 ]; then
+  disconnect_container_from_network "$NGINX_CONTAINER_NAME" "$TENANT_NETWORK" || true
+  disconnect_container_from_network "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}" "$TENANT_NETWORK" || true
   cd "$USER_DIR"
   docker compose down || true
 else
@@ -191,6 +197,10 @@ else
     echo "[ERROR] Failed to update nginx container"
     exit 1
   fi
+
+  connect_shared_services_to_tenant_networks \
+    "$NGINX_CONTAINER_NAME" \
+    "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 
   echo "[INFO] Testing nginx configuration..."
   if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then

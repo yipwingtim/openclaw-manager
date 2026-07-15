@@ -12,6 +12,17 @@ from tempfile import TemporaryDirectory
 ROOT_DIR = Path(__file__).resolve().parents[1]
 RESTORE_SCRIPT = ROOT_DIR / "scripts" / "restore_user.sh"
 MIGRATE_NGINX_UPSTREAMS_SCRIPT = ROOT_DIR / "scripts" / "migrate_nginx_upstreams.sh"
+TENANT_NETWORK_HELPER = ROOT_DIR / "scripts" / "lib_tenant_network.sh"
+LEGACY_USER_COMPOSE = """\
+services:
+  openclaw-alice:
+    container_name: openclaw_alice
+    networks:
+      - agent-net
+networks:
+  agent-net:
+    external: true
+"""
 
 
 class RestoreUserScriptTests(unittest.TestCase):
@@ -23,6 +34,7 @@ class RestoreUserScriptTests(unittest.TestCase):
         config.mkdir(parents=True)
         shutil.copy2(RESTORE_SCRIPT, scripts / "restore_user.sh")
         shutil.copy2(MIGRATE_NGINX_UPSTREAMS_SCRIPT, scripts / "migrate_nginx_upstreams.sh")
+        shutil.copy2(TENANT_NETWORK_HELPER, scripts / "lib_tenant_network.sh")
         (scripts / "metadata_cli.py").write_text(
             """
 import os
@@ -97,7 +109,7 @@ exit 0
             nginx_conf_dir.mkdir(parents=True)
             nginx_compose_dir.mkdir(parents=True)
 
-            (recycle_dir / "user" / "docker-compose.yml").write_text("services:\n  app:\n", encoding="utf-8")
+            (recycle_dir / "user" / "docker-compose.yml").write_text(LEGACY_USER_COMPOSE, encoding="utf-8")
             (recycle_dir / "nginx" / "alice.conf").write_text(
                 "server {\n"
                 "  listen 30123 ssl;\n"
@@ -207,7 +219,7 @@ exit 0
             (public_dir / "users").mkdir(parents=True)
             nginx_conf_dir.mkdir(parents=True)
             nginx_compose_dir.mkdir(parents=True)
-            (recycle_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            (recycle_dir / "docker-compose.yml").write_text(LEGACY_USER_COMPOSE, encoding="utf-8")
             (public_dir / "users.csv").write_text(
                 "user_id,port,created_at,status\nalice,30123,2026-07-05,deleted\n",
                 encoding="utf-8",

@@ -32,8 +32,8 @@ services:
       - ALL
 
     networks:
-      - agent-net
+      - tenant-net
 
 networks:
-  agent-net:
-    external: true
+  tenant-net:
+    name: {{TENANT_NETWORK}}

@@ -176,6 +176,7 @@ def detect_compose(path):
         "container_name": None,
         "version": None,
         "has_agent_net": False,
+        "has_tenant_net": False,
         "has_old_gateway_service": False,
         "has_bad_empty_service": False,
     }
@@ -189,6 +190,7 @@ def detect_compose(path):
     result["container_name"] = container_match.group(1).strip('"').strip("'") if container_match else None
     result["version"] = image_match.group(1) if image_match else None
     result["has_agent_net"] = "agent-net" in text
+    result["has_tenant_net"] = "tenant-net" in text
     result["has_old_gateway_service"] = bool(re.search(r"(?m)^  openclaw-gateway:\s*$", text))
     result["has_bad_empty_service"] = bool(re.search(r"(?m)^  openclaw-:\s*$", text))
     return result
@@ -411,8 +413,10 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
             "container_name_mismatch",
             f"{user_id}: container_name={compose['container_name']} expected={expected_container}",
         )
-    if not compose["has_agent_net"]:
-        reporter.error("compose_missing_agent_net", f"{user_id}: compose does not reference agent-net")
+    if compose["has_agent_net"]:
+        reporter.error("compose_uses_shared_agent_net", f"{user_id}: compose references shared agent-net")
+    if not compose["has_tenant_net"]:
+        reporter.error("compose_missing_tenant_net", f"{user_id}: compose does not reference tenant-net")
 
     if not nginx["exists"] and not is_deleted:
         reporter.error("nginx_conf_missing", f"{user_id}: nginx conf missing: {nginx_conf}")

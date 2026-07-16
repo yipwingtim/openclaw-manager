@@ -29,6 +29,7 @@ fi
 
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
+source "$SCRIPT_DIR/lib_tenant_network.sh"
 
 NGINX_COMPOSE_DIR="${NGINX_COMPOSE_DIR:?Missing NGINX_COMPOSE_DIR in config}"
 NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
@@ -108,6 +109,10 @@ if ! docker compose up -d; then
   echo "[ERROR] Failed to update nginx container" >&2
   exit 1
 fi
+
+connect_shared_services_to_tenant_networks \
+  "$NGINX_CONTAINER_NAME" \
+  "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 
 if ! docker exec "$NGINX_CONTAINER_NAME" nginx -t; then
   echo "[ERROR] Nginx configuration test failed" >&2

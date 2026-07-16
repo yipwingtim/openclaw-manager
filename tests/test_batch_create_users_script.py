@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BATCH_CREATE_SCRIPT = ROOT_DIR / "scripts" / "batch_create_users.sh"
+TENANT_NETWORK_HELPER = ROOT_DIR / "scripts" / "lib_tenant_network.sh"
 
 
 class BatchCreateUsersScriptTests(unittest.TestCase):
@@ -21,6 +22,7 @@ class BatchCreateUsersScriptTests(unittest.TestCase):
         scripts.mkdir(parents=True)
         config.mkdir(parents=True)
         shutil.copy2(BATCH_CREATE_SCRIPT, scripts / "batch_create_users.sh")
+        shutil.copy2(TENANT_NETWORK_HELPER, scripts / "lib_tenant_network.sh")
         (scripts / "lib_nginx_auth.sh").write_text(
             """
 normalize_basic_auth_enabled() {

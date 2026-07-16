@@ -87,6 +87,7 @@ MANAGER_WEB_CONTAINER_NAME="${MANAGER_WEB_CONTAINER_NAME:-openclaw-manager-web}"
 MODEL_PROXY_CONTAINER_NAME="${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
+OPENCLAW_TENANT_NETWORK_PREFIX="${OPENCLAW_TENANT_NETWORK_PREFIX:-openclaw-user}"
 
 if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
   ok "OPENCLAW_INTERNAL_TOKEN is configured"
@@ -166,9 +167,9 @@ if has_cmd docker; then
   if docker inspect "$NGINX_CONTAINER_NAME" >/dev/null 2>&1; then
     ok "container exists: $NGINX_CONTAINER_NAME"
     if container_has_network "$NGINX_CONTAINER_NAME" agent-net; then
-      ok "$NGINX_CONTAINER_NAME is attached to agent-net"
+      warn "$NGINX_CONTAINER_NAME is attached to legacy agent-net"
     else
-      error "$NGINX_CONTAINER_NAME is not attached to agent-net"
+      ok "$NGINX_CONTAINER_NAME is not attached to legacy agent-net"
     fi
     if container_has_network "$NGINX_CONTAINER_NAME" manager-net; then
       ok "$NGINX_CONTAINER_NAME is attached to manager-net"
@@ -182,9 +183,9 @@ if has_cmd docker; then
   if docker inspect "$MODEL_PROXY_CONTAINER_NAME" >/dev/null 2>&1; then
     ok "container exists: $MODEL_PROXY_CONTAINER_NAME"
     if container_has_network "$MODEL_PROXY_CONTAINER_NAME" agent-net; then
-      ok "$MODEL_PROXY_CONTAINER_NAME is attached to agent-net"
+      warn "$MODEL_PROXY_CONTAINER_NAME is attached to legacy agent-net"
     else
-      error "$MODEL_PROXY_CONTAINER_NAME is not attached to agent-net"
+      ok "$MODEL_PROXY_CONTAINER_NAME is not attached to legacy agent-net"
     fi
   else
     warn "container not found: $MODEL_PROXY_CONTAINER_NAME"
@@ -193,10 +194,23 @@ if has_cmd docker; then
   user_containers="$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "^${USER_CONTAINER_PREFIX}" || true)"
   if [ -n "$user_containers" ]; then
     while IFS= read -r container; do
+      user_id="${container#"$USER_CONTAINER_PREFIX"}"
+      service_id="$(printf '%s' "$user_id" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+      tenant_network="${OPENCLAW_TENANT_NETWORK_PREFIX}-${service_id}"
       if container_has_network "$container" manager-net; then
         error "user container is attached to manager-net: $container"
       else
         ok "user container is not attached to manager-net: $container"
+      fi
+      if container_has_network "$container" agent-net; then
+        error "user container is attached to shared agent-net: $container"
+      else
+        ok "user container is not attached to shared agent-net: $container"
+      fi
+      if container_has_network "$container" "$tenant_network"; then
+        ok "user container is attached to tenant network: $container -> $tenant_network"
+      else
+        error "user container is missing tenant network: $container -> $tenant_network"
       fi
     done <<EOF
 $user_containers

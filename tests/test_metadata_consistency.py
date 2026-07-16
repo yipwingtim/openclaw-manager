@@ -31,7 +31,10 @@ class MetadataConsistencyTests(unittest.TestCase):
             f"  openclaw-{user_id}:\n"
             f"    container_name: openclaw_{user_id}\n"
             "    networks:\n"
-            "      - agent-net\n",
+            "      - tenant-net\n"
+            "networks:\n"
+            "  tenant-net:\n"
+            f"    name: openclaw-user-{user_id}\n",
             encoding="utf-8",
         )
         return user_dir

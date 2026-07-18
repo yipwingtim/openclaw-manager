@@ -37,3 +37,4 @@ services:
 networks:
   tenant-net:
     name: {{TENANT_NETWORK}}
+    external: true

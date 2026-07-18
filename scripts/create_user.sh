@@ -162,6 +162,7 @@ cleanup_on_exit() {
     fi
     cd "$USER_DIR" 2>/dev/null || true
     docker compose down >/dev/null 2>&1 || true
+    remove_tenant_network_if_unused "$TENANT_NETWORK" || true
   fi
 
   if [ "$USERS_CSV_ROW_CREATED" -eq 1 ] && [ -f "$USERS_CSV" ]; then
@@ -240,7 +241,7 @@ if [ -z "$SERVICE_ID" ]; then
   exit 1
 fi
 
-TENANT_NETWORK="$(tenant_network_name "$SERVICE_ID")"
+TENANT_NETWORK="$(tenant_network_name "$USER_ID")"
 
 # ===== 检查模板 =====
 if [ ! -f "$TEMPLATE" ]; then
@@ -303,6 +304,9 @@ sed -i "s#{{BASE_DIR}}#$BASE_DIR#g" "$TARGET_COMPOSE"
 sed -i "s#{{TZ}}#$TZ#g" "$TARGET_COMPOSE"
 sed -i "s#{{GATEWAY_TOKEN}}#$GATEWAY_TOKEN#g" "$TARGET_COMPOSE"
 sed -i "s#{{TENANT_NETWORK}}#$TENANT_NETWORK#g" "$TARGET_COMPOSE"
+
+log "Ensuring isolated tenant network: $TENANT_NETWORK"
+ensure_tenant_network "$TENANT_NETWORK"
 
 # ===== 生成 nginx 用户配置 =====
 mkdir -p "$NGINX_USERS_CONF_DIR"

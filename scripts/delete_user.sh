@@ -60,7 +60,7 @@ done
 BASE_DIR="$OPENCLAW_PUBLIC_DIR"
 USER_DIR="$BASE_DIR/users/$USER_ID"
 SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
-TENANT_NETWORK="$(tenant_network_name "$SERVICE_ID")"
+TENANT_NETWORK="$(tenant_network_name "$USER_ID")"
 DELETED_DIR="$BASE_DIR/deleted"
 NGINX_USER_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
 NGINX_DISABLED_USERS_CONF_DIR="$NGINX_USERS_CONF_DIR/_disabled"
@@ -116,6 +116,7 @@ if [ "$USER_DIR_EXISTS" -eq 1 ]; then
   disconnect_container_from_network "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}" "$TENANT_NETWORK" || true
   cd "$USER_DIR"
   docker compose down || true
+  remove_tenant_network_if_unused "$TENANT_NETWORK" || true
 else
   echo "[INFO] Skip container stop: user directory not found"
 fi

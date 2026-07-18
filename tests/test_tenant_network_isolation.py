@@ -11,11 +11,33 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 NETWORK_HELPER = ROOT_DIR / "scripts" / "lib_tenant_network.sh"
+NETWORK_ALLOCATOR = ROOT_DIR / "scripts" / "tenant_network_allocator.py"
 MIGRATION_SCRIPT = ROOT_DIR / "scripts" / "migrate_tenant_networks.sh"
 COMPOSE_TEMPLATE = ROOT_DIR / "templates" / "docker-compose.tpl.yml"
 
 
 class TenantNetworkIsolationTests(unittest.TestCase):
+    def test_tenant_network_name_does_not_collapse_distinct_ids(self):
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; tenant_network_name "$2"; tenant_network_name "$3"',
+                "bash",
+                str(NETWORK_HELPER),
+                "foo_bar",
+                "foo-bar",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        names = result.stdout.splitlines()
+        self.assertEqual(len(names), 2)
+        self.assertNotEqual(names[0], names[1])
+
     def test_migration_preserves_running_stopped_and_paused_states(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -28,10 +50,15 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             config_dir.mkdir(parents=True)
             bin_dir.mkdir()
             shutil.copy2(NETWORK_HELPER, scripts_dir / NETWORK_HELPER.name)
+            shutil.copy2(NETWORK_ALLOCATOR, scripts_dir / NETWORK_ALLOCATOR.name)
             shutil.copy2(MIGRATION_SCRIPT, scripts_dir / MIGRATION_SCRIPT.name)
 
             (config_dir / "openclaw-manager.env").write_text(
-                f"OPENCLAW_PUBLIC_DIR={public_dir}\n",
+                (
+                    f"OPENCLAW_PUBLIC_DIR={public_dir}\n"
+                    "OPENCLAW_TENANT_SUBNET_POOL=10.250.0.0/24\n"
+                    "OPENCLAW_TENANT_SUBNET_PREFIX=28\n"
+                ),
                 encoding="utf-8",
             )
             legacy_compose = textwrap.dedent(
@@ -61,6 +88,12 @@ class TenantNetworkIsolationTests(unittest.TestCase):
                     printf '%s|%s\n' "$PWD" "$*" >> "$DOCKER_LOG"
                     if [ "$1" = "ps" ]; then
                       printf '%s\n' openclaw_alice openclaw_bob openclaw_carol
+                    elif [ "$1" = "network" ] && [ "$2" = "ls" ]; then
+                      exit 0
+                    elif [ "$1" = "network" ] && [ "$2" = "inspect" ]; then
+                      exit 1
+                    elif [ "$1" = "network" ] && [ "$2" = "create" ]; then
+                      exit 0
                     elif [ "$1" = "inspect" ] && [ "$2" = "-f" ]; then
                       case "$4:$3" in
                         openclaw_alice:*Running*) printf 'true\n' ;;
@@ -82,10 +115,38 @@ class TenantNetworkIsolationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_docker.chmod(0o755)
+            fake_ip = bin_dir / "ip"
+            fake_ip.write_text("#!/bin/sh\nprintf '%s\\n' '[]'\n", encoding="utf-8")
+            fake_ip.chmod(0o755)
             env = os.environ.copy()
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
             env["DOCKER_LOG"] = str(root / "docker.log")
 
+            dry_result = subprocess.run(
+                ["bash", str(scripts_dir / MIGRATION_SCRIPT.name), "--dry-run"],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(
+                dry_result.returncode, 0, dry_result.stdout + dry_result.stderr
+            )
+            self.assertIn("dry-run, no changes", dry_result.stdout)
+            self.assertIn("user=alice state=running", dry_result.stdout)
+            for user_id in ("alice", "bob", "carol"):
+                compose = public_dir / "users" / user_id / "docker-compose.yml"
+                self.assertEqual(compose.read_text(encoding="utf-8"), legacy_compose)
+            dry_log = (root / "docker.log").read_text(encoding="utf-8")
+            for forbidden in (
+                "network create", "compose up", "compose create", "network connect",
+                "unpause", "pause openclaw_carol",
+            ):
+                self.assertNotIn(forbidden, dry_log)
+            (root / "docker.log").unlink()
+
+            env["TENANT_NETWORK_ALLOCATOR"] = str(NETWORK_ALLOCATOR)
             result = subprocess.run(
                 ["bash", str(scripts_dir / MIGRATION_SCRIPT.name)],
                 text=True,
@@ -110,6 +171,7 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         self.assertIn("- tenant-net", template)
         self.assertIn("name: {{TENANT_NETWORK}}", template)
         self.assertNotIn("- agent-net", template)
+        self.assertIn("external: true", template)
 
     def test_legacy_compose_is_migrated_to_named_tenant_network(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -149,6 +211,7 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             self.assertIn("- tenant-net", migrated)
             self.assertIn("name: openclaw-user-alice", migrated)
             self.assertNotIn("agent-net", migrated)
+            self.assertIn("external: true", migrated)
 
     def test_empty_container_list_is_safe_with_pipefail(self):
         with tempfile.TemporaryDirectory() as temp_dir:

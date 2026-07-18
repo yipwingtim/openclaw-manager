@@ -62,7 +62,7 @@ DELETED_DIR="$BASE_DIR/deleted"
 USERS_CSV="$BASE_DIR/users.csv"
 USER_DIR="$USERS_DIR/$USER_ID"
 SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
-TENANT_NETWORK="$(tenant_network_name "$SERVICE_ID")"
+TENANT_NETWORK="$(tenant_network_name "$USER_ID")"
 NGINX_TARGET_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 MIGRATE_NGINX_UPSTREAMS_SCRIPT="$SCRIPT_DIR/migrate_nginx_upstreams.sh"
@@ -299,6 +299,7 @@ fi
 
 log "Ensuring restored compose uses tenant network: $TENANT_NETWORK"
 ensure_tenant_compose_network "$USER_DIR/docker-compose.yml" "$TENANT_NETWORK"
+ensure_tenant_network "$TENANT_NETWORK"
 
 MOVED_NGINX_CONF=""
 if [ -n "$RECYCLE_NGINX_CONF" ] && [ -f "$RECYCLE_NGINX_CONF" ]; then

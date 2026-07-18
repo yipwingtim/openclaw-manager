@@ -5,6 +5,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib_tenant_network.sh"
 
 ERRORS=0
 WARNINGS=0
@@ -195,8 +197,7 @@ if has_cmd docker; then
   if [ -n "$user_containers" ]; then
     while IFS= read -r container; do
       user_id="${container#"$USER_CONTAINER_PREFIX"}"
-      service_id="$(printf '%s' "$user_id" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
-      tenant_network="${OPENCLAW_TENANT_NETWORK_PREFIX}-${service_id}"
+      tenant_network="$(tenant_network_name "$user_id")"
       if container_has_network "$container" manager-net; then
         error "user container is attached to manager-net: $container"
       else

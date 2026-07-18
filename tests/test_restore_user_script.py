@@ -32,6 +32,16 @@ class RestoreUserScriptTests(unittest.TestCase):
         config = manager / "config"
         scripts.mkdir(parents=True)
         config.mkdir(parents=True)
+        allocator = scripts / "tenant_network_allocator.py"
+        allocator.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import sys\n"
+            "with open(os.environ['DOCKER_LOG'], 'a', encoding='utf-8') as log:\n"
+            "    log.write('allocator|' + ' '.join(sys.argv[1:]) + '\\n')\n",
+            encoding="utf-8",
+        )
+        allocator.chmod(0o755)
         shutil.copy2(RESTORE_SCRIPT, scripts / "restore_user.sh")
         shutil.copy2(MIGRATE_NGINX_UPSTREAMS_SCRIPT, scripts / "migrate_nginx_upstreams.sh")
         shutil.copy2(TENANT_NETWORK_HELPER, scripts / "lib_tenant_network.sh")
@@ -71,6 +81,8 @@ exit 0
                 NGINX_COMPOSE_FILE={nginx_compose_file}
                 NGINX_COMPOSE_DIR={nginx_compose_dir}
                 NGINX_USERS_CONF_DIR={nginx_conf_dir}
+                OPENCLAW_TENANT_SUBNET_POOL=10.250.0.0/24
+                OPENCLAW_TENANT_SUBNET_PREFIX=28
                 NGINX_CONTAINER_NAME=openclaw-nginx
                 """
             ).strip()
@@ -143,6 +155,7 @@ exit 0
             self.assertIn("set-instance-status --user-id alice --status active", (root / "metadata.log").read_text(encoding="utf-8"))
             self.assertIn("--port 30123", (root / "metadata.log").read_text(encoding="utf-8"))
             docker_log = (root / "docker.log").read_text(encoding="utf-8")
+            self.assertIn("allocator|prepare --network openclaw-user-", docker_log)
             self.assertIn("compose up -d", docker_log)
             self.assertIn("exec openclaw-nginx nginx -t", docker_log)
             self.assertIn("exec openclaw-nginx nginx -s reload", docker_log)

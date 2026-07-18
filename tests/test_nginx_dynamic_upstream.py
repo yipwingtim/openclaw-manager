@@ -80,7 +80,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         self.assertIn("server openclaw-manager-web:8080 resolve;", script)
         self.assertIn("proxy_pass http://manager_web_backend_${PORT}/instance-admin/;", script)
         self.assertNotIn("proxy_pass http://openclaw_${USER_ID}:18789;", script)
-        self.assertIn('TENANT_NETWORK="$(tenant_network_name "$SERVICE_ID")"', script)
+        self.assertIn('TENANT_NETWORK="$(tenant_network_name "$USER_ID")"', script)
         self.assertIn('connect_container_to_network "$NGINX_CONTAINER_NAME" "$TENANT_NETWORK"', script)
 
     def test_migrates_ip_and_static_container_upstreams_then_reloads(self):

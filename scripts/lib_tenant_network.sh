@@ -132,15 +132,15 @@ if "      - agent-net\n" in text:
 if "      - tenant-net\n" not in text:
     raise SystemExit("Compose does not attach the user service to tenant-net")
 
-text, replacements = re.subn(
-    rf"(?m)^  tenant-net:\n    name: {re.escape(network)}(?:\n    external: true)?\s*$",
-    f"  tenant-net:\n    name: {network}\n    external: true",
-    text,
-    count=1,
-)
-if replacements != 1:
-    raise SystemExit("Could not configure tenant-net as an external network")
 if mode == "write":
+    text, replacements = re.subn(
+        rf"(?m)^  tenant-net:\n    name: [^\n]+(?:\n    external: true)?\s*$",
+        f"  tenant-net:\n    name: {network}\n    external: true",
+        text,
+        count=1,
+    )
+    if replacements != 1:
+        raise SystemExit("Could not configure tenant-net as an external network")
     compose_file.write_text(text, encoding="utf-8")
 elif mode != "check":
     raise SystemExit(f"Unsupported compose network mode: {mode}")

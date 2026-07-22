@@ -4,6 +4,9 @@
 
 本文档定义 OpenClaw Manager 元数据数据库第一版的数据字典。
 
+> 本文前半部分记录旧版 schema v1。当前用户、身份和实例关系及迁移流程见
+> `user-identity-instance-migration.md`；schema v2 以 `db/schema.sql` 为准。
+
 该数据字典服务于 SQLite 第一阶段实现，重点约束：
 
 - 表的职责边界

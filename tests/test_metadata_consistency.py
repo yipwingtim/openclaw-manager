@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import runpy
+import sqlite3
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,9 +12,38 @@ CHECKER = runpy.run_path(str(ROOT_DIR / "scripts" / "check_metadata_consistency.
 Reporter = CHECKER["Reporter"]
 check_deleted_recycle_dirs = CHECKER["check_deleted_recycle_dirs"]
 check_user = CHECKER["check_user"]
+load_db = CHECKER["load_db"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def test_new_instances_without_legacy_ids_are_not_overwritten(self):
+        with TemporaryDirectory() as temp_dir:
+            db_file = Path(temp_dir) / "manager.db"
+            with sqlite3.connect(db_file) as conn:
+                conn.executescript(
+                    (ROOT_DIR / "db" / "schema.sql").read_text(encoding="utf-8")
+                )
+                conn.execute(
+                    "INSERT INTO users (public_id, username, normalized_username) VALUES ('u1', 'alice', 'alice')"
+                )
+                owner_id = conn.execute("SELECT id FROM users").fetchone()[0]
+                for public_id, runtime in (("i1", "runtime-1"), ("i2", "runtime-2")):
+                    conn.execute(
+                        """
+                        INSERT INTO instances (
+                            public_id, owner_user_id, product, instance_name,
+                            runtime_identifier
+                        ) VALUES (?, ?, 'openclaw', ?, ?)
+                        """,
+                        (public_id, owner_id, public_id, runtime),
+                    )
+            reporter = Reporter()
+
+            instances, _ = load_db(db_file, reporter)
+
+            self.assertEqual(set(instances), {"@i1", "@i2"})
+            self.assertEqual(reporter.issues, [])
+
     def configure_paths(self, root):
         conf_dir = root / "nginx" / "conf"
         auth_dir = root / "nginx" / "auth"
@@ -227,4 +257,3 @@ class MetadataConsistencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

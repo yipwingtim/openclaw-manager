@@ -72,10 +72,68 @@ class UpgradeMetadataConsistencyTests(unittest.TestCase):
             self.assertEqual(updated.returncode, 0, updated.stderr)
             with sqlite3.connect(env["METADATA_DB_FILE"]) as conn:
                 row = conn.execute(
-                    "SELECT status, openclaw_version FROM instances WHERE user_id = ?",
+                    "SELECT status, openclaw_version FROM instances WHERE legacy_user_id = ?",
                     ("alice",),
                 ).fetchone()
             self.assertEqual(row, ("stopped", "2026.6.11"))
+
+    def test_deleted_instance_restore_reuses_record_and_active_data_path(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            env = self.metadata_env(root)
+            public_dir = Path(env["OPENCLAW_PUBLIC_DIR"])
+            recycle_user = public_dir / "deleted" / "alice_20260722_120000" / "user"
+            recycle_user.mkdir(parents=True)
+            (recycle_user / "docker-compose.yml").write_text(
+                "services:\n  openclaw-alice:\n",
+                encoding="utf-8",
+            )
+            recycle_nginx = recycle_user.parent / "nginx"
+            recycle_nginx.mkdir()
+            (recycle_nginx / "alice.conf").write_text(
+                "server {\n    listen 30021;\n}\n", encoding="utf-8"
+            )
+
+            created = self.run_metadata(env, "create-instance", "--user-id", "alice")
+            self.assertEqual(created.returncode, 0, created.stderr)
+            deleted = self.run_metadata(
+                env,
+                "set-instance-status",
+                "--user-id",
+                "alice",
+                "--status",
+                "deleted",
+                "--action",
+                "delete_instance",
+            )
+            self.assertEqual(deleted.returncode, 0, deleted.stderr)
+
+            active_user_dir = public_dir / "users" / "alice"
+            active_user_dir.mkdir(parents=True)
+            restored = self.run_metadata(
+                env,
+                "set-instance-status",
+                "--user-id",
+                "alice",
+                "--status",
+                "active",
+                "--action",
+                "restore_instance",
+            )
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+
+            with sqlite3.connect(env["METADATA_DB_FILE"]) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, status, restore_state, data_path, deleted_at
+                    FROM instances WHERE legacy_user_id = 'alice'
+                    """
+                ).fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(
+                rows[0][1:],
+                ("active", "not_applicable", str(active_user_dir), None),
+            )
 
     def make_upgrade_fixture(self, root, metadata_exit_code):
         manager = root / "manager"

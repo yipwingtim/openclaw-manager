@@ -1,3 +1,10 @@
+upstream manager_web_backend {
+    zone manager_web_backend 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    server openclaw-manager-web:8080 resolve;
+}
+
 server {
     listen 30015 ssl;
     server_name _;
@@ -15,7 +22,7 @@ server {
     }
 
     location /admin/ {
-        proxy_pass http://openclaw-manager-web:8080/admin/;
+        proxy_pass http://manager_web_backend/admin/;
 
         proxy_buffering off;
         proxy_request_buffering off;

@@ -280,8 +280,8 @@ docker compose up -d
 docker exec openclaw-nginx nginx -t
 docker exec openclaw-nginx nginx -s reload
 
-cd /data/docker/openclaw-manager/services
-docker compose up -d --build
+cd /data/docker/openclaw-manager
+bash scripts/deploy_services.sh
 
 cd /data/docker/openclaw-manager
 ./scripts/check_metadata_consistency.py

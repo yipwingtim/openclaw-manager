@@ -75,9 +75,14 @@ MODEL_PROXY_PUBLIC_BASE_URL=https://gateway.example.com/v1
 ## 启动服务
 
 ```bash
-cd /data/docker/openclaw-manager/services
-docker compose up -d --build model-proxy
+cd /data/docker/openclaw-manager
+bash scripts/deploy_services.sh
 ```
+
+请使用部署脚本启动或重建 `model-proxy`。脚本会在 Compose 完成后，将
+`openclaw-nginx` 和 `openclaw-model-proxy` 重新连接到现有租户独立网络，
+并将 Nginx 上游迁移为动态 Docker DNS。直接执行 `docker compose up`
+重建容器会丢失运行时网络连接，也可能让 Nginx 继续使用旧容器 IP。
 
 如果自定义了 `MODEL_PROXY_TOKEN_DIR`，需要确保 Docker Compose 渲染 volume 时也能读取该变量。可在执行前导入环境变量：
 

@@ -33,6 +33,16 @@ schema_file = Path(sys.argv[2])
 schema = schema_file.read_text(encoding="utf-8")
 with sqlite3.connect(db_file) as conn:
     conn.execute("PRAGMA foreign_keys = ON")
+    migration_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+    ).fetchone()
+    if migration_table:
+        version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0
+        if version < 2:
+            raise SystemExit(
+                "[ERROR] Metadata schema v1 requires: "
+                "python3 scripts/migrate_identity_instance_model.py --db <path> --dry-run"
+            )
     conn.executescript(schema)
     conn.commit()
 

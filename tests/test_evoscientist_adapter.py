@@ -135,7 +135,7 @@ class EvoScientistRegistrationTests(unittest.TestCase):
             with sqlite3.connect(public_dir / "manager.db") as conn:
                 row = conn.execute(
                     "SELECT product, status, container_name, port "
-                    "FROM instances WHERE user_id = ?",
+                    "FROM instances WHERE legacy_user_id = ?",
                     ("alice",),
                 ).fetchone()
             self.assertEqual(
@@ -146,4 +146,3 @@ class EvoScientistRegistrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

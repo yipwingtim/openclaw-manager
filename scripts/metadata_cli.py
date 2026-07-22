@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+from legacy_recycle import deleted_payload
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = SCRIPT_DIR.parent
@@ -109,6 +111,8 @@ def upsert_instance(
     basic_auth_enabled=None,
     container_name=None,
     deleted_at=None,
+    restore_state=None,
+    data_path=None,
     conn=None,
 ):
     existing = metadata_store.get_instance(user_id, conn=conn) or {}
@@ -140,9 +144,10 @@ def upsert_instance(
         container_name=container_name or existing.get("container_name") or f"openclaw_{user_id}",
         access_url=access_url,
         admin_url=admin_url,
-        data_path=existing.get("data_path") or str(OPENCLAW_PUBLIC_DIR / "users" / user_id),
+        data_path=data_path or existing.get("data_path") or str(OPENCLAW_PUBLIC_DIR / "users" / user_id),
         nginx_conf_path=existing.get("nginx_conf_path") or str(NGINX_USERS_CONF_DIR / f"{user_id}.conf"),
         deleted_at=deleted_at if deleted_at is not None else existing.get("deleted_at"),
+        restore_state=restore_state,
         conn=conn,
     )
     return resolved_port
@@ -205,6 +210,11 @@ def register_instance(args):
             deleted_at=None,
             conn=conn,
         )
+        if args.status != "deleted":
+            conn.execute(
+                "UPDATE instances SET deleted_at = NULL WHERE legacy_user_id = ?",
+                (args.user_id,),
+            )
         if port is not None:
             metadata_store.record_port(
                 port,
@@ -226,6 +236,12 @@ def register_instance(args):
 def set_instance_status(args):
     initialize_metadata()
     deleted_at = metadata_store.utc_now() if args.status == "deleted" else None
+    restore_state = "not_applicable"
+    data_path = None
+    if args.status == "deleted":
+        restore_state, data_path = deleted_payload(OPENCLAW_PUBLIC_DIR, args.user_id)
+    elif args.status == "active":
+        data_path = OPENCLAW_PUBLIC_DIR / "users" / args.user_id
     with metadata_store.connect() as conn:
         port = upsert_instance(
             user_id=args.user_id,
@@ -233,8 +249,15 @@ def set_instance_status(args):
             port=args.port,
             openclaw_version=args.openclaw_version,
             deleted_at=deleted_at,
+            restore_state=restore_state,
+            data_path=str(data_path) if data_path is not None else None,
             conn=conn,
         )
+        if args.status != "deleted":
+            conn.execute(
+                "UPDATE instances SET deleted_at = NULL WHERE legacy_user_id = ?",
+                (args.user_id,),
+            )
         if port is not None:
             metadata_store.record_port(
                 port,

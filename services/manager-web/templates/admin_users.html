@@ -182,11 +182,13 @@
                   <td>
                     <div class="d-flex gap-2 flex-wrap">
                       {% if user.status == "DELETED" %}
-                        {% if "restore" in user.capabilities %}
+                        {% if "restore" in user.capabilities and user.restore_state == "restorable" %}
                         <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle" onsubmit="return confirm('&#30830;&#35748;&#24674;&#22797; {{ user.user_id }}&#65311;&#35813;&#25805;&#20316;&#20250;&#24674;&#22797;&#29992;&#25143;&#30446;&#24405;&#12289;Nginx &#37197;&#32622;&#24182;&#21551;&#21160;&#23454;&#20363;&#12290;');">
                           <input type="hidden" name="action" value="restore">
                           <button class="btn btn-sm btn-oc" type="submit">&#24674;&#22797;</button>
                         </form>
+                        {% elif user.restore_state != "restorable" %}
+                          <span class="badge-status badge-neutral">&#26080;&#21487;&#29992;&#24674;&#22797;&#25968;&#25454;</span>
                         {% endif %}
                       {% else %}
                         {% if "dashboard" in user.capabilities %}

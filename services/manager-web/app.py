@@ -659,6 +659,11 @@ def persist_lifecycle_metadata(user_id, action, output=""):
             basic_auth_enabled = existing.get("basic_auth_enabled", 1) != 0
         else:
             basic_auth_enabled = detected_basic_auth_enabled
+        data_path = existing.get("data_path") or str(get_user_dir(user_id))
+        restore_state = existing.get("restore_state")
+        if action == "restore":
+            data_path = str(get_user_dir(user_id))
+            restore_state = "not_applicable"
 
         with metadata_store.connect() as conn:
             metadata_store.upsert_instance(
@@ -671,9 +676,10 @@ def persist_lifecycle_metadata(user_id, action, output=""):
                 container_name=existing.get("container_name") or f"openclaw_{user_id}",
                 access_url=access_url,
                 admin_url=admin_url,
-                data_path=existing.get("data_path") or str(get_user_dir(user_id)),
+                data_path=data_path,
                 nginx_conf_path=existing.get("nginx_conf_path") or str(NGINX_USERS_CONF_DIR / f"{user_id}.conf"),
                 deleted_at=deleted_at,
+                restore_state=restore_state,
                 conn=conn,
             )
             if port is not None:
@@ -1148,6 +1154,9 @@ def run_instance_lifecycle_action(user_id, action):
     elif action == "restore":
         if user_dir.is_dir():
             return 1, f"User already exists: {user_id}"
+        instance = metadata_store.get_instance(user_id) or {}
+        if instance.get("restore_state") != "restorable":
+            return 1, f"Deleted instance is not restorable: {user_id}"
         return adapter.restore(user_id)
 
     return 1, "Invalid lifecycle action."
@@ -1312,6 +1321,7 @@ def list_deleted_users():
                 "openclaw_version": instance.get("openclaw_version") or "",
                 "access_url": "",
                 "basic_auth_enabled": None,
+                "restore_state": instance.get("restore_state") or "incomplete",
             }
         )
     return users

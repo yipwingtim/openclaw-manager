@@ -291,10 +291,28 @@ def load_db(path, reporter):
     with sqlite3.connect(path) as conn:
         conn.row_factory = sqlite3.Row
         try:
-            for row in conn.execute("SELECT * FROM instances"):
-                instances[row["user_id"]] = dict(row)
-            for row in conn.execute("SELECT * FROM ports"):
-                ports[int(row["port"])] = dict(row)
+            instance_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(instances)")
+            }
+            if "legacy_user_id" in instance_columns:
+                for row in conn.execute("SELECT * FROM instances"):
+                    value = dict(row)
+                    value["user_id"] = value["legacy_user_id"]
+                    key = value["legacy_user_id"] or f"@{value['public_id']}"
+                    instances[key] = value
+                for row in conn.execute(
+                    """
+                    SELECT p.*, i.legacy_user_id AS user_id
+                    FROM ports p
+                    LEFT JOIN instances i ON i.id = p.instance_id
+                    """
+                ):
+                    ports[int(row["port"])] = dict(row)
+            else:
+                for row in conn.execute("SELECT * FROM instances"):
+                    instances[row["user_id"]] = dict(row)
+                for row in conn.execute("SELECT * FROM ports"):
+                    ports[int(row["port"])] = dict(row)
         except sqlite3.Error as exc:
             reporter.error("metadata_db_read_failed", f"could not read metadata database: {exc}")
     return instances, ports
@@ -546,6 +564,17 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
             reporter.warn("users_csv_active_but_only_deleted_recycle", f"{user_id}: users.csv status is active but only deleted recycle dir exists")
 
     for user_id, row in db_instances.items():
+        legacy_user_id = row.get("legacy_user_id", row.get("user_id"))
+        if legacy_user_id is None:
+            data_path = row.get("data_path")
+            if row.get("status") != "deleted" and (
+                not data_path or not Path(data_path).is_dir()
+            ):
+                reporter.warn(
+                    "metadata_data_path_missing",
+                    f"instance {row.get('public_id')}: data path missing: {data_path}",
+                )
+            continue
         if row.get("status") != "deleted" and user_id not in users_dirs:
             reporter.warn("metadata_dir_missing", f"{user_id}: active metadata row exists but user dir is missing")
         if row.get("status") != "deleted" and user_id not in users_dirs and user_id in recycle_users:

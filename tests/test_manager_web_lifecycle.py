@@ -147,7 +147,12 @@ class LifecycleActionTests(unittest.TestCase):
             adapter = types.SimpleNamespace(restore=lambda user_id: (0, "restored"))
 
             with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
-                code, output = self.app_module.run_instance_lifecycle_action("deleted-user", "restore")
+                with patch.object(
+                    self.app_module.metadata_store,
+                    "get_instance",
+                    return_value={"restore_state": "restorable"},
+                ):
+                    code, output = self.app_module.run_instance_lifecycle_action("deleted-user", "restore")
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "restored")
@@ -163,6 +168,24 @@ class LifecycleActionTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(output, "User already exists: alice")
             run_command.assert_not_called()
+
+    def test_restore_rejects_instance_without_restorable_metadata(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            adapter = types.SimpleNamespace(restore=lambda user_id: (0, "restored"))
+
+            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
+                with patch.object(
+                    self.app_module.metadata_store,
+                    "get_instance",
+                    return_value={"restore_state": "incomplete"},
+                ):
+                    code, output = self.app_module.run_instance_lifecycle_action(
+                        "alice", "restore"
+                    )
+
+            self.assertEqual(code, 1)
+            self.assertEqual(output, "Deleted instance is not restorable: alice")
 
     def test_list_deleted_users_reads_metadata_instances(self):
         instances = [
@@ -188,6 +211,7 @@ class LifecycleActionTests(unittest.TestCase):
                     "openclaw_version": "1.2.3",
                     "access_url": "",
                     "basic_auth_enabled": None,
+                    "restore_state": "incomplete",
                 }
             ],
         )

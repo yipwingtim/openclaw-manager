@@ -30,11 +30,13 @@ fi
 
 mkdir -p "$(dirname "$METADATA_DB_FILE")"
 
-python3 - "$METADATA_DB_FILE" "$SCHEMA_FILE" "$USERS_CSV" "$OPENCLAW_PUBLIC_DIR" "$PUBLIC_HOST" "$NGINX_USERS_CONF_DIR" <<'PY'
+python3 - "$METADATA_DB_FILE" "$SCHEMA_FILE" "$USERS_CSV" "$OPENCLAW_PUBLIC_DIR" "$PUBLIC_HOST" "$NGINX_USERS_CONF_DIR" "$MANAGER_DIR" <<'PY'
 import csv
 import re
 import sqlite3
 import sys
+import unicodedata
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +46,9 @@ users_csv = Path(sys.argv[3])
 public_dir = Path(sys.argv[4])
 public_host = sys.argv[5]
 nginx_conf_dir = Path(sys.argv[6])
+sys.path.insert(0, str(Path(sys.argv[7]) / "scripts"))
+
+from legacy_recycle import deleted_payload
 
 
 def utc_now():
@@ -119,6 +124,16 @@ final_ports = 0
 
 with sqlite3.connect(db_file) as conn:
     conn.execute("PRAGMA foreign_keys = ON")
+    migration_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+    ).fetchone()
+    if migration_table:
+        version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0
+        if version < 2:
+            raise SystemExit(
+                "[ERROR] Metadata schema v1 requires: "
+                "python3 scripts/migrate_identity_instance_model.py --db <path> --dry-run"
+            )
     conn.executescript(schema)
 
     for row in iter_user_rows(users_csv):
@@ -140,14 +155,68 @@ with sqlite3.connect(db_file) as conn:
         nginx_conf = nginx_conf_dir / f"{user_id}.conf"
         access_url = f"https://{public_host}:{port}" if public_host and port else ""
         admin_url = f"{access_url}/admin/" if access_url else ""
+        restore_state = "not_applicable"
+        data_path = user_dir
+        if status == "deleted":
+            restore_state, recycle_path = deleted_payload(public_dir, user_id)
+            if recycle_path is not None:
+                data_path = recycle_path
 
         conn.execute(
             """
+                INSERT INTO users (
+                    public_id, username, normalized_username, status,
+                    provisioning_source, created_at, updated_at
+                ) VALUES (?, ?, ?, 'active', 'legacy', ?, ?)
+                ON CONFLICT(normalized_username) DO NOTHING
+            """,
+            (
+                str(uuid.uuid4()),
+                user_id,
+                unicodedata.normalize("NFKC", user_id).casefold(),
+                created_at,
+                now,
+            ),
+        )
+        owner = conn.execute(
+            "SELECT id, username FROM users WHERE normalized_username = ?",
+            (unicodedata.normalize("NFKC", user_id).casefold(),),
+        ).fetchone()
+        if owner[1] != user_id:
+            raise SystemExit(
+                f"normalized username collision: {owner[1]!r} and {user_id!r}"
+            )
+        identity = conn.execute(
+            "SELECT user_id FROM user_identities WHERE provider = 'legacy' AND subject = ?",
+            (user_id,),
+        ).fetchone()
+        if identity and identity[0] != owner[0]:
+            raise SystemExit(f"legacy identity owner conflict: {user_id!r}")
+        conn.execute(
+            """
+                INSERT INTO user_identities (
+                    user_id, provider, subject, external_username, created_at, updated_at
+                ) VALUES (?, 'legacy', ?, ?, ?, ?)
+                ON CONFLICT(provider, subject) DO UPDATE SET
+                    external_username = excluded.external_username,
+                    updated_at = excluded.updated_at
+            """,
+            (owner[0], user_id, user_id, created_at, now),
+        )
+
+        runtime_identifier = f"openclaw_{user_id}"
+        conn.execute(
+            """
                 INSERT INTO instances (
-                    user_id,
+                    public_id,
+                    legacy_user_id,
+                    owner_user_id,
                     product,
+                    instance_name,
+                    runtime_identifier,
                     port,
                     status,
+                    restore_state,
                     openclaw_version,
                     basic_auth_enabled,
                     container_name,
@@ -159,10 +228,15 @@ with sqlite3.connect(db_file) as conn:
                     updated_at,
                     deleted_at
                 )
-                VALUES (?, 'openclaw', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
+                VALUES (
+                    ?, ?, ?, 'openclaw', ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                ON CONFLICT(legacy_user_id) DO UPDATE SET
+                    owner_user_id = excluded.owner_user_id,
                     port = excluded.port,
                     status = excluded.status,
+                    restore_state = excluded.restore_state,
                     openclaw_version = excluded.openclaw_version,
                     basic_auth_enabled = excluded.basic_auth_enabled,
                     container_name = excluded.container_name,
@@ -174,36 +248,65 @@ with sqlite3.connect(db_file) as conn:
                     deleted_at = excluded.deleted_at
             """,
             (
+                    str(uuid.uuid4()),
                     user_id,
+                    owner[0],
+                    user_id,
+                    runtime_identifier,
                     port,
                     status,
+                    restore_state,
                     detect_version(compose_file),
                     detect_basic_auth_enabled(nginx_conf),
-                    f"openclaw_{user_id}",
+                    runtime_identifier,
                     access_url,
                     admin_url,
-                    str(user_dir),
+                    str(data_path),
                     str(nginx_conf),
                     created_at,
                     now,
                     now if status == "deleted" else None,
             ),
         )
+        instance_id = conn.execute(
+            "SELECT id FROM instances WHERE legacy_user_id = ?", (user_id,)
+        ).fetchone()[0]
         imported += 1
 
         if port is not None:
             port_status = "released" if status == "deleted" else "allocated"
             conn.execute(
                 """
-                    INSERT INTO ports (port, user_id, status, created_at, released_at)
+                    INSERT INTO ports (port, instance_id, status, created_at, released_at)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(port) DO UPDATE SET
-                        user_id = excluded.user_id,
+                        instance_id = excluded.instance_id,
                         status = excluded.status,
                         created_at = excluded.created_at,
                         released_at = excluded.released_at
                 """,
-                (port, user_id, port_status, created_at, now if port_status == "released" else None),
+                (port, instance_id, port_status, created_at, now if port_status == "released" else None),
+            )
+            conn.execute(
+                """
+                    INSERT INTO instance_endpoints (
+                        instance_id, endpoint_type, external_port, access_url,
+                        status, created_at, updated_at
+                    ) VALUES (?, 'legacy_port', ?, ?, ?, ?, ?)
+                    ON CONFLICT(instance_id, endpoint_type) DO UPDATE SET
+                        external_port = excluded.external_port,
+                        access_url = excluded.access_url,
+                        status = excluded.status,
+                        updated_at = excluded.updated_at
+                """,
+                (
+                    instance_id,
+                    port,
+                    access_url,
+                    "inactive" if status == "deleted" else "active",
+                    created_at,
+                    now,
+                ),
             )
             ports += 1
 

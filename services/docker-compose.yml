@@ -39,12 +39,9 @@ services:
     volumes:
       - ${MODEL_PROXY_TOKEN_DIR:-/data/docker/openclaw-public/model-proxy-tokens}:${MODEL_PROXY_TOKEN_DIR:-/data/docker/openclaw-public/model-proxy-tokens}:ro
     networks:
-      - agent-net
       - manager-net
 
 
 networks:
-  agent-net:
-    external: true
   manager-net:
     external: true

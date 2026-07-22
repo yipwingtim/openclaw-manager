@@ -14,9 +14,16 @@ NETWORK_HELPER = ROOT_DIR / "scripts" / "lib_tenant_network.sh"
 NETWORK_ALLOCATOR = ROOT_DIR / "scripts" / "tenant_network_allocator.py"
 MIGRATION_SCRIPT = ROOT_DIR / "scripts" / "migrate_tenant_networks.sh"
 COMPOSE_TEMPLATE = ROOT_DIR / "templates" / "docker-compose.tpl.yml"
+SERVICES_COMPOSE = ROOT_DIR / "services" / "docker-compose.yml"
 
 
 class TenantNetworkIsolationTests(unittest.TestCase):
+    def test_manager_services_do_not_join_legacy_agent_network(self):
+        compose = SERVICES_COMPOSE.read_text(encoding="utf-8")
+
+        self.assertNotIn("agent-net", compose)
+        self.assertIn("- manager-net", compose)
+
     def test_tenant_network_name_does_not_collapse_distinct_ids(self):
         result = subprocess.run(
             [

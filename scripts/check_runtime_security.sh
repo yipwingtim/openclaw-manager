@@ -213,6 +213,16 @@ if has_cmd docker; then
       else
         error "user container is missing tenant network: $container -> $tenant_network"
       fi
+      if container_has_network "$NGINX_CONTAINER_NAME" "$tenant_network"; then
+        ok "$NGINX_CONTAINER_NAME is attached to tenant network: $tenant_network"
+      else
+        error "$NGINX_CONTAINER_NAME is missing tenant network: $tenant_network"
+      fi
+      if container_has_network "$MODEL_PROXY_CONTAINER_NAME" "$tenant_network"; then
+        ok "$MODEL_PROXY_CONTAINER_NAME is attached to tenant network: $tenant_network"
+      else
+        error "$MODEL_PROXY_CONTAINER_NAME is missing tenant network: $tenant_network"
+      fi
     done <<EOF
 $user_containers
 EOF

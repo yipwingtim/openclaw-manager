@@ -15,6 +15,8 @@ NETWORK_ALLOCATOR = ROOT_DIR / "scripts" / "tenant_network_allocator.py"
 MIGRATION_SCRIPT = ROOT_DIR / "scripts" / "migrate_tenant_networks.sh"
 COMPOSE_TEMPLATE = ROOT_DIR / "templates" / "docker-compose.tpl.yml"
 SERVICES_COMPOSE = ROOT_DIR / "services" / "docker-compose.yml"
+DEPLOY_SERVICES = ROOT_DIR / "scripts" / "deploy_services.sh"
+RUNTIME_SECURITY_CHECK = ROOT_DIR / "scripts" / "check_runtime_security.sh"
 
 
 class TenantNetworkIsolationTests(unittest.TestCase):
@@ -23,6 +25,26 @@ class TenantNetworkIsolationTests(unittest.TestCase):
 
         self.assertNotIn("agent-net", compose)
         self.assertIn("- manager-net", compose)
+
+    def test_services_deploy_reconnects_shared_services_after_compose(self):
+        script = DEPLOY_SERVICES.read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index("docker compose up -d --build"),
+            script.index("connect_shared_services_to_tenant_networks"),
+        )
+
+    def test_runtime_check_verifies_shared_services_on_tenant_networks(self):
+        script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'container_has_network "$NGINX_CONTAINER_NAME" "$tenant_network"',
+            script,
+        )
+        self.assertIn(
+            'container_has_network "$MODEL_PROXY_CONTAINER_NAME" "$tenant_network"',
+            script,
+        )
 
     def test_tenant_network_name_does_not_collapse_distinct_ids(self):
         result = subprocess.run(

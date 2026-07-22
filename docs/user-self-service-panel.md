@@ -161,6 +161,12 @@ curl -I http://127.0.0.1:18082/users/<user_id>
 新建实例时，`scripts/create_user.sh` 会在用户 Nginx 配置中自动加入：
 
 ```nginx
+upstream manager_web_backend_<port> {
+    zone manager_web_backend_<port> 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    server openclaw-manager-web:8080 resolve;
+}
+
 location = /admin {
     return 302 /admin/;
 }
@@ -169,7 +175,7 @@ location /admin/ {
     auth_basic "OpenClaw Login";
     auth_basic_user_file /etc/nginx/auth/.htpasswd;
 
-    proxy_pass http://openclaw-manager-web:8080/instance-admin/;
+    proxy_pass http://manager_web_backend_<port>/instance-admin/;
 
     proxy_set_header X-OpenClaw-User "<user_id>";
 }
@@ -206,6 +212,13 @@ Nginx 配置文件：
 示例配置：
 
 ```nginx
+upstream manager_web_backend {
+    zone manager_web_backend 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    server openclaw-manager-web:8080 resolve;
+}
+
 server {
     listen 30015 ssl;
     server_name _;
@@ -219,7 +232,7 @@ server {
         auth_basic "OpenClaw Manager";
         auth_basic_user_file /etc/nginx/auth/.htpasswd;
 
-        proxy_pass http://openclaw-manager-web:8080;
+        proxy_pass http://manager_web_backend;
 
         proxy_buffering off;
         proxy_request_buffering off;

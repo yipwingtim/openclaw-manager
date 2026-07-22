@@ -71,7 +71,7 @@ else
       if [ "$config_dir" = "$NGINX_USERS_CONF_DIR" ]; then
         while IFS= read -r -d '' config_file; do
           config_files+=("$config_file")
-        done < <(find "$config_dir" -maxdepth 1 -type f -name '*.conf' ! -name 'manager-web.conf' -print0)
+        done < <(find "$config_dir" -maxdepth 1 -type f -name '*.conf' -print0)
       else
         while IFS= read -r -d '' config_file; do
           config_files+=("$config_file")
@@ -153,14 +153,45 @@ static_proxy = re.compile(
     r"(?P<host>[A-Za-z0-9_.-]+):(?P<port>[0-9]+)(?P<uri>/[^;\s]*)?;"
 )
 ipv4_address = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+manager_static_proxy = re.compile(
+    r"(?P<prefix>proxy_pass\s+http://)openclaw-manager-web:8080(?P<uri>/[^;\s]*)?;"
+)
+manager_upstream = (
+    "upstream manager_web_backend {\n"
+    "    zone manager_web_backend 64k;\n"
+    "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+    "    resolver_timeout 5s;\n"
+    "    server openclaw-manager-web:8080 resolve;\n"
+    "}\n\n"
+)
 
 updates = []
 for path in config_files:
+    text = path.read_text(encoding="utf-8")
+    if path.name == "manager-web.conf":
+        if (
+            "server openclaw-manager-web:8080 resolve;" in text
+            and "proxy_pass http://manager_web_backend" in text
+        ):
+            continue
+        if not manager_static_proxy.search(text):
+            if scan_mode == "bulk":
+                continue
+            raise SystemExit(f"Could not find manager-web upstream in {path}")
+        updated = manager_upstream + manager_static_proxy.sub(
+            lambda match: (
+                f'{match.group("prefix")}manager_web_backend'
+                f'{match.group("uri") or ""};'
+            ),
+            text,
+        )
+        updates.append((path, updated))
+        continue
+
     user_id = path.stem
     if not user_id_pattern.fullmatch(user_id):
         raise SystemExit(f"Invalid user config filename: {path.name}")
 
-    text = path.read_text(encoding="utf-8")
     root_match = root_location.search(text)
     root_body = root_match.group("body") if root_match else ""
     if (
@@ -250,7 +281,7 @@ if [ "$changed_count" -eq 0 ]; then
   migration_active=0
   trap - EXIT INT TERM
   rmdir "$backup_dir"
-  echo "[INFO] All Nginx user upstreams already use Docker DNS"
+  echo "[INFO] All Nginx upstreams already use Docker DNS"
   exit 0
 fi
 
@@ -266,5 +297,5 @@ fi
 
 migration_active=0
 trap - EXIT INT TERM
-echo "[INFO] Migrated $changed_count Nginx user config(s) to Docker DNS upstreams"
+echo "[INFO] Migrated $changed_count Nginx config(s) to Docker DNS upstreams"
 echo "[INFO] Backup: $backup_dir"

@@ -13,11 +13,26 @@ from tempfile import TemporaryDirectory
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CREATE_USER_SCRIPT = ROOT_DIR / "scripts" / "create_user.sh"
 MIGRATE_SCRIPT = ROOT_DIR / "scripts" / "migrate_nginx_upstreams.sh"
+MANAGER_TEMPLATE = ROOT_DIR / "templates" / "nginx" / "manager-web.conf.tpl"
+DEPLOY_SERVICES = ROOT_DIR / "scripts" / "deploy_services.sh"
 CHECKER = runpy.run_path(str(ROOT_DIR / "scripts" / "check_metadata_consistency.py"))
 detect_nginx_conf = CHECKER["detect_nginx_conf"]
 
 
 class NginxDynamicUpstreamTests(unittest.TestCase):
+    def test_manager_web_template_uses_runtime_resolved_upstream(self):
+        template = MANAGER_TEMPLATE.read_text(encoding="utf-8")
+
+        self.assertIn("upstream manager_web_backend {", template)
+        self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", template)
+        self.assertIn("server openclaw-manager-web:8080 resolve;", template)
+        self.assertIn("proxy_pass http://manager_web_backend/admin/;", template)
+
+    def test_services_deploy_migrates_nginx_upstreams(self):
+        script = DEPLOY_SERVICES.read_text(encoding="utf-8")
+
+        self.assertIn('bash "$SCRIPT_DIR/migrate_nginx_upstreams.sh"', script)
+
     def make_manager(self, root):
         manager = root / "manager"
         (manager / "scripts").mkdir(parents=True)
@@ -179,7 +194,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             self.assertIn("already use Docker DNS", repeated.stdout)
 
 
-    def test_bulk_migration_skips_manager_web_config(self):
+    def test_bulk_migration_converts_manager_web_config(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             manager = self.make_manager(root)
@@ -190,6 +205,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             manager_config = conf_dir / "manager-web.conf"
             manager_text = (
                 "location / {\n"
+                '    proxy_set_header X-OpenClaw-Internal-Token "secret";\n'
                 "    proxy_pass http://openclaw-manager-web:8080;\n"
                 "}\n"
             )
@@ -203,11 +219,20 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             result = self.run_migration(manager, root)
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(manager_config.read_text(encoding="utf-8"), manager_text)
+            migrated_manager = manager_config.read_text(encoding="utf-8")
+            self.assertIn("upstream manager_web_backend {", migrated_manager)
+            self.assertIn(
+                "server openclaw-manager-web:8080 resolve;", migrated_manager
+            )
+            self.assertIn("proxy_pass http://manager_web_backend;", migrated_manager)
+            self.assertIn(
+                'proxy_set_header X-OpenClaw-Internal-Token "secret";',
+                migrated_manager,
+            )
             migrated_user = user_config.read_text(encoding="utf-8")
             self.assertIn("server openclaw_alice:18789 resolve;", migrated_user)
             self.assertIn("proxy_pass http://agent_alice_1;", migrated_user)
-            self.assertIn("Migrated 1 Nginx user config(s)", result.stdout)
+            self.assertIn("Migrated 2 Nginx config(s)", result.stdout)
 
     def test_bulk_migration_converts_evoscientist_multi_port_config(self):
         with TemporaryDirectory() as temp_dir:
@@ -251,7 +276,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             self.assertEqual(migrated.count("evoscientist_evosci-test001:4716 resolve;"), 1)
             self.assertIn("proxy_pass http://agent_evosci_test001_1;", migrated)
             self.assertIn("proxy_pass http://agent_evosci_test001_2/;", migrated)
-            self.assertIn("Migrated 2 Nginx user config(s)", result.stdout)
+            self.assertIn("Migrated 2 Nginx config(s)", result.stdout)
 
     def test_restores_original_configs_when_nginx_test_fails(self):
         with TemporaryDirectory() as temp_dir:

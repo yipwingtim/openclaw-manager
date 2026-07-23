@@ -35,6 +35,23 @@ EOF
   fi
 }
 
+render_instance_admin_provider_guard() {
+  local provider="${1:-nginx-basic}"
+  local public_host="${2:-}"
+  case "$provider" in
+    nginx-basic)
+      return 0
+      ;;
+    local)
+      [ -n "$public_host" ] || return 1
+      printf '        return 302 https://%s:30015/; # managed-by-openclaw-manager-auth\n' "$public_host"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 nginx_user_htpasswd_file() {
   local user_id="$1"
   local htpasswd_file="$2"

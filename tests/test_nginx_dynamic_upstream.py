@@ -26,7 +26,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         self.assertIn("upstream manager_web_backend {", template)
         self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", template)
         self.assertIn("server openclaw-manager-web:8080 resolve;", template)
-        self.assertIn("proxy_pass http://manager_web_backend/admin/;", template)
+        self.assertIn("proxy_pass http://manager_web_backend;", template)
 
     def test_services_deploy_migrates_nginx_upstreams(self):
         script = DEPLOY_SERVICES.read_text(encoding="utf-8")

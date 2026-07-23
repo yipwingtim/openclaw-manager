@@ -30,7 +30,11 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         script = DEPLOY_SERVICES.read_text(encoding="utf-8")
 
         self.assertLess(
-            script.index("docker compose up -d --build"),
+            script.index("docker compose build"),
+            script.index("docker compose up -d --no-build"),
+        )
+        self.assertLess(
+            script.index("docker compose up -d --no-build"),
             script.index("connect_shared_services_to_tenant_networks"),
         )
 

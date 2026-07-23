@@ -14,15 +14,10 @@ server {
 
     client_max_body_size 20M;
 
-    auth_basic "OpenClaw Login";
-    auth_basic_user_file {{NGINX_HTPASSWD_FILE_IN_CONTAINER}};
+{{MANAGER_NGINX_AUTH_DIRECTIVES}}
 
-    location = /admin {
-        return 302 /admin/;
-    }
-
-    location /admin/ {
-        proxy_pass http://manager_web_backend/admin/;
+    location / {
+        proxy_pass http://manager_web_backend;
 
         proxy_buffering off;
         proxy_request_buffering off;
@@ -34,6 +29,7 @@ server {
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Remote-User $remote_user;
+{{MANAGER_INTERNAL_TOKEN_HEADER}}
 
         proxy_read_timeout 300;
         proxy_send_timeout 300;

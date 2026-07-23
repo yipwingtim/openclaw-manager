@@ -98,6 +98,27 @@ class UserDetailAccessTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.public_dir = Path(self._tmp.name)
         self.app_module.PUBLIC_DIR = self.public_dir
+        self.app_module.MANAGER_DIR = ROOT_DIR
+        self.app_module.MANAGER_AUTH_PROVIDER = "nginx-basic"
+        self.app_module.metadata_store.DB_FILE = self.public_dir / "manager.db"
+        self.app_module.metadata_store.initialize(
+            schema_file=ROOT_DIR / "db" / "schema.sql"
+        )
+        self.app_module.metadata_store.upsert_instance(
+            user_id="alice",
+            container_name="openclaw_alice",
+            data_path=str(self.public_dir / "users" / "alice"),
+        )
+        alice = self.app_module.metadata_store.get_user_by_username("alice")
+        self.app_module.metadata_store.upsert_identity(
+            alice["id"], "nginx-basic", "alice", "alice"
+        )
+        for username, role in (("attacker", "user"), ("openclaw", "admin")):
+            user = self.app_module.metadata_store.create_user(username)
+            self.app_module.metadata_store.upsert_identity(
+                user["id"], "nginx-basic", username, username
+            )
+            self.app_module.metadata_store.set_user_role(user["id"], role)
         # Keep the admin set predictable so our "attacker" actor is never admin.
         self.app_module.ADMIN_USERS = {"openclaw"}
 
@@ -160,8 +181,8 @@ class UserDetailAccessTests(unittest.TestCase):
         self.assertEqual(response[1], 403)
 
     def test_self_access_passes_permission_then_reveals_missing_user(self):
-        # Sanity check: when permission passes (actor == target), the existence
-        # check runs and a missing user yields 404 rather than 403.
+        # Ownership is established through instances.owner_user_id rather than
+        # by comparing the proxy username with a URL segment.
         with self._with_actor("alice"):
             response = self.app_module.user_detail("alice")
 
@@ -172,6 +193,30 @@ class UserDetailAccessTests(unittest.TestCase):
             response = self.app_module.user_detail("missing-admin-target")
 
         self.assertEqual(response[1], 404)
+
+    def test_provider_switch_invalidates_local_session(self):
+        alice = self.app_module.metadata_store.get_user_by_username("alice")
+        self.app_module.metadata_store.upsert_identity(
+            alice["id"], "local", "alice", "alice"
+        )
+        token = "local-session-token"
+        self.app_module.metadata_store.create_session(
+            self.app_module.token_hash(token),
+            alice["id"],
+            "local",
+            "csrf-token",
+            "2999-01-01T00:00:00+00:00",
+        )
+        self.app_module.MANAGER_AUTH_PROVIDER = "local"
+        with patch.object(self.app_module.request, "cookies", {self.app_module.MANAGER_SESSION_COOKIE: token}, create=True):
+            self.assertEqual(self.app_module.get_actor_user_record()["id"], alice["id"])
+
+            self.app_module.MANAGER_AUTH_PROVIDER = "nginx-basic"
+            with self._with_actor("alice"):
+                self.assertEqual(self.app_module.get_actor_user_record()["id"], alice["id"])
+
+            self.app_module.MANAGER_AUTH_PROVIDER = "local"
+            self.assertIsNone(self.app_module.get_actor_user_record())
 
 
 if __name__ == "__main__":

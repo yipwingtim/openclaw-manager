@@ -109,6 +109,7 @@ sudo -E python3 scripts/check_metadata_consistency.py
 - [用户自助面板](docs/user-self-service-panel.md)
 - [EvoScientist 适配器](docs/evoscientist-adapter.md)
 - [模型代理部署](docs/deployment/model-proxy.md)
+- [Manager Web 认证](docs/deployment/local-auth.md)
 - [元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [元数据数据字典](docs/architecture/metadata-data-dictionary.md)
 - [项目路线图](docs/architecture/roadmap.md)

@@ -578,6 +578,12 @@
           {% endif %}
           <div class="sidebar-nav-extra">
             {% block nav_right %}{% endblock %}
+            {% if current_user and auth_provider == "local" %}
+              <form method="post" action="/logout" class="mt-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="btn btn-sm btn-oc-outline" type="submit">退出登录</button>
+              </form>
+            {% endif %}
           </div>
         </div>
         <div class="sidebar-footer">
@@ -595,6 +601,15 @@
       </div>
     </div>
     <script>
+      document.querySelectorAll('form[method="post"], form[method="POST"]').forEach(function(form) {
+        if (!form.querySelector('input[name="csrf_token"]')) {
+          var input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'csrf_token';
+          input.value = {{ csrf_token|default("")|tojson }};
+          form.appendChild(input);
+        }
+      });
       (function() {
         var sidebar = document.getElementById('ocSidebar');
         var appLayout = document.querySelector('.app-layout');

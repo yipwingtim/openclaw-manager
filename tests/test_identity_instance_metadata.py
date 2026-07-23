@@ -66,6 +66,59 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "normalized username collision"):
             self.store.create_user("alice", db_file=self.db_file)
 
+    def test_local_identity_and_server_session_map_to_one_user(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        self.store.upsert_identity(user["id"], "local", "alice", "Alice", db_file=self.db_file)
+        self.store.set_local_credential(user["id"], "scrypt:test", db_file=self.db_file)
+        self.store.create_session(
+            "token-hash",
+            user["id"],
+            "local",
+            "csrf-token",
+            "2999-01-01T00:00:00+00:00",
+            db_file=self.db_file,
+        )
+
+        identity_user = self.store.get_user_by_identity("local", "alice", db_file=self.db_file)
+        session = self.store.get_session("token-hash", db_file=self.db_file)
+
+        self.assertEqual(identity_user["id"], user["id"])
+        self.assertEqual(session["id"], user["id"])
+        self.assertEqual(session["provider"], "local")
+        self.assertEqual(session["csrf_token"], "csrf-token")
+
+    def test_switching_auth_provider_invalidates_existing_sessions(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        self.store.activate_auth_provider("local", db_file=self.db_file)
+        self.store.create_session(
+            "token-hash",
+            user["id"],
+            "local",
+            "csrf-token",
+            "2999-01-01T00:00:00+00:00",
+            db_file=self.db_file,
+        )
+
+        self.store.activate_auth_provider("nginx-basic", db_file=self.db_file)
+
+        self.assertIsNone(self.store.get_session("token-hash", db_file=self.db_file))
+
+    def test_restarting_with_same_provider_preserves_sessions(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        self.store.activate_auth_provider("local", db_file=self.db_file)
+        self.store.create_session(
+            "token-hash",
+            user["id"],
+            "local",
+            "csrf-token",
+            "2999-01-01T00:00:00+00:00",
+            db_file=self.db_file,
+        )
+
+        self.store.activate_auth_provider("local", db_file=self.db_file)
+
+        self.assertIsNotNone(self.store.get_session("token-hash", db_file=self.db_file))
+
     def test_runtime_identifier_is_globally_unique(self):
         alice = self.store.create_user("alice", db_file=self.db_file)
         bob = self.store.create_user("bob", db_file=self.db_file)

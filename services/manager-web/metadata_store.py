@@ -3,7 +3,7 @@ import sqlite3
 import unicodedata
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -42,9 +42,9 @@ def initialize(db_file=None, schema_file=None):
         ).fetchone()
         if migration_table:
             version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0
-            if version < 2:
+            if version < 3:
                 raise RuntimeError(
-                    "metadata schema version 1 requires scripts/migrate_identity_instance_model.py"
+                    "metadata schema requires scripts/migrate_local_auth_model.py"
                 )
         conn.executescript(schema)
 
@@ -57,6 +57,204 @@ def row_to_dict(row):
 
 def normalize_username(value):
     return unicodedata.normalize("NFKC", value).casefold()
+
+
+def get_user_by_username(username, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        return row_to_dict(
+            active_conn.execute(
+                "SELECT * FROM users WHERE normalized_username = ?",
+                (normalize_username(username),),
+            ).fetchone()
+        )
+
+
+def get_user_by_identity(provider, subject, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        return row_to_dict(
+            active_conn.execute(
+                """
+                SELECT u.*
+                FROM users u
+                JOIN user_identities i ON i.user_id = u.id
+                WHERE i.provider = ? AND i.subject = ?
+                """,
+                (provider, subject),
+            ).fetchone()
+        )
+
+
+def upsert_identity(user_id, provider, subject, external_username=None, db_file=None, conn=None):
+    now = utc_now()
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            """
+            INSERT INTO user_identities (
+                user_id, provider, subject, external_username, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, subject) DO UPDATE SET
+                external_username = excluded.external_username,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, provider, subject, external_username, now, now),
+        )
+        owner = active_conn.execute(
+            "SELECT user_id FROM user_identities WHERE provider = ? AND subject = ?",
+            (provider, subject),
+        ).fetchone()["user_id"]
+        if owner != user_id:
+            raise ValueError("identity is already linked to another user")
+
+
+def set_user_role(user_id, role, db_file=None, conn=None):
+    if role not in {"admin", "user"}:
+        raise ValueError("invalid role")
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            "UPDATE users SET role = ?, updated_at = ? WHERE id = ?",
+            (role, utc_now(), user_id),
+        )
+
+
+def set_local_credential(user_id, password_hash, db_file=None, conn=None):
+    now = utc_now()
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            """
+            INSERT INTO local_credentials (
+                user_id, password_hash, password_changed_at,
+                failed_login_count, locked_until, created_at, updated_at
+            ) VALUES (?, ?, ?, 0, NULL, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                password_hash = excluded.password_hash,
+                password_changed_at = excluded.password_changed_at,
+                failed_login_count = 0,
+                locked_until = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, password_hash, now, now, now),
+        )
+
+
+def get_local_credential(user_id, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        return row_to_dict(
+            active_conn.execute(
+                "SELECT * FROM local_credentials WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        )
+
+
+def record_login_failure(user_id, max_failures=5, lock_minutes=15, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        credential = active_conn.execute(
+            "SELECT failed_login_count FROM local_credentials WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if credential is None:
+            return
+        failures = credential["failed_login_count"] + 1
+        locked_until = None
+        if failures >= max_failures:
+            locked_until = (datetime.now(timezone.utc) + timedelta(minutes=lock_minutes)).replace(microsecond=0).isoformat()
+            failures = 0
+        active_conn.execute(
+            "UPDATE local_credentials SET failed_login_count = ?, locked_until = ?, updated_at = ? WHERE user_id = ?",
+            (failures, locked_until, utc_now(), user_id),
+        )
+
+
+def reset_login_failures(user_id, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            "UPDATE local_credentials SET failed_login_count = 0, locked_until = NULL, updated_at = ? WHERE user_id = ?",
+            (utc_now(), user_id),
+        )
+
+
+def create_session(token_hash, user_id, provider, csrf_token, expires_at, db_file=None, conn=None):
+    now = utc_now()
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (now,))
+        active_conn.execute(
+            """
+            INSERT INTO user_sessions (
+                token_hash, user_id, provider, csrf_token, expires_at, created_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (token_hash, user_id, provider, csrf_token, expires_at, now, now),
+        )
+
+
+def get_session(token_hash, db_file=None, conn=None):
+    now = utc_now()
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        row = active_conn.execute(
+            """
+            SELECT s.token_hash, s.provider, s.csrf_token, s.expires_at,
+                   u.id, u.public_id, u.username, u.normalized_username,
+                   u.display_name, u.email, u.role, u.status
+            FROM user_sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ? AND s.expires_at > ?
+            """,
+            (token_hash, now),
+        ).fetchone()
+        return row_to_dict(row)
+
+
+def delete_session(token_hash, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute("DELETE FROM user_sessions WHERE token_hash = ?", (token_hash,))
+
+
+def activate_auth_provider(provider, db_file=None, conn=None):
+    """Record the active provider and invalidate sessions when it changes."""
+    now = utc_now()
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            """
+            INSERT OR IGNORE INTO auth_settings (key, value, updated_at)
+            VALUES ('active_provider', ?, ?)
+            """,
+            (provider, now),
+        )
+        row = active_conn.execute(
+            "SELECT value FROM auth_settings WHERE key = 'active_provider'"
+        ).fetchone()
+        previous = row["value"]
+        if previous == provider:
+            return False
+        active_conn.execute("DELETE FROM user_sessions")
+        active_conn.execute(
+            "UPDATE auth_settings SET value = ?, updated_at = ? WHERE key = 'active_provider'",
+            (provider, now),
+        )
+        return True
 
 
 def ensure_legacy_user(username, conn):
@@ -548,6 +746,9 @@ def table_counts(conn=None):
     tables = [
         "users",
         "user_identities",
+        "local_credentials",
+        "user_sessions",
+        "auth_settings",
         "instances",
         "instance_endpoints",
         "ports",

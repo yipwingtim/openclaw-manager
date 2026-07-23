@@ -7,13 +7,15 @@
 
 ## 项目简介
 
-OpenClaw Manager 在不修改上游应用代码的前提下，为每个用户开通并管理独立的 AI 智能体实例。项目整合了容器生命周期自动化、Nginx 路由、访问认证、元数据跟踪和 Web 管理界面，适用于私有化平台、高校、实验室和组织内部 AI 服务。
+OpenClaw Manager 在不修改上游应用代码的前提下开通并管理相互隔离的 AI 智能体实例。元数据模型已经将平台用户、认证身份和实例拆分为独立实体，允许一个平台用户拥有多个产品实例，同时兼容现有 OpenClaw 部署。
 
 目前主要管理 OpenClaw 实例；适配器层也已支持对登记后的现有 EvoScientist 实例执行生命周期管理。当前能力范围请参阅 [EvoScientist 适配器](docs/evoscientist-adapter.md)。
 
 ## 核心特性
 
 - **按用户隔离：** 每个用户拥有独立的容器、工作区、配置和运行状态。
+- **身份与实例解耦：** 平台用户、登录身份和托管实例使用独立 ID 和关系模型。
+- **可切换管理端认证：** 支持 Nginx Basic Auth 或 Local 登录；多个身份可以映射到同一平台用户，但同时只启用一个 Provider。
 - **生命周期管理：** 支持创建、启动、停止、重启、升级、回收和恢复实例。
 - **Web 管理：** 统一管理用户、状态、认证、Skills 和常用运维操作。
 - **稳定反向代理：** 使用独立 HTTPS 端口和基于 Docker DNS 的 Nginx 上游。
@@ -31,7 +33,7 @@ OpenClaw Manager 在不修改上游应用代码的前提下，为每个用户开
                          +----------+---------+
                                     |
                                     v
-用户 -> HTTPS 独立端口 -> Nginx -> agent-net -> 用户实例容器
+用户 -> HTTPS 独立端口 -> Nginx -> 每实例独立租户网络 -> 用户实例容器
                                     |
                                     +----------> OpenClaw
                                     +----------> EvoScientist
@@ -110,6 +112,7 @@ sudo -E python3 scripts/check_metadata_consistency.py
 - [EvoScientist 适配器](docs/evoscientist-adapter.md)
 - [模型代理部署](docs/deployment/model-proxy.md)
 - [Manager Web 认证](docs/deployment/local-auth.md)
+- [用户、身份与实例迁移](docs/architecture/user-identity-instance-migration.md)
 - [元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [元数据数据字典](docs/architecture/metadata-data-dictionary.md)
 - [项目路线图](docs/architecture/roadmap.md)

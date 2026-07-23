@@ -20,6 +20,8 @@ cd "$MANAGER_DIR/services"
 
 docker compose up -d --build
 
+bash "$SCRIPT_DIR/update_manager_auth.sh"
+
 connect_shared_services_to_tenant_networks \
   "${NGINX_CONTAINER_NAME:-openclaw-nginx}" \
   "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"

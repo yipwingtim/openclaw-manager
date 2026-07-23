@@ -174,6 +174,24 @@ NGINX_LOGS_DIR="${NGINX_LOGS_DIR:-/data/docker/nginx/logs}"
 NGINX_HTPASSWD_FILE_IN_CONTAINER="${NGINX_HTPASSWD_FILE_IN_CONTAINER:-/etc/nginx/auth/.htpasswd}"
 NGINX_SSL_CERT="${NGINX_SSL_CERT:-/etc/nginx/certs/openclaw.crt}"
 NGINX_SSL_KEY="${NGINX_SSL_KEY:-/etc/nginx/certs/openclaw.key}"
+MANAGER_AUTH_PROVIDER="${MANAGER_AUTH_PROVIDER:-nginx-basic}"
+
+case "$MANAGER_AUTH_PROVIDER" in
+  nginx-basic)
+    MANAGER_NGINX_AUTH_DIRECTIVES="    auth_basic \"OpenClaw Manager\";
+    auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;"
+    ;;
+  local)
+    MANAGER_NGINX_AUTH_DIRECTIVES="    auth_basic off;"
+    ;;
+  *)
+    fail "Unsupported MANAGER_AUTH_PROVIDER during bootstrap: $MANAGER_AUTH_PROVIDER"
+    ;;
+esac
+MANAGER_INTERNAL_TOKEN_HEADER=""
+if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
+  MANAGER_INTERNAL_TOKEN_HEADER="        proxy_set_header X-OpenClaw-Internal-Token \"$OPENCLAW_INTERNAL_TOKEN\";"
+fi
 
 export NGINX_CONF_DIR
 export NGINX_CERTS_DIR
@@ -182,6 +200,8 @@ export NGINX_AUTH_DIR
 export NGINX_SSL_CERT
 export NGINX_SSL_KEY
 export NGINX_HTPASSWD_FILE_IN_CONTAINER
+export MANAGER_NGINX_AUTH_DIRECTIVES
+export MANAGER_INTERNAL_TOKEN_HEADER
 
 mkdir_or_sudo "$OPENCLAW_PUBLIC_DIR/users"
 mkdir_or_sudo "$OPENCLAW_PUBLIC_DIR/deleted"

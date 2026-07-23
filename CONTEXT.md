@@ -12,6 +12,10 @@ A login identity issued by one authentication provider. It is uniquely
 identified by `(provider, subject)` and maps to exactly one User. Usernames,
 email addresses, and display names are not identity keys.
 
+Binding an identity does not enable it. OpenClaw Manager activates exactly one
+authentication provider at a time; every accepted identity still resolves to
+the same internal User.
+
 ## Instance
 
 One managed deployment of a product such as OpenClaw, Hermes, or EvoScientist.

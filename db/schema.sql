@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
     normalized_username TEXT NOT NULL UNIQUE,
     display_name TEXT,
     email TEXT,
+    role TEXT NOT NULL DEFAULT 'user'
+        CHECK (role IN ('admin', 'user')),
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'disabled', 'locked', 'deleted')),
     provisioning_source TEXT NOT NULL DEFAULT 'legacy',
@@ -32,6 +34,37 @@ CREATE TABLE IF NOT EXISTS user_identities (
     last_login_at TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE (provider, subject)
+);
+
+CREATE TABLE IF NOT EXISTS local_credentials (
+    user_id INTEGER PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    password_changed_at TEXT NOT NULL,
+    failed_login_count INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    csrf_token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS instances (
@@ -137,4 +170,4 @@ CREATE INDEX IF NOT EXISTS idx_operation_records_instance_id ON operation_record
 CREATE INDEX IF NOT EXISTS idx_operation_records_action ON operation_records(action);
 
 INSERT OR IGNORE INTO schema_migrations (version, name)
-VALUES (2, 'user_identity_instance_model');
+VALUES (3, 'local_auth_session');

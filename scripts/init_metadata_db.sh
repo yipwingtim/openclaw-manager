@@ -38,10 +38,10 @@ with sqlite3.connect(db_file) as conn:
     ).fetchone()
     if migration_table:
         version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0
-        if version < 2:
+        if version < 3:
             raise SystemExit(
-                "[ERROR] Metadata schema v1 requires: "
-                "python3 scripts/migrate_identity_instance_model.py --db <path> --dry-run"
+                "[ERROR] Metadata schema requires: "
+                "python3 scripts/migrate_local_auth_model.py --db <path>"
             )
     conn.executescript(schema)
     conn.commit()

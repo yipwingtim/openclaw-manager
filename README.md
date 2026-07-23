@@ -109,6 +109,7 @@ Runtime paths are configurable in `config/openclaw-manager.env` and intentionall
 - [User Self-Service Panel](docs/user-self-service-panel.md)
 - [EvoScientist Adapter](docs/evoscientist-adapter.md)
 - [Model Proxy Deployment](docs/deployment/model-proxy.md)
+- [Manager Web Authentication](docs/deployment/local-auth.md)
 - [Metadata Storage Plan](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary](docs/architecture/metadata-data-dictionary.md)
 - [Roadmap](docs/architecture/roadmap.md)

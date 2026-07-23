@@ -7,8 +7,11 @@ import csv
 import io
 import threading
 import hmac
+import hashlib
+import secrets
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -27,6 +30,10 @@ NGINX_COMPOSE_DIR = Path(os.environ.get("NGINX_COMPOSE_DIR", "/data/docker/nginx
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
 NGINX_CONTAINER_NAME = os.environ.get("NGINX_CONTAINER_NAME", "openclaw-nginx")
 OPENCLAW_INTERNAL_TOKEN = os.environ.get("OPENCLAW_INTERNAL_TOKEN", "").strip()
+MANAGER_AUTH_PROVIDER = os.environ.get("MANAGER_AUTH_PROVIDER", "nginx-basic").strip()
+MANAGER_SESSION_COOKIE = "openclaw_manager_session"
+MANAGER_SESSION_HOURS = int(os.environ.get("MANAGER_SESSION_HOURS", "8"))
+MANAGER_COOKIE_SECURE = os.environ.get("MANAGER_COOKIE_SECURE", "true").strip().lower() not in {"0", "false", "no"}
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
@@ -83,14 +90,54 @@ def require_internal_proxy_token():
     return None
 
 
+def token_hash(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def proxy_subject():
+    return (request.headers.get("X-Remote-User") or request.headers.get("X-Forwarded-User") or "").strip()
+
+
+def get_actor_user_record():
+    try:
+        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+        metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
+        if MANAGER_AUTH_PROVIDER == "nginx-basic":
+            subject = proxy_subject()
+            return metadata_store.get_user_by_identity("nginx-basic", subject) if subject else None
+        if MANAGER_AUTH_PROVIDER == "local":
+            raw_token = getattr(request, "cookies", {}).get(MANAGER_SESSION_COOKIE, "")
+            session = metadata_store.get_session(token_hash(raw_token)) if raw_token else None
+            if not session or session["provider"] != "local" or session["status"] != "active":
+                return None
+            return session
+    except Exception as exc:
+        app.logger.warning("Could not resolve authenticated user: %s", exc)
+    return None
+
+
+@app.before_request
+def require_csrf_token():
+    if MANAGER_AUTH_PROVIDER != "local" or request.method != "POST" or request.path == "/login":
+        return None
+    actor = get_actor_user_record()
+    provided = request.form.get("csrf_token", "")
+    if not actor or not provided or not hmac.compare_digest(provided, actor["csrf_token"]):
+        return forbidden("Forbidden: invalid CSRF token.")
+    return None
+
+
 @app.context_processor
 def inject_actor_context():
-    actor = get_actor_user()
-    actor_is_admin = is_admin_user(actor) if actor else False
+    actor_record = get_actor_user_record()
+    actor = actor_record["username"] if actor_record else ""
+    actor_is_admin = actor_record is not None and actor_record["role"] == "admin"
     return {
         "current_user": actor,
         "is_admin": actor_is_admin,
         "show_global_admin_nav": actor_is_admin,
+        "csrf_token": actor_record.get("csrf_token", "") if actor_record else "",
+        "auth_provider": MANAGER_AUTH_PROVIDER,
     }
 
 
@@ -149,7 +196,8 @@ def get_instance_product(user_id):
 
 
 def get_actor_user():
-    return (request.headers.get("X-Remote-User") or request.headers.get("X-Forwarded-User") or "").strip()
+    actor = get_actor_user_record()
+    return actor["username"] if actor else ""
 
 
 def get_instance_user():
@@ -157,8 +205,11 @@ def get_instance_user():
 
 
 def is_admin_user(user_id=None):
-    user_id = (user_id or get_actor_user()).strip()
-    return user_id in ADMIN_USERS
+    if user_id:
+        user = metadata_store.get_user_by_username(user_id)
+    else:
+        user = get_actor_user_record()
+    return user is not None and user["status"] == "active" and user["role"] == "admin"
 
 
 def forbidden(message="Forbidden"):
@@ -831,19 +882,20 @@ def load_account_record(user_id):
 
 
 def require_admin():
-    actor = get_actor_user()
-    if not actor or not is_admin_user(actor):
+    actor = get_actor_user_record()
+    if not actor or actor["status"] != "active" or actor["role"] != "admin":
         return forbidden("Forbidden: admin access required.")
     return None
 
 
 def require_instance_access(user_id, allow_admin=True):
-    actor = get_actor_user()
+    actor = get_actor_user_record()
     if not actor:
         return forbidden("Forbidden: missing authenticated user.")
-    if actor == user_id:
+    instance = metadata_store.get_instance(user_id)
+    if instance and instance["owner_user_id"] == actor["id"]:
         return None
-    if allow_admin and is_admin_user(actor):
+    if allow_admin and actor["role"] == "admin":
         return None
     return forbidden("Forbidden: you can only access your own instance.")
 
@@ -1694,6 +1746,95 @@ def delete_file_for_user(user_id, root_key, relative_path, instance_mode=False):
     return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message)
 
 
+@app.get("/login")
+def login_page():
+    if MANAGER_AUTH_PROVIDER != "local":
+        return render_template("error.html", message="Local login is disabled."), 404
+    if get_actor_user_record():
+        return redirect(url_for("index"))
+    login_csrf = secrets.token_urlsafe(32)
+    response = app.make_response(render_template("login.html", error="", login_csrf=login_csrf))
+    response.set_cookie(
+        "openclaw_manager_login_csrf",
+        login_csrf,
+        secure=MANAGER_COOKIE_SECURE,
+        httponly=True,
+        samesite="Lax",
+        max_age=600,
+    )
+    return response
+
+
+@app.post("/login")
+def login_submit():
+    from werkzeug.security import check_password_hash
+
+    if MANAGER_AUTH_PROVIDER != "local":
+        return render_template("error.html", message="Local login is disabled."), 404
+    metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+    metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
+    cookie_csrf = getattr(request, "cookies", {}).get("openclaw_manager_login_csrf", "")
+    form_csrf = request.form.get("csrf_token", "")
+    if not cookie_csrf or not form_csrf or not hmac.compare_digest(cookie_csrf, form_csrf):
+        return forbidden("Forbidden: invalid CSRF token.")
+
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    user = metadata_store.get_user_by_identity(
+        "local", metadata_store.normalize_username(username)
+    ) if username else None
+    credential = metadata_store.get_local_credential(user["id"]) if user else None
+    locked = False
+    if credential and credential.get("locked_until"):
+        try:
+            locked = datetime.fromisoformat(credential["locked_until"]) > datetime.now(timezone.utc)
+        except ValueError:
+            locked = True
+    valid = (
+        user is not None
+        and user["status"] == "active"
+        and credential is not None
+        and not locked
+        and check_password_hash(credential["password_hash"], password)
+    )
+    if not valid:
+        if user and credential and not locked:
+            metadata_store.record_login_failure(user["id"])
+        response = app.make_response(
+            render_template("login.html", error="Invalid username or password.", login_csrf=cookie_csrf)
+        )
+        return response, 401
+
+    metadata_store.reset_login_failures(user["id"])
+    raw_token = secrets.token_urlsafe(48)
+    csrf_token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=MANAGER_SESSION_HOURS)).replace(microsecond=0).isoformat()
+    metadata_store.create_session(
+        token_hash(raw_token), user["id"], "local", csrf_token, expires_at
+    )
+    response = redirect(url_for("index"))
+    response.set_cookie(
+        MANAGER_SESSION_COOKIE,
+        raw_token,
+        secure=MANAGER_COOKIE_SECURE,
+        httponly=True,
+        samesite="Lax",
+        max_age=MANAGER_SESSION_HOURS * 3600,
+    )
+    response.delete_cookie("openclaw_manager_login_csrf")
+    return response
+
+
+@app.post("/logout")
+def logout():
+    raw_token = getattr(request, "cookies", {}).get(MANAGER_SESSION_COOKIE, "")
+    if raw_token:
+        metadata_store.delete_session(token_hash(raw_token))
+    response = redirect(url_for("login_page"))
+    response.delete_cookie(MANAGER_SESSION_COOKIE)
+    return response
+
+
 @app.get("/")
 def index():
     actor = get_actor_user()
@@ -1701,6 +1842,8 @@ def index():
         return redirect(url_for("admin_users"))
     if actor:
         return redirect(url_for("my_instance"))
+    if MANAGER_AUTH_PROVIDER == "local":
+        return redirect(url_for("login_page"))
     return render_template("index.html", current_user="", is_admin=False)
 
 

@@ -185,7 +185,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
                 temp_dir,
             )
             self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
-            self.assertIn("already at schema version 3", repeated.stdout)
+            self.assertIn("already at schema version 4", repeated.stdout)
 
     def test_deleted_instance_without_recycle_payload_is_marked_incomplete(self):
         with tempfile.TemporaryDirectory() as temp_dir:

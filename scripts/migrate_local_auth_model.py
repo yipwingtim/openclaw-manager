@@ -34,8 +34,8 @@ def main():
             admins,
         ).fetchone()[0] if admins else 0
 
-    if version not in {2, 3}:
-        print(f"[ERROR] schema version 2 or 3 is required; found {version}")
+    if version not in {2, 3, 4}:
+        print(f"[ERROR] schema version 2, 3, or 4 is required; found {version}")
         return 1
 
     print(f"[PLAN] users={users} admins={matched_admins} provider=nginx-basic")
@@ -79,7 +79,7 @@ def main():
             "INSERT OR REPLACE INTO schema_migrations (version, name) VALUES (3, 'local_auth_session')"
         )
         conn.commit()
-    print("[INFO] Metadata migration to schema version 3 completed")
+    print("[INFO] Local authentication data migration completed")
     return 0
 
 

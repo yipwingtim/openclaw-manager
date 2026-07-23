@@ -2,22 +2,24 @@
 
 ## 1. 文档范围
 
-本文档描述当前 SQLite metadata schema v3。权威定义以
+本文档描述当前 SQLite metadata schema v4。权威定义以
 [`db/schema.sql`](../../db/schema.sql) 为准，生产迁移步骤见
 [`user-identity-instance-migration.md`](user-identity-instance-migration.md)。
 
-Schema v3 的核心关系为：
+Schema v4 的核心关系为：
 
 ```text
 users
 ├── user_identities
 ├── local_credentials
 ├── user_sessions
-└── instances
-    ├── instance_credentials
-    ├── instance_endpoints
-    ├── ports
-    └── operation_records
+├── instances
+│   ├── instance_members
+│   ├── instance_credentials
+│   ├── instance_endpoints
+│   ├── ports
+│   └── operation_records
+└── execution_jobs
 ```
 
 完整审计日志仍保存在：
@@ -52,7 +54,7 @@ users
 当前版本：
 
 ```text
-3 / local_auth_session
+4 / control_plane_model
 ```
 
 ## 4. `users`
@@ -129,6 +131,7 @@ UNIQUE(provider, subject)
 | `user_id` | integer | PK, FK → `users.id` | 平台用户 |
 | `password_hash` | text | required | scrypt 单向密码哈希 |
 | `password_changed_at` | text | required | 最近修改密码时间 |
+| `must_change_password` | integer | `0` / `1` | 下次登录是否必须修改密码 |
 | `failed_login_count` | integer | default `0` | 连续失败次数 |
 | `locked_until` | text | optional | 临时锁定截止时间 |
 | `created_at` | text | required | 创建时间 |
@@ -145,6 +148,7 @@ UNIQUE(provider, subject)
 | `token_hash` | text | primary key | 浏览器随机 Token 的 SHA-256 哈希 |
 | `user_id` | integer | FK → `users.id` | 登录用户 |
 | `provider` | text | required | 创建 Session 的 Provider |
+| `session_kind` | text | enum | `user`、`admin` 或 `emergency` |
 | `csrf_token` | text | required | POST 请求 CSRF Token |
 | `expires_at` | text | required | 过期时间 |
 | `created_at` | text | required | 创建时间 |
@@ -226,7 +230,25 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 这些约束允许一个用户拥有多个实例，同时防止运行时、目录和活动端口冲突。
 
-## 10. `instance_credentials`
+## 10. `instance_members`
+
+保存实例所有者之外的共享授权。
+
+| Field | Type | Constraint | Description |
+| --- | --- | --- | --- |
+| `id` | integer | primary key | 成员记录主键 |
+| `instance_id` | integer | FK → `instances.id` | 被共享实例 |
+| `user_id` | integer | FK → `users.id` | 被授权用户 |
+| `role` | text | enum | `manager`、`operator` 或 `viewer` |
+| `created_by_user_id` | integer | optional FK → `users.id` | 授权发起人 |
+| `created_at` | text | required | 创建时间 |
+| `updated_at` | text | required | 最近角色更新时间 |
+
+`UNIQUE(instance_id, user_id)` 防止重复授权。实例所有者只保存在
+`instances.owner_user_id`；触发器禁止将 owner 重复写入成员表，也禁止在
+所有权转移前保留新 owner 的成员记录。
+
+## 11. `instance_credentials`
 
 保存实例自身的认证信息摘要，与平台登录凭据分离。
 
@@ -242,7 +264,7 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 `local_credentials` 用于平台 Local 登录；`instance_credentials` 用于具体实例，两者不能混用。
 
-## 11. `instance_endpoints`
+## 12. `instance_endpoints`
 
 保存实例访问端点，使实例运行与外部入口解耦。
 
@@ -263,7 +285,7 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 独立端口目前仍用于兼容现有实例；未来子域名或统一 HTTPS 入口可增加新的 `endpoint_type`，不需要更换实例主键。
 
-## 12. `ports`
+## 13. `ports`
 
 记录独立端口的分配状态。
 
@@ -277,15 +299,17 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 `ports.txt` 仍是迁移期兼容文件。数据库记录、Nginx 实际监听和运行配置应通过一致性检查共同验证。
 
-## 13. `operation_records`
+## 14. `operation_records`
 
 保存平台操作摘要。
 
 | Field | Type | Constraint | Description |
 | --- | --- | --- | --- |
 | `id` | integer | primary key | 记录主键 |
+| `request_id` | text | unique when non-null | 与幂等任务关联的请求 ID |
 | `actor` | text | optional | 兼容的操作人文本 |
 | `actor_user_id` | integer | FK → `users.id` | 平台操作人 |
+| `source_service` | text | optional | 发起操作的内部服务 |
 | `action` | text | required | 操作类型 |
 | `user_id` | text | optional | 兼容的历史目标用户 |
 | `instance_id` | integer | FK → `instances.id` | 目标实例 |
@@ -302,7 +326,39 @@ success | failed | skipped | running
 
 新增业务逻辑应优先写入 `actor_user_id` 和 `instance_id`；`actor` 与 `user_id` 仅用于历史兼容。
 
-## 14. 删除与恢复规则
+## 15. `execution_jobs`
+
+保存需要 Executor 执行的持久化幂等任务。
+
+| Field | Type | Constraint | Description |
+| --- | --- | --- | --- |
+| `id` | integer | primary key | 任务主键 |
+| `request_id` | text | unique, required | 幂等请求 ID |
+| `parent_request_id` | text | optional FK | 重试所关联的原任务 |
+| `actor_user_id` | integer | optional FK → `users.id` | 发起人 |
+| `instance_id` | integer | optional FK → `instances.id` | 目标实例 |
+| `action` | text | required | 白名单动作名 |
+| `params_json` | text | required | 经 Control 校验的结构化参数 |
+| `status` | text | enum | 任务状态 |
+| `current_step` | text | optional | 当前安全步骤 |
+| `heartbeat_at` | text | optional | Executor 最近心跳 |
+| `error_summary` | text | optional | 脱敏失败摘要 |
+| `output` | text | optional | 有大小上限的脱敏输出 |
+| `created_at` / `updated_at` | text | required | 创建和更新时间 |
+| `started_at` / `finished_at` | text | optional | 执行时间 |
+
+任务状态：
+
+```text
+queued | running | succeeded | failed | partial_failure | interrupted | cancelled
+```
+
+`queued` 只能进入 `running` 或 `cancelled`；`running` 可刷新心跳并进入任一终态；
+终态不能重新打开，重试必须创建新的 `request_id` 并设置 `parent_request_id`。
+
+重复 `request_id` 只能返回语义完全相同的原任务；不得用于另一动作或实例。
+
+## 16. 删除与恢复规则
 
 - 删除实例不会删除其 `users`、`instances` 或历史操作记录。
 - 可恢复性由 `instances.restore_state` 决定，不根据页面或 Docker 状态临时猜测。
@@ -310,7 +366,7 @@ success | failed | skipped | running
 - 已删除实例的端点应标记为 `inactive`，端口可以进入 `released`。
 - 删除平台用户前必须先处理其仍有关联的实例。
 
-## 15. 一致性验证
+## 17. 一致性验证
 
 数据库变更或生产迁移后至少执行：
 
@@ -326,4 +382,4 @@ SELECT MAX(version) FROM schema_migrations;
 PRAGMA foreign_key_check;
 ```
 
-预期 Schema 版本为 `3`，`PRAGMA foreign_key_check` 返回空结果。
+预期 Schema 版本为 `4`，`PRAGMA foreign_key_check` 返回空结果。

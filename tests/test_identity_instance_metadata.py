@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -60,6 +62,114 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
         )
         self.assertTrue(all(row["owner_user_id"] == user["id"] for row in instances))
 
+    def test_user_lists_owned_and_shared_instances_with_access_role(self):
+        owner = self.store.create_user("owner", db_file=self.db_file)
+        member = self.store.create_user("member", db_file=self.db_file)
+        owned = self.store.create_instance(
+            owner_public_id=member["public_id"],
+            product="openclaw",
+            instance_name="Owned",
+            runtime_identifier="openclaw_member",
+            db_file=self.db_file,
+        )
+        shared = self.store.create_instance(
+            owner_public_id=owner["public_id"],
+            product="openclaw",
+            instance_name="Shared",
+            runtime_identifier="openclaw_owner",
+            db_file=self.db_file,
+        )
+        self.store.add_instance_member(
+            shared["public_id"],
+            member["public_id"],
+            "operator",
+            created_by_user_id=owner["id"],
+            db_file=self.db_file,
+        )
+
+        instances = self.store.list_instances_for_user(
+            member["public_id"], db_file=self.db_file
+        )
+
+        self.assertEqual(
+            [(row["public_id"], row["access_role"]) for row in instances],
+            [(owned["public_id"], "owner"), (shared["public_id"], "operator")],
+        )
+
+    def test_owner_cannot_be_duplicated_as_instance_member(self):
+        owner = self.store.create_user("owner", db_file=self.db_file)
+        member = self.store.create_user("member", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=owner["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_owner",
+            db_file=self.db_file,
+        )
+
+        with self.assertRaisesRegex(ValueError, "owner cannot be an instance member"):
+            self.store.add_instance_member(
+                instance["public_id"],
+                owner["public_id"],
+                "manager",
+                db_file=self.db_file,
+            )
+        self.store.add_instance_member(
+            instance["public_id"],
+            member["public_id"],
+            "manager",
+            db_file=self.db_file,
+        )
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError,
+            "member must be removed before ownership transfer",
+        ):
+            with self.store.connect(self.db_file) as conn:
+                conn.execute(
+                    "UPDATE instances SET owner_user_id = ? WHERE public_id = ?",
+                    (member["id"], instance["public_id"]),
+                )
+
+    def test_instance_member_role_must_be_supported(self):
+        owner = self.store.create_user("owner", db_file=self.db_file)
+        member = self.store.create_user("member", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=owner["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_owner",
+            db_file=self.db_file,
+        )
+
+        with self.assertRaisesRegex(ValueError, "invalid instance member role"):
+            self.store.add_instance_member(
+                instance["public_id"],
+                member["public_id"],
+                "owner",
+                db_file=self.db_file,
+            )
+
+    def test_disabled_user_cannot_be_added_as_instance_member(self):
+        owner = self.store.create_user("owner", db_file=self.db_file)
+        member = self.store.create_user(
+            "member", status="disabled", db_file=self.db_file
+        )
+        instance = self.store.create_instance(
+            owner_public_id=owner["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_owner",
+            db_file=self.db_file,
+        )
+
+        with self.assertRaisesRegex(ValueError, "active member user not found"):
+            self.store.add_instance_member(
+                instance["public_id"],
+                member["public_id"],
+                "viewer",
+                db_file=self.db_file,
+            )
+
     def test_casefolded_username_collision_is_rejected(self):
         self.store.create_user("Alice", db_file=self.db_file)
 
@@ -86,6 +196,151 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
         self.assertEqual(session["id"], user["id"])
         self.assertEqual(session["provider"], "local")
         self.assertEqual(session["csrf_token"], "csrf-token")
+        self.assertEqual(session["session_kind"], "user")
+
+    def test_admin_reset_requires_password_change(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+
+        self.store.set_local_credential(
+            user["id"], "scrypt:test", db_file=self.db_file
+        )
+
+        credential = self.store.get_local_credential(
+            user["id"], db_file=self.db_file
+        )
+        self.assertEqual(credential["must_change_password"], 1)
+
+    def test_session_kind_is_stored(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+
+        self.store.create_session(
+            "admin-token",
+            user["id"],
+            "local",
+            "csrf-token",
+            "2999-01-01T00:00:00+00:00",
+            session_kind="admin",
+            db_file=self.db_file,
+        )
+
+        session = self.store.get_session("admin-token", db_file=self.db_file)
+        self.assertEqual(session["session_kind"], "admin")
+
+    def test_execution_request_id_is_idempotent(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+
+        first = self.store.create_execution_job(
+            request_id="request-1",
+            action="runtime.restart",
+            actor_user_id=user["id"],
+            instance_public_id=instance["public_id"],
+            params={"force": True, "reason": "test"},
+            db_file=self.db_file,
+        )
+        repeated = self.store.create_execution_job(
+            request_id="request-1",
+            action="runtime.restart",
+            actor_user_id=user["id"],
+            instance_public_id=instance["public_id"],
+            params={"reason": "test", "force": True},
+            db_file=self.db_file,
+        )
+
+        self.assertEqual(first["id"], repeated["id"])
+        self.assertEqual(first["status"], "queued")
+        with self.assertRaisesRegex(ValueError, "request_id already used"):
+            self.store.create_execution_job(
+                request_id="request-1",
+                action="runtime.stop",
+                actor_user_id=user["id"],
+                instance_public_id=instance["public_id"],
+                params={"force": True, "reason": "test"},
+                db_file=self.db_file,
+            )
+
+    def test_execution_job_tracks_progress_and_retry_parent(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        self.store.create_execution_job(
+            request_id="request-1",
+            action="runtime.restart",
+            actor_user_id=user["id"],
+            instance_public_id=instance["public_id"],
+            db_file=self.db_file,
+        )
+
+        running = self.store.update_execution_job(
+            "request-1",
+            "running",
+            current_step="restart_container",
+            db_file=self.db_file,
+        )
+        interrupted = self.store.update_execution_job(
+            "request-1",
+            "interrupted",
+            error_summary="executor stopped",
+            db_file=self.db_file,
+        )
+        retry = self.store.create_execution_job(
+            request_id="request-2",
+            parent_request_id="request-1",
+            action="runtime.restart",
+            actor_user_id=user["id"],
+            instance_public_id=instance["public_id"],
+            db_file=self.db_file,
+        )
+
+        self.assertEqual(running["current_step"], "restart_container")
+        self.assertIsNotNone(running["heartbeat_at"])
+        self.assertEqual(interrupted["status"], "interrupted")
+        self.assertIsNotNone(interrupted["finished_at"])
+        self.assertEqual(retry["parent_request_id"], "request-1")
+        with self.assertRaisesRegex(ValueError, "invalid execution job transition"):
+            self.store.update_execution_job(
+                "request-1", "running", db_file=self.db_file
+            )
+
+    def test_concurrent_identical_execution_requests_return_one_job(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+
+        def create_job():
+            return self.store.create_execution_job(
+                request_id="request-1",
+                action="runtime.restart",
+                actor_user_id=user["id"],
+                instance_public_id=instance["public_id"],
+                db_file=self.db_file,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            jobs = list(executor.map(lambda _: create_job(), range(2)))
+
+        self.assertEqual(jobs[0]["id"], jobs[1]["id"])
+        with self.store.connect(self.db_file) as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM execution_jobs WHERE request_id = 'request-1'"
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
 
     def test_switching_auth_provider_invalidates_existing_sessions(self):
         user = self.store.create_user("Alice", db_file=self.db_file)

@@ -7,13 +7,15 @@
 
 ## Overview
 
-OpenClaw Manager provisions and operates one isolated AI agent instance per user without modifying the upstream application. It combines container lifecycle automation, Nginx routing, authentication, metadata tracking, and a web administration interface for private platforms, universities, labs, and internal AI services.
+OpenClaw Manager provisions and operates isolated AI agent instances without modifying the upstream application. Its metadata model separates platform users, authentication identities, and instances, and allows one platform user to own multiple product instances while preserving compatibility with existing OpenClaw deployments.
 
 OpenClaw is the primary managed product today. The adapter layer also supports lifecycle management for registered, existing EvoScientist instances. See the [EvoScientist adapter](docs/evoscientist-adapter.md) for its current scope.
 
 ## Highlights
 
 - **Per-user isolation:** independent containers, workspaces, configuration, and runtime state.
+- **Separated identity model:** platform users, login identities, and managed instances use independent IDs and relationships.
+- **Selectable manager authentication:** use either Nginx Basic Auth or Local login; multiple identities may map to the same platform user, but only one provider is active at a time.
 - **Lifecycle management:** create, start, stop, restart, upgrade, recycle, and restore instances.
 - **Web administration:** manage users, status, authentication, skills, and common operations.
 - **Stable reverse proxying:** dedicated HTTPS ports and Docker DNS-based Nginx upstreams.
@@ -31,7 +33,7 @@ OpenClaw is the primary managed product today. The adapter layer also supports l
                          +----------+---------+
                                     |
                                     v
-User -> HTTPS : dedicated port -> Nginx -> agent-net -> user container
+User -> HTTPS : dedicated port -> Nginx -> per-tenant network -> user container
                                     |
                                     +----------> OpenClaw
                                     +----------> EvoScientist
@@ -110,6 +112,7 @@ Runtime paths are configurable in `config/openclaw-manager.env` and intentionall
 - [EvoScientist Adapter](docs/evoscientist-adapter.md)
 - [Model Proxy Deployment](docs/deployment/model-proxy.md)
 - [Manager Web Authentication](docs/deployment/local-auth.md)
+- [User, Identity, and Instance Migration](docs/architecture/user-identity-instance-migration.md)
 - [Metadata Storage Plan](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary](docs/architecture/metadata-data-dictionary.md)
 - [Roadmap](docs/architecture/roadmap.md)

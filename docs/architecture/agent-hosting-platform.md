@@ -11,7 +11,7 @@
 - 定义平台层、产品适配层、运行时层的职责边界
 - 指导后续 Web 控制台、API、脚本重构和目录演进
 
-当前阶段，这是一份架构初稿。它的主要价值是帮助项目统一方向和术语，而不是一次性确定全部实现细节。
+当前用户、身份和实例基础模型已经落地到 metadata schema v3；产品能力、执行器拆分和统一入口仍属于后续演进内容。本文档用于统一长期方向和术语，不代表所有模块均已实现。
 
 ## 2. 背景与当前问题
 
@@ -112,10 +112,16 @@
 建议最小字段包括：
 
 - `id`
+- `public_id`
 - `username`
+- `normalized_username`
+- `display_name`
+- `email`
 - `role`
 - `status`
 - `created_at`
+
+当前实现通过 `user_identities(provider, subject)` 将 `nginx-basic`、`local` 以及未来的 OIDC/UIS 身份映射到同一个 `users.id`。外部认证首次登录不自动创建平台用户。
 
 平台角色至少区分为：
 
@@ -166,13 +172,15 @@
 建议最小字段包括：
 
 - `id`
-- `user_id`
-- `product_id`
-- `name`
+- `public_id`
+- `owner_user_id`
+- `product`
+- `instance_name`
+- `runtime_identifier`
 - `status`
-- `runtime_type`
-- `access_type`
-- `access_endpoint`
+- `restore_state`
+- `data_path`
+- `metadata_json`
 - `created_at`
 - `deleted_at`
 
@@ -182,6 +190,11 @@
 - 一个实例只属于一个产品类型
 
 后续平台不应再默认“一个用户只对应一个 OpenClaw 容器”。
+
+当前 metadata schema 已允许一个用户拥有多个实例，并通过
+`UNIQUE(owner_user_id, product, instance_name)`、全局唯一
+`runtime_identifier` 和唯一非空 `data_path` 防止资源冲突。旧生命周期脚本仍通过
+`legacy_user_id` 兼容历史的一用户一 OpenClaw 实例流程。
 
 ### 6.5 Instance Resource
 
@@ -431,18 +444,27 @@
 
 ## 14. 演进路线
 
-### Phase 1：文档与抽象收敛
+### Phase 1：用户、身份与实例基础模型（已完成）
 
-这一阶段的目标是统一方向，而不是立即做大规模实现改造。
+已完成：
 
-建议任务包括：
+- `users`、`user_identities` 与独立 `instances`
+- 用户和实例 UUID `public_id`
+- 一个用户拥有多个实例的数据约束
+- 凭据、端点、端口和操作记录关联 `instance_id`
+- 历史数据迁移、已删除实例恢复状态和兼容字段
 
-- 明确数据模型
-- 明确模块边界
-- 梳理 `OpenClaw` 当前动作列表
-- 定义最小 API 草案
+### Phase 2：认证框架基础（已完成）
 
-### Phase 2：OpenClaw 平台化
+已完成：
+
+- `nginx-basic` 与 `local` Provider
+- 一个用户绑定多个认证身份
+- 同时只启用一种管理端认证方式
+- Local 密码哈希、服务端 Session、CSRF 和失败锁定
+- 外部认证用户必须预置、不在首次登录时自动创建的策略
+
+### Phase 3：OpenClaw 平台化
 
 这一阶段目标是将现有脚本能力逐步纳入统一平台框架。
 
@@ -453,7 +475,7 @@
 - 增加用户自助动作入口
 - 增加受控文件上传能力
 
-### Phase 3：多产品接入
+### Phase 4：多产品接入
 
 这一阶段目标是验证平台抽象是否足够支持第二种产品。
 
@@ -467,7 +489,6 @@
 
 当前仍有一些问题需要在后续设计和实现中逐步确认：
 
-- 实例是否允许一个用户创建多个同类产品实例
 - 产品版本由平台统一控制，还是实例级可选
 - 文件上传是走本地目录还是对象存储
 - 是否要引入异步任务队列

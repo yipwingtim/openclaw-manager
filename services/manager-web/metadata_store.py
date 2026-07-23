@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import unicodedata
@@ -42,9 +43,9 @@ def initialize(db_file=None, schema_file=None):
         ).fetchone()
         if migration_table:
             version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0
-            if version < 3:
+            if version < 4:
                 raise RuntimeError(
-                    "metadata schema requires scripts/migrate_local_auth_model.py"
+                    "metadata schema requires scripts/migrate_control_plane_model.py"
                 )
         conn.executescript(schema)
 
@@ -124,7 +125,13 @@ def set_user_role(user_id, role, db_file=None, conn=None):
         )
 
 
-def set_local_credential(user_id, password_hash, db_file=None, conn=None):
+def set_local_credential(
+    user_id,
+    password_hash,
+    must_change_password=True,
+    db_file=None,
+    conn=None,
+):
     now = utc_now()
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
@@ -133,16 +140,18 @@ def set_local_credential(user_id, password_hash, db_file=None, conn=None):
             """
             INSERT INTO local_credentials (
                 user_id, password_hash, password_changed_at,
-                failed_login_count, locked_until, created_at, updated_at
-            ) VALUES (?, ?, ?, 0, NULL, ?, ?)
+                must_change_password, failed_login_count, locked_until,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 0, NULL, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 password_hash = excluded.password_hash,
                 password_changed_at = excluded.password_changed_at,
+                must_change_password = excluded.must_change_password,
                 failed_login_count = 0,
                 locked_until = NULL,
                 updated_at = excluded.updated_at
             """,
-            (user_id, password_hash, now, now, now),
+            (user_id, password_hash, now, 1 if must_change_password else 0, now, now),
         )
 
 
@@ -188,7 +197,18 @@ def reset_login_failures(user_id, db_file=None, conn=None):
         )
 
 
-def create_session(token_hash, user_id, provider, csrf_token, expires_at, db_file=None, conn=None):
+def create_session(
+    token_hash,
+    user_id,
+    provider,
+    csrf_token,
+    expires_at,
+    session_kind="user",
+    db_file=None,
+    conn=None,
+):
+    if session_kind not in {"user", "admin", "emergency"}:
+        raise ValueError("invalid session kind")
     now = utc_now()
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
@@ -197,10 +217,20 @@ def create_session(token_hash, user_id, provider, csrf_token, expires_at, db_fil
         active_conn.execute(
             """
             INSERT INTO user_sessions (
-                token_hash, user_id, provider, csrf_token, expires_at, created_at, last_seen_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                token_hash, user_id, provider, session_kind, csrf_token,
+                expires_at, created_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (token_hash, user_id, provider, csrf_token, expires_at, now, now),
+            (
+                token_hash,
+                user_id,
+                provider,
+                session_kind,
+                csrf_token,
+                expires_at,
+                now,
+                now,
+            ),
         )
 
 
@@ -211,7 +241,7 @@ def get_session(token_hash, db_file=None, conn=None):
     with context as active_conn:
         row = active_conn.execute(
             """
-            SELECT s.token_hash, s.provider, s.csrf_token, s.expires_at,
+            SELECT s.token_hash, s.provider, s.session_kind, s.csrf_token, s.expires_at,
                    u.id, u.public_id, u.username, u.normalized_username,
                    u.display_name, u.email, u.role, u.status
             FROM user_sessions s
@@ -435,21 +465,239 @@ def create_instance(
         )
 
 
-def list_instances_for_user(owner_public_id, *, db_file=None, conn=None):
+def list_instances_for_user(user_public_id, *, db_file=None, conn=None):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
         rows = active_conn.execute(
             """
-            SELECT i.*
+            SELECT i.*,
+                   CASE
+                       WHEN i.owner_user_id = current_user.id THEN 'owner'
+                       ELSE m.role
+                   END AS access_role
             FROM instances i
-            JOIN users u ON u.id = i.owner_user_id
-            WHERE u.public_id = ?
+            JOIN users current_user ON current_user.public_id = ?
+            LEFT JOIN instance_members m
+                ON m.instance_id = i.id
+               AND m.user_id = current_user.id
+            WHERE i.owner_user_id = current_user.id
+               OR m.user_id IS NOT NULL
             ORDER BY i.id
             """,
-            (owner_public_id,),
+            (user_public_id,),
         ).fetchall()
         return [instance_dict(row) for row in rows]
+
+
+def add_instance_member(
+    instance_public_id,
+    user_public_id,
+    role,
+    *,
+    created_by_user_id=None,
+    db_file=None,
+    conn=None,
+):
+    if role not in {"manager", "operator", "viewer"}:
+        raise ValueError("invalid instance member role")
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        instance = active_conn.execute(
+            "SELECT id, owner_user_id FROM instances WHERE public_id = ?",
+            (instance_public_id,),
+        ).fetchone()
+        user = active_conn.execute(
+            "SELECT id, status FROM users WHERE public_id = ?",
+            (user_public_id,),
+        ).fetchone()
+        if instance is None:
+            raise ValueError("instance not found")
+        if user is None or user["status"] != "active":
+            raise ValueError("active member user not found")
+        if instance["owner_user_id"] == user["id"]:
+            raise ValueError("owner cannot be an instance member")
+        now = utc_now()
+        active_conn.execute(
+            """
+            INSERT INTO instance_members (
+                instance_id, user_id, role, created_by_user_id,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(instance_id, user_id) DO UPDATE SET
+                role = excluded.role,
+                updated_at = excluded.updated_at
+            """,
+            (
+                instance["id"],
+                user["id"],
+                role,
+                created_by_user_id,
+                now,
+                now,
+            ),
+        )
+        return row_to_dict(
+            active_conn.execute(
+                "SELECT * FROM instance_members WHERE instance_id = ? AND user_id = ?",
+                (instance["id"], user["id"]),
+            ).fetchone()
+        )
+
+
+def create_execution_job(
+    *,
+    request_id,
+    action,
+    actor_user_id=None,
+    instance_public_id=None,
+    params=None,
+    parent_request_id=None,
+    db_file=None,
+    conn=None,
+):
+    if not request_id or not action:
+        raise ValueError("request_id and action are required")
+    params_json = json.dumps(
+        params or {},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        instance_id = None
+        if instance_public_id is not None:
+            instance = active_conn.execute(
+                "SELECT id FROM instances WHERE public_id = ?",
+                (instance_public_id,),
+            ).fetchone()
+            if instance is None:
+                raise ValueError("instance not found")
+            instance_id = instance["id"]
+        now = utc_now()
+        active_conn.execute(
+            """
+            INSERT INTO execution_jobs (
+                request_id, parent_request_id, actor_user_id, instance_id,
+                action, params_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(request_id) DO NOTHING
+            """,
+            (
+                request_id,
+                parent_request_id,
+                actor_user_id,
+                instance_id,
+                action,
+                params_json,
+                now,
+                now,
+            ),
+        )
+        job = active_conn.execute(
+            "SELECT * FROM execution_jobs WHERE request_id = ?",
+            (request_id,),
+        ).fetchone()
+        if (
+            job["action"],
+            job["actor_user_id"],
+            job["instance_id"],
+            job["params_json"],
+            job["parent_request_id"],
+        ) != (
+            action,
+            actor_user_id,
+            instance_id,
+            params_json,
+            parent_request_id,
+        ):
+            raise ValueError("request_id already used for another operation")
+        return row_to_dict(job)
+
+
+def update_execution_job(
+    request_id,
+    status,
+    *,
+    current_step=None,
+    error_summary=None,
+    output=None,
+    db_file=None,
+    conn=None,
+):
+    transitions = {
+        "queued": {"running", "cancelled"},
+        "running": {
+            "running",
+            "succeeded",
+            "failed",
+            "partial_failure",
+            "interrupted",
+            "cancelled",
+        },
+    }
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        job = active_conn.execute(
+            "SELECT * FROM execution_jobs WHERE request_id = ?",
+            (request_id,),
+        ).fetchone()
+        if job is None:
+            raise ValueError("execution job not found")
+        if status not in transitions.get(job["status"], set()):
+            raise ValueError(
+                f"invalid execution job transition: {job['status']} -> {status}"
+            )
+        now = utc_now()
+        started_at = job["started_at"] or (now if status == "running" else None)
+        heartbeat_at = now if status == "running" else job["heartbeat_at"]
+        finished_at = (
+            now
+            if status
+            in {
+                "succeeded",
+                "failed",
+                "partial_failure",
+                "interrupted",
+                "cancelled",
+            }
+            else None
+        )
+        active_conn.execute(
+            """
+            UPDATE execution_jobs
+            SET status = ?,
+                current_step = COALESCE(?, current_step),
+                heartbeat_at = ?,
+                error_summary = COALESCE(?, error_summary),
+                output = COALESCE(?, output),
+                updated_at = ?,
+                started_at = ?,
+                finished_at = ?
+            WHERE request_id = ?
+            """,
+            (
+                status,
+                current_step,
+                heartbeat_at,
+                error_summary,
+                output,
+                now,
+                started_at,
+                finished_at,
+                request_id,
+            ),
+        )
+        return row_to_dict(
+            active_conn.execute(
+                "SELECT * FROM execution_jobs WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+        )
 
 
 def upsert_instance(
@@ -691,6 +939,10 @@ def record_operation(
     action,
     status,
     actor=None,
+    actor_user_id=None,
+    instance_id=None,
+    request_id=None,
+    source_service=None,
     user_id=None,
     message=None,
     finished_at=None,
@@ -700,19 +952,21 @@ def record_operation(
     owns_conn = conn is None
     context = connect() if owns_conn else nullcontext(conn)
     with context as active_conn:
-        actor_user_id = None
-        if actor:
+        if actor_user_id is None and actor:
             actor_row = active_conn.execute(
                 "SELECT id FROM users WHERE normalized_username = ?",
                 (normalize_username(actor),),
             ).fetchone()
             actor_user_id = actor_row["id"] if actor_row else None
-        instance_id = instance_id_for_legacy_user(user_id, active_conn) if user_id else None
+        if instance_id is None and user_id:
+            instance_id = instance_id_for_legacy_user(user_id, active_conn)
         active_conn.execute(
             """
             INSERT INTO operation_records (
+                request_id,
                 actor,
                 actor_user_id,
+                source_service,
                 action,
                 user_id,
                 instance_id,
@@ -721,9 +975,21 @@ def record_operation(
                 created_at,
                 finished_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (actor, actor_user_id, action, user_id, instance_id, status, message, now, finished_at),
+            (
+                request_id,
+                actor,
+                actor_user_id,
+                source_service,
+                action,
+                user_id,
+                instance_id,
+                status,
+                message,
+                now,
+                finished_at,
+            ),
         )
 
 
@@ -750,9 +1016,11 @@ def table_counts(conn=None):
         "user_sessions",
         "auth_settings",
         "instances",
+        "instance_members",
         "instance_endpoints",
         "ports",
         "operation_records",
+        "execution_jobs",
         "instance_credentials",
     ]
     owns_conn = conn is None

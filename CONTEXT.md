@@ -22,6 +22,12 @@ One managed deployment of a product such as OpenClaw, Hermes, or EvoScientist.
 An instance has its own stable public ID, runtime identifier, data path,
 credentials, endpoints, and lifecycle status.
 
+## Instance member
+
+An explicit grant that lets a non-owner use an Instance as a `manager`,
+`operator`, or `viewer`. Instance ownership remains exclusively in
+`instances.owner_user_id`; owners are never duplicated as members.
+
 ## Runtime identifier
 
 The platform-controlled identifier used by the runtime, such as a Docker
@@ -37,3 +43,10 @@ only as a compatibility lookup key for migrated instances.
 
 A published or internal route to an instance. A legacy host port and a future
 HTTPS subdomain are different endpoint types for the same Instance.
+
+## Execution job
+
+A durable, idempotent request for a privileged runtime change. Its
+`request_id` connects the requested action, executor progress, retries, and
+audit records. A failed external action may require explicit reconciliation;
+database state alone does not imply runtime success.

@@ -4,9 +4,11 @@
 
 Schema v2 separates platform users, authentication identities, and managed
 instances. Schema v3 adds platform roles, Local authentication credentials,
-server-side sessions, and the active authentication-provider setting.
+server-side sessions, and the active authentication-provider setting. Schema
+v4 adds instance sharing, separate session kinds, forced password changes,
+idempotent execution jobs, and request-linked audit records.
 
-Schema v2 将平台用户、认证身份和托管实例拆分为独立实体。Schema v3 在此基础上增加平台角色、Local 认证凭据、服务端 Session 和当前认证 Provider 设置。
+Schema v2 将平台用户、认证身份和托管实例拆分为独立实体。Schema v3 在此基础上增加平台角色、Local 认证凭据、服务端 Session 和当前认证 Provider 设置。Schema v4 增加实例成员、Session 类型、强制改密、幂等执行任务和请求关联审计。
 
 The migration preserves existing containers, ports, active data directories,
 Nginx routes, OpenClaw tokens, and legacy manager routes.
@@ -67,18 +69,18 @@ Existing schema v1 and v2 deployments must run the migrations in this order:
 现有 schema v1 和 v2 部署必须按以下顺序迁移：
 
 ```text
-schema v1 ── migrate_identity_instance_model.py ──┐
-                                                  ├── migrate_local_auth_model.py ── schema v3
-schema v2 ────────────────────────────────────────┘
+schema v1 → migrate_identity_instance_model.py → migrate_local_auth_model.py → migrate_control_plane_model.py
+schema v2 → migrate_local_auth_model.py → migrate_control_plane_model.py
+schema v3 → migrate_control_plane_model.py
 ```
 
 The identity/instance migration establishes the v2 data model but reads the
 current `db/schema.sql`. On a current checkout it may therefore report schema
-version 3 immediately. Always run `migrate_local_auth_model.py` afterwards:
+version 4 immediately. Always run `migrate_local_auth_model.py` afterwards:
 that migration also assigns configured administrator roles and creates
-`nginx-basic` identities, even when the structural version is already 3.
+`nginx-basic` identities, even when the structural version is already 4.
 
-身份与实例迁移负责建立 v2 数据模型，但会读取当前的 `db/schema.sql`。因此在当前主分支上执行后，数据库可能直接显示 schema version 3。之后仍必须执行 `migrate_local_auth_model.py`：即使结构版本已经是 3，该迁移仍负责设置管理员角色并补充 `nginx-basic` 身份。
+身份与实例迁移负责建立 v2 数据模型，但会读取当前的 `db/schema.sql`。因此在当前主分支上执行后，数据库可能直接显示 schema version 4。之后仍必须执行 `migrate_local_auth_model.py`：即使结构版本已经是 4，该迁移仍负责设置管理员角色并补充 `nginx-basic` 身份。最后运行 `migrate_control_plane_model.py`；如果结构已经是 v4，该步骤会安全返回。
 
 Do not run both apply operations while `manager-web` can still write to the
 database.
@@ -202,6 +204,28 @@ session tables, assigns configured administrators, and creates
 
 脚本会生成 `manager.db.pre-v3-<timestamp>.bak`，增加 Local Auth 与 Session 表、设置配置中的管理员角色，并为迁移后的历史用户补充 `nginx-basic` 身份。
 
+## Step 4: establish the control-plane model / 第四步：建立控制平面模型
+
+先只读检查：
+
+```bash
+sudo env PYTHONDONTWRITEBYTECODE=1 \
+  python3 scripts/migrate_control_plane_model.py \
+  --db "$db_file"
+```
+
+确认输出为 `schema v3 -> v4` 后执行：
+
+```bash
+sudo env PYTHONDONTWRITEBYTECODE=1 \
+  python3 scripts/migrate_control_plane_model.py \
+  --db "$db_file" \
+  --apply
+```
+
+脚本会使用 SQLite backup API 创建 `manager.db.pre-v4-<timestamp>.bak`。既有
+Local 凭据会被标记为下次登录必须修改密码；实例、端口、运行目录和容器不会变更。
+
 ## Validation / 验证
 
 Verify schema version, ownership, multi-instance support, deleted restore
@@ -268,7 +292,7 @@ If post-migration validation fails:
 
 1. Keep `manager-web` stopped.
 2. Preserve the failed database for diagnosis.
-3. Restore the corresponding `pre-v2` or `pre-v3` backup as the configured
+3. Restore the corresponding `pre-v2`, `pre-v3`, or `pre-v4` backup as the configured
    `METADATA_DB_FILE`.
 4. Run `PRAGMA foreign_key_check` and the consistency checker before restarting
    services.

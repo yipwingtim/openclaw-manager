@@ -16,6 +16,7 @@ __pycache__/
 
 # system
 .DS_Store
+/AGENTS.md
 
 logs/
 

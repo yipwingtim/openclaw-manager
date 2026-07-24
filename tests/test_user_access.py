@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 
-"""Access-control tests for manager-web user endpoints.
-
-Regression coverage for username enumeration: every ``/users/<user_id>`` route
-must run the permission check (``require_instance_access``) *before* revealing
-whether the target user exists. An unauthorized request must therefore return
-403 regardless of existence, so attackers cannot probe user ids via response
-code differences (403 vs 404).
-"""
+"""Access-control tests for legacy manager-web user-id endpoints."""
 
 import importlib.util
 import sys
@@ -72,11 +65,9 @@ def load_app_module():
     return module
 
 
-# Every /users/<user_id> route handler plus any extra positional args the
-# function expects beyond user_id. Extra args are never used because the
-# permission check short-circuits before they are consulted.
-USER_ENDPOINTS = [
-    ("user_detail", ()),
+# Legacy user-id routes may only redirect to the UUID portal. All legacy
+# content and mutation endpoints are permanently disabled.
+DISABLED_USER_ENDPOINTS = [
     ("approve_latest", ()),
     ("refresh_devices", ()),
     ("upload_file", ()),
@@ -138,6 +129,15 @@ class UserDetailAccessTests(unittest.TestCase):
 
         self.assertEqual(response[1], 403)
 
+    def test_uuid_instance_routes_require_internal_proxy_token(self):
+        self.app_module.OPENCLAW_INTERNAL_TOKEN = "internal-secret"
+
+        with patch.object(self.app_module.request, "path", "/instances/instance-1"):
+            with patch.object(self.app_module.request, "headers", {}):
+                response = self.app_module.require_internal_proxy_token()
+
+        self.assertEqual(response[1], 403)
+
     def test_user_routes_accept_matching_internal_proxy_token(self):
         self.app_module.OPENCLAW_INTERNAL_TOKEN = "internal-secret"
 
@@ -151,28 +151,29 @@ class UserDetailAccessTests(unittest.TestCase):
 
         self.assertIsNone(response)
 
-    def test_all_user_endpoints_return_403_for_unauthorized_missing_user(self):
-        # Core enumeration-prevention property: for every /users/<user_id>
-        # route, an unauthorized actor hitting a non-existent user must get 403
-        # (not 404), proving the permission gate fires before existence check.
-        for func_name, extra_args in USER_ENDPOINTS:
+    def test_legacy_user_content_and_mutation_routes_are_disabled(self):
+        for func_name, extra_args in DISABLED_USER_ENDPOINTS:
             with self.subTest(endpoint=func_name):
                 with self._with_actor("attacker"):
                     response = getattr(self.app_module, func_name)("victim", *extra_args)
 
                 self.assertEqual(
                     response[1],
-                    403,
-                    f"{func_name} should return 403 for unauthorized access to a missing user",
+                    410,
+                    f"{func_name} should no longer execute through a user id",
                 )
 
-    def test_unauthorized_access_returns_403_for_existing_user(self):
+    def test_unauthorized_access_hides_existing_legacy_instance(self):
         (self.public_dir / "users" / "victim").mkdir(parents=True)
 
-        with self._with_actor("attacker"):
-            response = self.app_module.user_detail("victim")
+        with self._with_actor("attacker"), patch.object(
+            self.app_module.control_client,
+            "list_instances",
+            return_value=[],
+        ):
+            response = self.app_module.user_detail("alice")
 
-        self.assertEqual(response[1], 403)
+        self.assertEqual(response[1], 404)
 
     def test_missing_actor_returns_403_for_missing_user(self):
         with self._with_actor(None):
@@ -180,16 +181,31 @@ class UserDetailAccessTests(unittest.TestCase):
 
         self.assertEqual(response[1], 403)
 
-    def test_self_access_passes_permission_then_reveals_missing_user(self):
-        # Ownership is established through instances.owner_user_id rather than
-        # by comparing the proxy username with a URL segment.
-        with self._with_actor("alice"):
+    def test_self_access_redirects_legacy_url_to_uuid_portal(self):
+        instance = self.app_module.metadata_store.get_instance("alice")
+        with self._with_actor("alice"), patch.object(
+            self.app_module.control_client,
+            "list_instances",
+            return_value=[
+                {
+                    "public_id": instance["public_id"],
+                    "legacy_user_id": "alice",
+                }
+            ],
+        ) as list_instances:
             response = self.app_module.user_detail("alice")
 
-        self.assertEqual(response[1], 404)
+        self.assertIsNone(response)
+        list_instances.assert_called_once_with(
+            self.app_module.metadata_store.get_user_by_username("alice")["public_id"],
+        )
 
     def test_admin_access_passes_permission_then_reveals_missing_user(self):
-        with self._with_actor("openclaw"):
+        with self._with_actor("openclaw"), patch.object(
+            self.app_module.control_client,
+            "list_instances",
+            return_value=[],
+        ):
             response = self.app_module.user_detail("missing-admin-target")
 
         self.assertEqual(response[1], 404)

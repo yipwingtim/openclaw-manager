@@ -15,6 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY control_client.py .
 COPY instance_adapters.py .
 COPY metadata_store.py .
 COPY templates ./templates

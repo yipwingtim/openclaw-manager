@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ user_id }} - 实例管理 - 容器实例管理与运维平台{% endblock %}
+{% block title %}{{ instance_name }} - 实例管理 - 容器实例管理与运维平台{% endblock %}
 {% block nav_right %}
   当前用户：{{ current_user }}{% if is_admin %}（管理员）{% endif %}
 {% endblock %}
@@ -7,7 +7,7 @@
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
       <div class="page-kicker">实例管理面板</div>
-      <h1 class="page-title">{{ user_id }}</h1>
+      <h1 class="page-title">{{ instance_name }}</h1>
       <div class="page-subtitle">
         {% if instance_mode %}
           当前实例的自助管理页面，可进行设备审批、文件上传和工作区文件下载。
@@ -23,7 +23,7 @@
       {% if show_admin_links %}
         <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
       {% endif %}
-      <a class="btn btn-oc-outline" href="/">{% if instance_mode %}返回首页{% else %}切换用户{% endif %}</a>
+      <a class="btn btn-oc-outline" href="{% if instance_public_id %}{{ url_for('my_instance') }}{% else %}/{% endif %}">{% if instance_mode %}返回首页{% elif instance_public_id %}返回我的实例{% else %}切换用户{% endif %}</a>
     </div>
   </div>
 
@@ -54,7 +54,7 @@
           <div class="metric">
             <div class="metric-label">访问地址</div>
             <div class="metric-value">
-              {% if access_url %}
+              {% if access_url and (not instance_public_id or "access" in allowed_actions) %}
                 <a href="{{ access_url }}" target="_blank" rel="noreferrer">{{ access_url }}</a>
               {% else %}
                 未知
@@ -77,6 +77,7 @@
     {% endif %}
 
     <div class="col-12 col-lg-7">
+      {% if can_device_pairing %}
       <div class="surface p-3 p-lg-4 mb-3">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
           <div>
@@ -98,7 +99,6 @@
         </div>
       </div>
 
-      {% if can_manage %}
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
@@ -146,7 +146,9 @@
             </div>
           </div>
         </div>
+      {% endif %}
 
+      {% if can_file_upload %}
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
@@ -189,7 +191,9 @@
               <div class="muted-small">暂无已上传文件。</div>
             {% endif %}
         </div>
+      {% endif %}
 
+      {% if can_file_download %}
         <div class="surface p-3 p-lg-4 mb-3">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
@@ -228,14 +232,20 @@
                       <td>
                         {% if instance_mode %}
                           <a class="btn btn-sm btn-oc-outline" href="/admin/files/{{ file.root }}/{{ file.relative_path }}">下载</a>
+                        {% elif instance_public_id %}
+                          <a class="btn btn-sm btn-oc-outline" href="{{ url_for(download_endpoint, instance_public_id=instance_public_id, root_key=file.root, relative_path=file.relative_path) }}">下载</a>
                         {% else %}
                           <a class="btn btn-sm btn-oc-outline" href="{{ url_for(download_endpoint, user_id=user_id, root_key=file.root, relative_path=file.relative_path) }}">下载</a>
                         {% endif %}
                       </td>
                       <td>
-                        {% if file.can_delete %}
+                        {% if file.can_delete and can_file_delete %}
                           {% if instance_mode %}
                             <form method="post" action="/admin/files/{{ file.root }}/{{ file.relative_path }}/delete" onsubmit="return confirm('确认删除文件 {{ file.name }}？此操作不可撤销。');">
+                              <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
+                            </form>
+                          {% elif instance_public_id %}
+                            <form method="post" action="{{ url_for(delete_endpoint, instance_public_id=instance_public_id, root_key=file.root, relative_path=file.relative_path) }}" onsubmit="return confirm('确认删除文件 {{ file.name }}？此操作不可撤销。');">
                               <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
                             </form>
                           {% else %}
@@ -257,9 +267,14 @@
           {% endif %}
         </div>
       {% endif %}
+
+      {% if can_manage_members %}
+        {% include "_instance_members.html" %}
+      {% endif %}
     </div>
 
     <div class="col-12 col-lg-5">
+      {% if can_device_pairing %}
       <div class="surface p-3 p-lg-4 mb-3">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
           <div>
@@ -269,7 +284,9 @@
         </div>
           <pre class="codebox mb-0">{{ devices_cache }}</pre>
       </div>
+      {% endif %}
 
+      {% if can_view_logs %}
       <div class="surface p-3 p-lg-4">
         <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
           <div>
@@ -279,6 +296,7 @@
         </div>
         <pre class="codebox mb-0">{{ recent_logs }}</pre>
       </div>
+      {% endif %}
     </div>
   </div>
   <style>

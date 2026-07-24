@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ instance.instance_name }} - 实例详情{% endblock %}
+{% block nav_right %}当前用户：{{ current_user }}{% if is_admin %}（管理员）{% endif %}{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
+    <div>
+      <div class="page-kicker">{{ instance.product }}</div>
+      <h1 class="page-title">{{ instance.instance_name }}</h1>
+      <div class="page-subtitle">实例元数据与平台访问权限。</div>
+    </div>
+    <a class="btn btn-oc-outline" href="{{ url_for('my_instance') }}">返回我的实例</a>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-7">
+      <div class="surface p-3 p-lg-4 mb-3">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">产品</dt><dd class="col-sm-8">{{ instance.product }}</dd>
+          <dt class="col-sm-4">状态</dt><dd class="col-sm-8">{{ instance.status }}</dd>
+          <dt class="col-sm-4">我的角色</dt><dd class="col-sm-8">{{ access_role }}</dd>
+          <dt class="col-sm-4">版本</dt><dd class="col-sm-8">{{ instance.version or "未知" }}</dd>
+        </dl>
+        {% if instance.access_url and "access" in allowed_actions %}
+          <a class="btn btn-oc mt-3" href="{{ instance.access_url }}" target="_blank" rel="noreferrer">进入应用</a>
+        {% endif %}
+      </div>
+      {% if can_manage_members %}
+        {% include "_instance_members.html" %}
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

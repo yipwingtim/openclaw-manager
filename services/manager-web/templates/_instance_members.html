@@ -1,0 +1,45 @@
+<div class="surface p-3 p-lg-4 mb-3">
+  <div class="section-title mb-1">实例成员</div>
+  <div class="muted-small mb-3">成员必须是管理员已创建的有效平台用户。</div>
+  <form method="post" action="{{ url_for('portal_add_instance_member', instance_public_id=instance_public_id) }}" class="row g-2 mb-3">
+    <div class="col-12 col-md-6">
+      <label class="form-label" for="member-username">平台用户名</label>
+      <input class="form-control" id="member-username" name="username" required maxlength="128">
+    </div>
+    <div class="col-8 col-md-4">
+      <label class="form-label" for="member-role">角色</label>
+      <select class="form-select" id="member-role" name="role">
+        <option value="operator">operator</option>
+        <option value="viewer">viewer</option>
+        {% if access_role == "owner" %}<option value="manager">manager</option>{% endif %}
+      </select>
+    </div>
+    <div class="col-4 col-md-2 d-flex align-items-end">
+      <button class="btn btn-oc w-100" type="submit">添加</button>
+    </div>
+  </form>
+  {% if members %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>用户</th><th>角色</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for member in members %}
+            <tr>
+              <td>{{ member.display_name or member.username }} <span class="muted-small">{{ member.username }}</span></td>
+              <td><span class="badge-status badge-neutral">{{ member.role }}</span></td>
+              <td>
+                {% if access_role == "owner" or member.role != "manager" %}
+                  <form method="post" action="{{ url_for('portal_remove_instance_member', instance_public_id=instance_public_id, member_public_id=member.user_public_id) }}" onsubmit="return confirm('确认移除成员 {{ member.username }}？');">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">移除</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="muted-small">暂无共享成员。</div>
+  {% endif %}
+</div>

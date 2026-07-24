@@ -331,7 +331,7 @@ class UploadFileSymlinkEscapeTests(_SymlinkEscapeTestBase):
         """执行 upload_file_for_user 并捕获 redirect_to_user_dashboard 的调用参数。"""
         calls = []
 
-        def fake_redirect(uid, instance_mode=False, result="", error="", wechat_url=""):
+        def fake_redirect(uid, instance_mode=False, *, instance_public_id=None, result="", error="", wechat_url=""):
             calls.append({"user_id": uid, "result": result, "error": error})
             return ("redirected", 302)
 
@@ -459,9 +459,16 @@ class UploadFileSymlinkEscapeTests(_SymlinkEscapeTestBase):
         calls = []
         original_redirect = self.app_module.redirect_to_user_dashboard
 
-        def capture_redirect(uid, instance_mode=False, result="", error="", wechat_url=""):
+        def capture_redirect(uid, instance_mode=False, *, instance_public_id=None, result="", error="", wechat_url=""):
             calls.append({"user_id": uid, "result": result, "error": error})
-            return original_redirect(uid, instance_mode=instance_mode, result=result, error=error, wechat_url=wechat_url)
+            return original_redirect(
+                uid,
+                instance_mode=instance_mode,
+                instance_public_id=instance_public_id,
+                result=result,
+                error=error,
+                wechat_url=wechat_url,
+            )
 
         with patch.object(self.app_module, "redirect_to_user_dashboard", capture_redirect):
             with patch.object(self.app_module, "persist_operation_metadata", return_value=""):

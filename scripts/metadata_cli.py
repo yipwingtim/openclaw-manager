@@ -322,6 +322,16 @@ def update_version(args):
         )
 
 
+def bind_identity(args):
+    initialize_metadata()
+    user = metadata_store.get_user_by_username(args.username)
+    if not user or user["status"] == "deleted":
+        raise ValueError("platform user not found")
+    metadata_store.upsert_identity(
+        user["id"], args.provider, args.subject, args.external_username
+    )
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description="Write OpenClaw Manager metadata records.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -377,6 +387,13 @@ def build_parser():
     version.add_argument("--openclaw-version", required=True)
     version.add_argument("--actor")
     version.set_defaults(func=update_version)
+
+    identity = subparsers.add_parser("bind-identity")
+    identity.add_argument("--username", required=True)
+    identity.add_argument("--provider", required=True)
+    identity.add_argument("--subject", required=True)
+    identity.add_argument("--external-username")
+    identity.set_defaults(func=bind_identity)
 
     return parser
 

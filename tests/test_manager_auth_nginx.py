@@ -59,6 +59,22 @@ class ManagerAuthNginxTests(unittest.TestCase):
             "        return 302 https://manager.example.test:30015/; # managed-by-openclaw-manager-auth\n",
         )
 
+    def test_new_instance_guard_rejects_unknown_provider_without_protocol(self):
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; render_instance_admin_provider_guard typo manager.example.test',
+                "bash",
+                str(NGINX_AUTH_LIBRARY),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+
     def make_runtime(self, root, provider="local", fail_nginx_test=False):
         manager = root / "manager"
         conf_dir = root / "nginx" / "conf"
@@ -174,6 +190,26 @@ class ManagerAuthNginxTests(unittest.TestCase):
                 "managed-by-openclaw-manager-auth",
                 deleted_config.read_text(encoding="utf-8"),
             )
+
+    def test_external_provider_exposes_only_basic_auth_emergency_path(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager, conf_dir, bin_dir = self.make_runtime(root, provider="campus-uis")
+            config_file = manager / "config" / "openclaw-manager.env"
+            config_file.write_text(
+                config_file.read_text(encoding="utf-8") + "MANAGER_AUTH_TYPE=oidc\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_update(manager, bin_dir)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            config = (conf_dir / "manager-web.conf").read_text(encoding="utf-8")
+            self.assertIn("location = /emergency/login", config)
+            self.assertIn('auth_basic "OpenClaw Manager Emergency";', config)
+            self.assertIn('X-OpenClaw-Internal-Token "test-token";', config)
+            root_location = config.split("    location / {", 1)[1]
+            self.assertNotIn("auth_basic_user_file", root_location)
 
     def test_nginx_validation_failure_restores_instance_config(self):
         with TemporaryDirectory() as temp_dir:

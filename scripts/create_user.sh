@@ -317,7 +317,7 @@ NGINX_USER_HTPASSWD_FILE_IN_CONTAINER="$(nginx_user_htpasswd_file_in_container "
 NGINX_USER_HTPASSWD_REF="$(nginx_user_htpasswd_ref "$USER_ID" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
 NGINX_ADMIN_AUTH_BLOCK="$(render_nginx_auth_lines "true" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
-NGINX_ADMIN_PROVIDER_GUARD="$(render_instance_admin_provider_guard "${MANAGER_AUTH_PROVIDER:-nginx-basic}" "$PUBLIC_HOST")" || fail "Unsupported manager authentication configuration"
+NGINX_ADMIN_PROVIDER_GUARD="$(render_instance_admin_provider_guard "${MANAGER_AUTH_PROVIDER:-nginx-basic}" "$PUBLIC_HOST" "${MANAGER_AUTH_TYPE:-}")" || fail "Unsupported manager authentication configuration"
 NGINX_INTERNAL_TOKEN_HEADER=""
 if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
   NGINX_INTERNAL_TOKEN_HEADER="        proxy_set_header X-OpenClaw-Internal-Token \"$OPENCLAW_INTERNAL_TOKEN\";"

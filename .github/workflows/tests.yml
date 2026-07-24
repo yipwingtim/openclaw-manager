@@ -1,0 +1,50 @@
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 装真实 flask/werkzeug。test_format_bytes、test_symlink_escape、
+          # test_user_access、test_manager_web_lifecycle 在加载 app.py 之前用
+          # sys.modules.setdefault 注入 stub，stub 会优先生效。
+          pip install flask werkzeug
+
+      - name: Ensure shell scripts have LF line endings
+        run: |
+          # Windows 开发者提交时可能误把 .sh 转 CRLF，导致 Linux 上 bash 解析失败。
+          # 这里兜底把所有 .sh 转回 LF。
+          find scripts tests -name '*.sh' -exec sed -i 's/\r$//' {} +
+
+      - name: Run tests
+        run: |
+          set -u
+          failed=0
+          # 每个测试文件单独进程跑，避免某个测试在 sys.modules 注入的 stub
+          # 污染后续测试（特别是 flask stub 与真实 flask 行为不一致）。
+          for f in tests/test_*.py; do
+            echo "::group:::: $f"
+            if python "$f" -v; then
+              echo "PASS: $f"
+            else
+              echo "FAIL: $f"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed

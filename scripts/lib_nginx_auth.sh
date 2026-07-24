@@ -38,6 +38,7 @@ EOF
 render_instance_admin_provider_guard() {
   local provider="${1:-nginx-basic}"
   local public_host="${2:-}"
+  local auth_type="${3:-}"
   case "$provider" in
     nginx-basic)
       return 0
@@ -47,7 +48,9 @@ render_instance_admin_provider_guard() {
       printf '        return 302 https://%s:30015/; # managed-by-openclaw-manager-auth\n' "$public_host"
       ;;
     *)
-      return 1
+      case "$auth_type" in oidc|oauth2) ;; *) return 1 ;; esac
+      [ -n "$public_host" ] || return 1
+      printf '        return 302 https://%s:30015/; # managed-by-openclaw-manager-auth\n' "$public_host"
       ;;
   esac
 }

@@ -20,6 +20,7 @@ from werkzeug.utils import secure_filename
 
 import metadata_store
 import control_client
+import auth_providers
 from instance_adapters import EvoScientistDockerAdapter, OpenClawDockerAdapter
 
 
@@ -35,6 +36,10 @@ MANAGER_AUTH_PROVIDER = os.environ.get("MANAGER_AUTH_PROVIDER", "nginx-basic").s
 MANAGER_SESSION_COOKIE = "openclaw_manager_session"
 MANAGER_SESSION_HOURS = int(os.environ.get("MANAGER_SESSION_HOURS", "8"))
 MANAGER_COOKIE_SECURE = os.environ.get("MANAGER_COOKIE_SECURE", "true").strip().lower() not in {"0", "false", "no"}
+MANAGER_SESSION_SECRET = os.environ.get("MANAGER_SESSION_SECRET", "").strip()
+MANAGER_EMERGENCY_USERS = {
+    value.strip() for value in os.environ.get("MANAGER_EMERGENCY_USERS", "").split(",") if value.strip()
+}
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
@@ -93,13 +98,18 @@ CREATE_EVENTS_LOCK = threading.Lock()
 WECHAT_BIND_JOBS = {}
 WECHAT_BIND_JOBS_LOCK = threading.Lock()
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=str(APP_DIR / "templates"))
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+app.config["SECRET_KEY"] = MANAGER_SESSION_SECRET or None
+app.config["SESSION_COOKIE_SECURE"] = MANAGER_COOKIE_SECURE
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 if not OPENCLAW_INTERNAL_TOKEN:
     app.logger.warning("OPENCLAW_INTERNAL_TOKEN is not configured; internal proxy token checks are disabled.")
 
 INTERNAL_PROXY_PATHS = (
     "/admin",
+    "/emergency",
     "/instance-admin",
     "/instances",
     "/users",
@@ -128,6 +138,17 @@ def proxy_subject():
     return (request.headers.get("X-Remote-User") or request.headers.get("X-Forwarded-User") or "").strip()
 
 
+def external_auth_enabled():
+    return MANAGER_AUTH_PROVIDER not in {"nginx-basic", "local"}
+
+
+def get_external_auth():
+    if not MANAGER_SESSION_SECRET:
+        raise auth_providers.AuthConfigurationError("MANAGER_SESSION_SECRET is required")
+    config = auth_providers.external_auth_config()
+    return auth_providers.register_external_client(app, config), config
+
+
 def get_actor_user_record():
     try:
         metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
@@ -135,10 +156,10 @@ def get_actor_user_record():
         if MANAGER_AUTH_PROVIDER == "nginx-basic":
             subject = proxy_subject()
             return metadata_store.get_user_by_identity("nginx-basic", subject) if subject else None
-        if MANAGER_AUTH_PROVIDER == "local":
+        if MANAGER_AUTH_PROVIDER == "local" or external_auth_enabled():
             raw_token = getattr(request, "cookies", {}).get(MANAGER_SESSION_COOKIE, "")
             session = metadata_store.get_session(token_hash(raw_token)) if raw_token else None
-            if not session or session["provider"] != "local" or session["status"] != "active":
+            if not session or session["provider"] != MANAGER_AUTH_PROVIDER or session["status"] != "active":
                 return None
             return session
     except Exception as exc:
@@ -148,7 +169,7 @@ def get_actor_user_record():
 
 @app.before_request
 def require_csrf_token():
-    if MANAGER_AUTH_PROVIDER != "local" or request.method != "POST" or request.path == "/login":
+    if MANAGER_AUTH_PROVIDER == "nginx-basic" or request.method != "POST" or request.path == "/login":
         return None
     actor = get_actor_user_record()
     provided = request.form.get("csrf_token", "")
@@ -1985,10 +2006,17 @@ def delete_file_for_user(
 
 @app.get("/login")
 def login_page():
-    if MANAGER_AUTH_PROVIDER != "local":
-        return render_template("error.html", message="Local login is disabled."), 404
     if get_actor_user_record():
         return redirect(url_for("index"))
+    if external_auth_enabled():
+        try:
+            client, config = get_external_auth()
+            return client.authorize_redirect(config["redirect_uri"])
+        except Exception as exc:
+            app.logger.warning("Could not start external authentication: %s", exc)
+            return render_template("error.html", message="External authentication is unavailable."), 503
+    if MANAGER_AUTH_PROVIDER != "local":
+        return render_template("error.html", message="Local login is disabled."), 404
     login_csrf = secrets.token_urlsafe(32)
     response = app.make_response(render_template("login.html", error="", login_csrf=login_csrf))
     response.set_cookie(
@@ -2000,6 +2028,67 @@ def login_page():
         max_age=600,
     )
     return response
+
+
+def create_manager_session(user, provider, session_kind="user"):
+    raw_token = secrets.token_urlsafe(48)
+    csrf_token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=MANAGER_SESSION_HOURS)).replace(microsecond=0).isoformat()
+    metadata_store.create_session(
+        token_hash(raw_token), user["id"], provider, csrf_token, expires_at,
+        session_kind=session_kind,
+    )
+    response = redirect(url_for("index"))
+    response.set_cookie(
+        MANAGER_SESSION_COOKIE,
+        raw_token,
+        secure=MANAGER_COOKIE_SECURE,
+        httponly=True,
+        samesite="Lax",
+        max_age=MANAGER_SESSION_HOURS * 3600,
+    )
+    return response
+
+
+@app.get("/auth/callback")
+def external_auth_callback():
+    if not external_auth_enabled():
+        return render_template("error.html", message="External login is disabled."), 404
+    try:
+        client, config = get_external_auth()
+        identity = auth_providers.external_identity(client, client.authorize_access_token(), config)
+    except Exception as exc:
+        app.logger.warning("External authentication failed: %s", exc)
+        return render_template("error.html", message="External authentication failed."), 401
+
+    metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+    metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
+    user = metadata_store.get_user_by_identity(identity["provider"], identity["subject"])
+    if not user or user["status"] != "active":
+        return forbidden("Forbidden: external identity is not linked to an active platform user.")
+    metadata_store.record_identity_login(
+        identity["provider"], identity["subject"], identity["profile"]
+    )
+    return create_manager_session(user, MANAGER_AUTH_PROVIDER)
+
+
+@app.get("/emergency/login")
+def emergency_login():
+    username = proxy_subject()
+    if (
+        not OPENCLAW_INTERNAL_TOKEN
+        or not external_auth_enabled()
+        or not username
+        or username not in MANAGER_EMERGENCY_USERS
+    ):
+        return forbidden("Forbidden: emergency access is unavailable.")
+    metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+    metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
+    user = metadata_store.get_user_by_username(username)
+    if not user or user["status"] != "active" or user["role"] != "admin":
+        return forbidden("Forbidden: emergency administrator is not active.")
+    app.logger.warning("Emergency manager login used by %s", username)
+    return create_manager_session(user, MANAGER_AUTH_PROVIDER, session_kind="emergency")
 
 
 @app.post("/login")
@@ -2043,21 +2132,7 @@ def login_submit():
         return response, 401
 
     metadata_store.reset_login_failures(user["id"])
-    raw_token = secrets.token_urlsafe(48)
-    csrf_token = secrets.token_urlsafe(32)
-    expires_at = (datetime.now(timezone.utc) + timedelta(hours=MANAGER_SESSION_HOURS)).replace(microsecond=0).isoformat()
-    metadata_store.create_session(
-        token_hash(raw_token), user["id"], "local", csrf_token, expires_at
-    )
-    response = redirect(url_for("index"))
-    response.set_cookie(
-        MANAGER_SESSION_COOKIE,
-        raw_token,
-        secure=MANAGER_COOKIE_SECURE,
-        httponly=True,
-        samesite="Lax",
-        max_age=MANAGER_SESSION_HOURS * 3600,
-    )
+    response = create_manager_session(user, "local")
     response.delete_cookie("openclaw_manager_login_csrf")
     return response
 
@@ -2079,7 +2154,7 @@ def index():
         return redirect(url_for("admin_users"))
     if actor:
         return redirect(url_for("my_instance"))
-    if MANAGER_AUTH_PROVIDER == "local":
+    if MANAGER_AUTH_PROVIDER == "local" or external_auth_enabled():
         return redirect(url_for("login_page"))
     return render_template("index.html", current_user="", is_admin=False)
 

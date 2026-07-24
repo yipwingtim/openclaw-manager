@@ -14,6 +14,11 @@
   session.
 - `local`：由 manager-web 提供登录页面并使用服务端 Session。
 
+- A named external provider uses `MANAGER_AUTH_TYPE=oidc` or `oauth2` and
+  Authlib's Authorization Code flow. OIDC Discovery is preferred.
+- 命名的外部 Provider 使用 `MANAGER_AUTH_TYPE=oidc` 或 `oauth2`，通过 Authlib
+  执行 Authorization Code 流程；优先使用 OIDC Discovery。
+
 One platform user may bind both `nginx-basic` and `local` identities. Binding
 multiple identities does not enable multiple login paths simultaneously; only
 `MANAGER_AUTH_PROVIDER` is accepted.
@@ -44,6 +49,62 @@ identity record. Use the external provider's stable subject, not a display
 name, email address, or other mutable field.
 
 外部认证首次登录不得自动创建平台用户。未来接入 OIDC 或 UIS 时，必须预先创建平台用户并绑定对应身份；身份标识应使用外部系统提供的稳定 subject，不能默认使用姓名、邮箱等可变字段。
+
+## External OAuth2/OIDC provider / 外部 OAuth2/OIDC Provider
+
+Use a deployment-specific provider name such as `campus-uis` or `company-sso`.
+Do not use a school name or endpoint in committed defaults. For OIDC:
+
+使用部署侧 Provider 名称，例如 `campus-uis` 或 `company-sso`。仓库默认配置不得写入
+真实学校名称或地址。OIDC 配置示例：
+
+```dotenv
+MANAGER_AUTH_PROVIDER=campus-uis
+MANAGER_AUTH_TYPE=oidc
+MANAGER_SESSION_SECRET=<random-high-entropy-secret>
+MANAGER_OAUTH_CLIENT_ID=<client-id>
+MANAGER_OAUTH_CLIENT_SECRET=<client-secret>
+MANAGER_OAUTH_REDIRECT_URI=https://manager.example.test:30015/auth/callback
+MANAGER_OIDC_DISCOVERY_URL=https://sso.example.test/.well-known/openid-configuration
+MANAGER_OAUTH_SCOPES=openid profile email
+MANAGER_OAUTH_SUBJECT_CLAIM=sub
+```
+
+Generic OAuth2 providers additionally require authorization, token, and
+UserInfo endpoints. `MANAGER_OAUTH_SUBJECT_CLAIM` must identify an immutable,
+unique subject returned by UserInfo. The callback rejects identities that are
+not already linked through `user_identities(provider, subject)`.
+
+通用 OAuth2 还需要授权、Token 和 UserInfo 地址。`MANAGER_OAUTH_SUBJECT_CLAIM`
+必须指向 UserInfo 返回的稳定唯一标识。回调只接受已通过
+`user_identities(provider, subject)` 绑定的平台用户。
+
+预绑定外部身份：
+
+```bash
+python3 scripts/metadata_cli.py bind-identity \
+  --username alice \
+  --provider campus-uis \
+  --subject '<stable-subject>'
+```
+
+```dotenv
+MANAGER_OAUTH_AUTHORIZE_URL=https://sso.example.test/authorize
+MANAGER_OAUTH_TOKEN_URL=https://sso.example.test/token
+MANAGER_OAUTH_USERINFO_URL=https://sso.example.test/userinfo
+```
+
+### Emergency entry / 应急入口
+
+For an external provider only, `/emergency/login` is protected by the existing
+Nginx administrator Basic Auth file. Set `MANAGER_EMERGENCY_USERS` to an
+allowlist of existing active platform administrators. Keep this path restricted
+to an internal or controlled network and monitor manager-web warning logs.
+
+仅外部 Provider 模式提供 `/emergency/login`。该精确路径使用现有 Nginx 管理员
+Basic Auth 文件，并由 `MANAGER_EMERGENCY_USERS` 再次限制为已有且启用的平台管理员。
+应通过网络策略限制该路径，并监控 manager-web 警告日志。
+应急入口还要求配置非空的 `OPENCLAW_INTERNAL_TOKEN`，否则应用拒绝建立 Session。
 
 ## Prerequisite: identity model / 前置条件：身份模型
 

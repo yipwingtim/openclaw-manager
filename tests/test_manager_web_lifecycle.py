@@ -19,8 +19,15 @@ class FakeUpload:
         self.filename = filename
         self.content = content
 
-    def save(self, target):
-        Path(target).write_text(self.content, encoding="utf-8")
+    def save(self, destination):
+        if hasattr(destination, "write"):
+            data = self.content
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            destination.write(data)
+            destination.flush()
+        else:
+            Path(destination).write_text(self.content, encoding="utf-8")
 
 
 class FakeThread:

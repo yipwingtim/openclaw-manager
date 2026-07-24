@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import csv
@@ -1030,11 +1031,16 @@ def resolve_direct_download_file(user_id, filename):
 
     candidates = []
     for _, relative_dir, _ in WORKSPACE_FILE_ROOTS.values():
-        root = get_user_dir(user_id) / relative_dir
-        if root.is_dir():
-            candidate = root / safe_name
-            if is_downloadable_file(candidate):
-                candidates.append(candidate)
+        root = (get_user_dir(user_id) / relative_dir).resolve()
+        if not root.is_dir():
+            continue
+        candidate = (root / safe_name).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        if is_downloadable_file(candidate):
+            candidates.append(candidate)
 
     if len(candidates) != 1:
         return None
@@ -1880,6 +1886,139 @@ def refresh_devices_for_user(
     )
 
 
+def _save_uploaded_file_atomic(uploaded, filename, resolved_upload_dir):
+    use_atomic = (
+        hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and os.open in os.supports_dir_fd
+    )
+    if not use_atomic:
+        return "Secure atomic upload is not supported on this platform"
+
+    try:
+        upload_dir_fd = os.open(
+            str(resolved_upload_dir),
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+    except OSError:
+        return f"Invalid file path: {filename}"
+
+    file_flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW
+    fd = None
+    try:
+        try:
+            fd = os.open(filename, file_flags, 0o600, dir_fd=upload_dir_fd)
+        except FileExistsError:
+            try:
+                st = os.lstat(filename, dir_fd=upload_dir_fd)
+            except OSError:
+                return f"File already exists: {filename}"
+            if stat.S_ISLNK(st.st_mode):
+                return f"Invalid file path: {filename}"
+            return f"File already exists: {filename}"
+        except OSError:
+            return f"Invalid file path: {filename}"
+
+        out_fp = None
+        try:
+            out_fp = os.fdopen(fd, "wb")
+            uploaded.save(out_fp)
+            out_fp.flush()
+            os.fchmod(fd, 0o644)
+        except OSError:
+            if out_fp is None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            else:
+                try:
+                    out_fp.close()
+                except OSError:
+                    pass
+            fd = None
+            try:
+                os.unlink(filename, dir_fd=upload_dir_fd)
+            except OSError:
+                pass
+            return f"Failed to save upload: {filename}"
+        else:
+            out_fp.close()
+            fd = None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.close(upload_dir_fd)
+        except OSError:
+            pass
+
+    return None
+
+
+def _open_download_file_atomic(target):
+    use_atomic = (
+        hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and os.open in os.supports_dir_fd
+    )
+    if not use_atomic:
+        return None
+
+    parent_fd = None
+    fd = None
+    file_obj = None
+    try:
+        try:
+            parent_fd = os.open(
+                str(target.parent),
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+        except OSError:
+            return None
+
+        file_flags = os.O_RDONLY | os.O_NOFOLLOW
+        try:
+            fd = os.open(target.name, file_flags, dir_fd=parent_fd)
+        except OSError:
+            return None
+
+        try:
+            st = os.fstat(fd)
+        except OSError:
+            return None
+        if not stat.S_ISREG(st.st_mode):
+            return None
+
+        try:
+            actual = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            return None
+        if Path(actual) != target:
+            return None
+
+        try:
+            file_obj = os.fdopen(fd, "rb")
+        except OSError:
+            return None
+        fd = None
+        return file_obj
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if parent_fd is not None:
+            try:
+                os.close(parent_fd)
+            except OSError:
+                pass
+
+
 def upload_file_for_user(
     user_id,
     instance_mode=False,
@@ -1915,16 +2054,27 @@ def upload_file_for_user(
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     target = upload_dir / filename
-    if target.exists():
+
+    try:
+        resolved_upload_dir = upload_dir.resolve()
+        resolved_target = target.resolve()
+        resolved_target.relative_to(resolved_upload_dir)
+    except (ValueError, OSError):
         return redirect_to_user_dashboard(
             user_id,
             instance_mode=instance_mode,
             instance_public_id=instance_public_id,
-            error=f"File already exists: {filename}",
+            error=f"Invalid file path: {filename}",
         )
 
-    uploaded.save(target)
-    os.chmod(target, 0o644)
+    save_error = _save_uploaded_file_atomic(uploaded, filename, resolved_upload_dir)
+    if save_error:
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error=save_error,
+        )
 
     message = f"Uploaded {filename} to {CONTAINER_UPLOAD_DIR}/{filename}"
     message += persist_operation_metadata("upload_file", user_id=user_id, message=message)
@@ -1940,14 +2090,22 @@ def download_workspace_file_for_user(user_id, root_key, relative_path):
     target = resolve_workspace_file(user_id, root_key, relative_path)
     if target is None:
         return render_template("error.html", message="File not found."), 404
-    return send_file(target, as_attachment=True, download_name=target.name)
+
+    file_obj = _open_download_file_atomic(target)
+    if file_obj is None:
+        return render_template("error.html", message="File not found."), 404
+    return send_file(file_obj, as_attachment=True, download_name=target.name)
 
 
 def download_direct_file_for_user(user_id, filename):
     target = resolve_direct_download_file(user_id, filename)
     if target is None:
         return render_template("error.html", message="File not found or filename is ambiguous."), 404
-    return send_file(target, as_attachment=True, download_name=target.name)
+
+    file_obj = _open_download_file_atomic(target)
+    if file_obj is None:
+        return render_template("error.html", message="File not found or filename is ambiguous."), 404
+    return send_file(file_obj, as_attachment=True, download_name=target.name)
 
 
 def delete_file_for_user(

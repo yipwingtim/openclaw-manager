@@ -114,13 +114,35 @@ class LifecycleActionTests(unittest.TestCase):
             self.assertEqual(records_dir.stat().st_mode & 0o777, 0o700)
             self.assertEqual(record_path.stat().st_mode & 0o777, 0o600)
 
+    def test_status_and_logs_pass_instance_record_to_adapter(self):
+        instance = {
+            "legacy_user_id": "alice",
+            "runtime_identifier": "openclaw_alice_custom",
+            "product": "openclaw",
+        }
+        adapter = types.SimpleNamespace(
+            status=lambda value: "Up",
+            logs=lambda value, tail=120: "logs",
+        )
+        with patch.object(self.app_module, "get_instance_record", return_value=instance):
+            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter) as get_adapter:
+                with patch.object(adapter, "status", return_value="Up") as status:
+                    with patch.object(adapter, "logs", return_value="logs") as logs:
+                        self.assertEqual(self.app_module.get_container_status("alice"), "Up")
+                        self.assertEqual(self.app_module.get_container_logs("alice"), "logs")
+
+        self.assertEqual(get_adapter.call_args_list[0].args, ("openclaw",))
+        status.assert_called_once_with(instance)
+        logs.assert_called_once_with(instance, tail=120)
+
     def test_delete_runs_script_when_user_dir_is_missing(self):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)
-            adapter = types.SimpleNamespace(delete=lambda user_id: (0, "deleted"))
+            adapter = types.SimpleNamespace(delete=lambda instance: (0, "deleted"))
 
-            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
-                code, output = self.app_module.run_instance_lifecycle_action("missing-user", "delete")
+            with patch.object(self.app_module, "get_instance_record", return_value={"legacy_user_id": "missing-user", "runtime_identifier": "openclaw_missing-user"}):
+                with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
+                    code, output = self.app_module.run_instance_lifecycle_action("missing-user", "delete")
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "deleted")
@@ -129,8 +151,9 @@ class LifecycleActionTests(unittest.TestCase):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)
 
-            with patch.object(self.app_module, "run_command") as run_command:
-                code, output = self.app_module.run_instance_lifecycle_action("missing-user", "start")
+            with patch.object(self.app_module, "get_instance_record", return_value={}):
+                with patch.object(self.app_module, "run_command") as run_command:
+                    code, output = self.app_module.run_instance_lifecycle_action("missing-user", "start")
 
             self.assertEqual(code, 1)
             self.assertEqual(output, "User not found: missing-user")
@@ -144,14 +167,10 @@ class LifecycleActionTests(unittest.TestCase):
             (manager_dir / "scripts").mkdir(parents=True)
             self.app_module.PUBLIC_DIR = public_dir
             self.app_module.MANAGER_DIR = manager_dir
-            adapter = types.SimpleNamespace(restore=lambda user_id: (0, "restored"))
+            adapter = types.SimpleNamespace(restore=lambda instance: (0, "restored"))
 
-            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
-                with patch.object(
-                    self.app_module.metadata_store,
-                    "get_instance",
-                    return_value={"restore_state": "restorable"},
-                ):
+            with patch.object(self.app_module, "get_instance_record", return_value={"restore_state": "restorable", "legacy_user_id": "deleted-user", "runtime_identifier": "openclaw_deleted-user"}):
+                with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
                     code, output = self.app_module.run_instance_lifecycle_action("deleted-user", "restore")
 
             self.assertEqual(code, 0)
@@ -162,8 +181,9 @@ class LifecycleActionTests(unittest.TestCase):
             self.app_module.PUBLIC_DIR = Path(public_dir)
             (Path(public_dir) / "users" / "alice").mkdir(parents=True)
 
-            with patch.object(self.app_module, "run_command") as run_command:
-                code, output = self.app_module.run_instance_lifecycle_action("alice", "restore")
+            with patch.object(self.app_module, "get_instance_record", return_value={"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"}):
+                with patch.object(self.app_module, "run_command") as run_command:
+                    code, output = self.app_module.run_instance_lifecycle_action("alice", "restore")
 
             self.assertEqual(code, 1)
             self.assertEqual(output, "User already exists: alice")
@@ -172,14 +192,10 @@ class LifecycleActionTests(unittest.TestCase):
     def test_restore_rejects_instance_without_restorable_metadata(self):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)
-            adapter = types.SimpleNamespace(restore=lambda user_id: (0, "restored"))
+            adapter = types.SimpleNamespace(restore=lambda instance: (0, "restored"))
 
-            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
-                with patch.object(
-                    self.app_module.metadata_store,
-                    "get_instance",
-                    return_value={"restore_state": "incomplete"},
-                ):
+            with patch.object(self.app_module, "get_instance_record", return_value={"restore_state": "incomplete", "legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"}):
+                with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
                     code, output = self.app_module.run_instance_lifecycle_action(
                         "alice", "restore"
                     )
@@ -220,10 +236,11 @@ class LifecycleActionTests(unittest.TestCase):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)
             (Path(public_dir) / "users" / "alice").mkdir(parents=True)
-            adapter = types.SimpleNamespace(start=lambda user_id: (0, f"started {user_id}"))
+            adapter = types.SimpleNamespace(start=lambda instance: (0, f"started {instance['legacy_user_id']}"))
 
-            with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
-                code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
+            with patch.object(self.app_module, "get_instance_record", return_value={"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"}):
+                with patch.object(self.app_module, "get_instance_adapter", return_value=adapter):
+                    code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "started alice")
@@ -232,11 +249,12 @@ class LifecycleActionTests(unittest.TestCase):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)
             (Path(public_dir) / "users" / "alice").mkdir(parents=True)
-            adapter = types.SimpleNamespace(start=lambda user_id: (0, f"started {user_id}"))
+            adapter = types.SimpleNamespace(start=lambda instance: (0, f"started {instance['legacy_user_id']}"))
 
-            with patch.object(self.app_module, "get_instance_product", return_value="openclaw"):
-                with patch.object(self.app_module, "get_instance_adapter", return_value=adapter) as get_adapter:
-                    code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
+            with patch.object(self.app_module, "get_instance_record", return_value={"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice", "product": "openclaw"}):
+                with patch.object(self.app_module, "get_instance_product", return_value="openclaw"):
+                    with patch.object(self.app_module, "get_instance_adapter", return_value=adapter) as get_adapter:
+                        code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
 
             get_adapter.assert_called_once_with("openclaw")
             self.assertEqual(code, 0)
@@ -247,8 +265,9 @@ class LifecycleActionTests(unittest.TestCase):
             self.app_module.PUBLIC_DIR = Path(public_dir)
             (Path(public_dir) / "users" / "alice").mkdir(parents=True)
 
-            with patch.object(self.app_module, "get_instance_product", return_value="hermes"):
-                code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
+            with patch.object(self.app_module, "get_instance_record", return_value={"legacy_user_id": "alice", "runtime_identifier": "hermes_alice", "product": "hermes"}):
+                with patch.object(self.app_module, "get_instance_product", return_value="hermes"):
+                    code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
 
             self.assertEqual(code, 1)
             self.assertEqual(output, "Unsupported instance product: hermes")
@@ -621,7 +640,12 @@ class BatchCreatePreflightTests(unittest.TestCase):
             )
 
             with patch.object(adapter, "run_command", return_value=(0, "updated")) as run_command:
-                code, output = adapter.update_version("alice", "2026.5.26", restore_model_provider=True, timeout=123)
+                code, output = adapter.update_version(
+                    {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
+                    "2026.5.26",
+                    restore_model_provider=True,
+                    timeout=123,
+                )
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "updated")
@@ -629,6 +653,23 @@ class BatchCreatePreflightTests(unittest.TestCase):
             self.assertTrue(str(command[0]).endswith("scripts/update_instance_version.sh"))
             self.assertEqual(command[1:], ["alice", "2026.5.26", "--restore-model-provider"])
             self.assertEqual(run_command.call_args.kwargs["timeout"], 123)
+
+    def test_version_update_job_reports_missing_instance(self):
+        with patch.object(self.app_module, "get_instance_record", return_value={}):
+            with patch.object(self.app_module, "persist_operation_metadata") as persist:
+                code, output = self.app_module.run_instance_version_update_job(
+                    "missing-user",
+                    "2026.5.26",
+                )
+
+        self.assertEqual((code, output), (1, "Instance not found: missing-user"))
+        persist.assert_called_once_with(
+            "update_version",
+            user_id="missing-user",
+            status="failed",
+            actor=None,
+            message="Instance not found: missing-user",
+        )
 
 
 if __name__ == "__main__":

@@ -2,9 +2,15 @@
 
 The first EvoScientist adapter phase manages existing two-container instances. It does not create, delete, restore, or update EvoScientist versions.
 
+Runtime lifecycle methods receive the instance metadata record rather than a
+platform user id. The adapter uses `instances.runtime_identifier` as the main
+container target and derives the proxy target by appending `-proxy`. The
+optional `legacy_user_id` remains only for legacy data and Nginx configuration
+paths.
+
 ## Runtime Contract
 
-For user ID `<user_id>`:
+For legacy user ID `<user_id>`:
 
 - Main container: `evoscientist_<user_id>`
 - TCP proxy container: `evoscientist_<user_id>-proxy`
@@ -33,4 +39,3 @@ sudo -E python3 scripts/metadata_cli.py register-instance \
 The command detects the external port and Basic Auth state from the user Nginx configuration, records the port allocation, and creates an auditable `register_instance` operation.
 
 After registration, restart manager-web and verify the instance list. The Web UI exposes status, start, stop, and restart actions. OpenClaw-only actions remain hidden.
-

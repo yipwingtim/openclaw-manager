@@ -72,6 +72,18 @@ def get_user_by_username(username, db_file=None, conn=None):
         )
 
 
+def get_user_by_public_id(public_id, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        return row_to_dict(
+            active_conn.execute(
+                "SELECT * FROM users WHERE public_id = ?",
+                (public_id,),
+            ).fetchone()
+        )
+
+
 def get_user_by_identity(provider, subject, db_file=None, conn=None):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
@@ -490,6 +502,78 @@ def list_instances_for_user(user_public_id, *, db_file=None, conn=None):
         return [instance_dict(row) for row in rows]
 
 
+def get_instance_for_user(instance_public_id, user_public_id, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        row = active_conn.execute(
+            """
+            SELECT i.*,
+                   current_user.id AS current_user_id,
+                   CASE
+                       WHEN i.owner_user_id = current_user.id THEN 'owner'
+                       ELSE m.role
+                   END AS access_role
+            FROM instances i
+            JOIN users current_user ON current_user.public_id = ?
+            LEFT JOIN instance_members m
+                ON m.instance_id = i.id
+               AND m.user_id = current_user.id
+            WHERE i.public_id = ?
+              AND current_user.status = 'active'
+              AND (i.owner_user_id = current_user.id OR m.user_id IS NOT NULL)
+            """,
+            (user_public_id, instance_public_id),
+        ).fetchone()
+        return instance_dict(row)
+
+
+def list_instance_members(instance_public_id, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        rows = active_conn.execute(
+            """
+            SELECT u.public_id AS user_public_id,
+                   u.username,
+                   u.display_name,
+                   m.role
+            FROM instance_members m
+            JOIN instances i ON i.id = m.instance_id
+            JOIN users u ON u.id = m.user_id
+            WHERE i.public_id = ?
+            ORDER BY m.id
+            """,
+            (instance_public_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+
+def remove_instance_member(
+    instance_public_id,
+    user_public_id,
+    *,
+    db_file=None,
+    conn=None,
+):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        cursor = active_conn.execute(
+            """
+            DELETE FROM instance_members
+            WHERE instance_id = (
+                SELECT id FROM instances WHERE public_id = ?
+            )
+              AND user_id = (
+                SELECT id FROM users WHERE public_id = ?
+            )
+            """,
+            (instance_public_id, user_public_id),
+        )
+        return cursor.rowcount > 0
+
+
 def add_instance_member(
     instance_public_id,
     user_public_id,
@@ -698,6 +782,49 @@ def update_execution_job(
                 (request_id,),
             ).fetchone()
         )
+
+
+def get_execution_job(request_id, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        return row_to_dict(
+            active_conn.execute(
+                """
+                SELECT job.*,
+                       actor.public_id AS actor_user_public_id,
+                       instance.public_id AS instance_public_id
+                FROM execution_jobs job
+                LEFT JOIN users actor ON actor.id = job.actor_user_id
+                LEFT JOIN instances instance ON instance.id = job.instance_id
+                WHERE job.request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+        )
+
+
+def list_execution_jobs(status=None, limit=100, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        where = "WHERE job.status = ?" if status else ""
+        params = (status, limit) if status else (limit,)
+        rows = active_conn.execute(
+            f"""
+            SELECT job.*,
+                   actor.public_id AS actor_user_public_id,
+                   instance.public_id AS instance_public_id
+            FROM execution_jobs job
+            LEFT JOIN users actor ON actor.id = job.actor_user_id
+            LEFT JOIN instances instance ON instance.id = job.instance_id
+            {where}
+            ORDER BY job.created_at, job.id
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
 
 
 def upsert_instance(
@@ -1001,6 +1128,32 @@ def list_operations(limit=100, conn=None):
             """
             SELECT * FROM operation_records
             ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+
+def list_operation_events(limit=100, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        rows = active_conn.execute(
+            """
+            SELECT o.request_id,
+                   actor.public_id AS actor_user_public_id,
+                   instance.public_id AS instance_public_id,
+                   o.source_service,
+                   o.action,
+                   o.status,
+                   o.message,
+                   o.created_at,
+                   o.finished_at
+            FROM operation_records o
+            LEFT JOIN users actor ON actor.id = o.actor_user_id
+            LEFT JOIN instances instance ON instance.id = o.instance_id
+            ORDER BY o.created_at DESC, o.id DESC
             LIMIT ?
             """,
             (limit,),

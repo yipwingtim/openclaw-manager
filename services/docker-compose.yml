@@ -1,4 +1,26 @@
 services:
+  manager-control:
+    build:
+      context: ..
+      dockerfile: services/manager-control/Dockerfile
+    container_name: openclaw-manager-control
+    restart: unless-stopped
+    env_file:
+      - ../config/openclaw-manager.env
+    volumes:
+      - ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}:${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - manager-net
+
   manager-web:
     build: ./manager-web
     container_name: openclaw-manager-web

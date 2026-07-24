@@ -2,20 +2,24 @@
 
 ## 1. 功能定位
 
-`manager-web` 是 OpenClaw Manager 的第一版用户自助面板。
+`manager-web` 同时承载兼容管理页面和统一多实例用户门户。
 
 它的目标不是给用户开放 SSH、容器 shell 或宿主机权限，而是把常用管理动作封装成受控 Web 操作。用户只看到自己的实例信息和平台允许执行的白名单动作。
 
 当前 MVP 重点解决三个问题：
 
 - 用户首次登录 OpenClaw Control UI 时，如果出现 Device Pairing，可通过管理面板触发审批流程，而不必让管理员手工进入服务器执行脚本。
-- 用户不需要额外记住 `30015` 管理端口，可直接在自己的实例端口访问 `/admin/`。
+- 用户可从统一入口 `/me` 查看自己拥有或被授权访问的全部实例。
 - 用户可以通过受控页面上传文件，并下载工作区中生成的常见导出文件。
 
 ## 2. 当前 MVP 能力
 
 当前版本提供以下能力：
 
+- 通过 `/me` 展示当前用户拥有和被授权访问的实例
+- 使用实例 UUID 路由 `/instances/<instance_public_id>` 执行用户操作
+- 按 owner、manager、operator、viewer 角色和产品能力共同裁剪操作
+- owner 和 manager 管理实例成员；manager 不能管理 manager 成员
 - 通过实例端口 `/admin/` 自动进入当前实例的管理页面
 - 通过管理员入口输入 `user_id` 打开实例页面
 - 查看 OpenClaw 实例状态
@@ -43,13 +47,31 @@ scripts/approve_device.sh <user_id> --latest
 
 ### 3.1 用户推荐入口
 
-推荐用户只记自己的实例端口：
+用户先访问当前统一管理入口并登录：
+
+```text
+https://<PUBLIC_HOST>:30015/me
+```
+
+门户使用实例 UUID 打开管理页面：
+
+```text
+https://<PUBLIC_HOST>:30015/instances/<instance_public_id>
+```
+
+owner 和 manager 可使用产品声明的用户管理能力；operator 可查看状态并进入应用；viewer
+仅查看实例元数据和状态。进入产品后仍由产品自身的 Token 或其他机制认证。
+
+旧 `/users/<user_id>` 页面只用于跳转到 UUID 门户，旧 user-id 文件和变更路由返回
+`410 Gone`，不再执行操作。
+
+实例应用本身仍使用现有独立端口：
 
 ```text
 https://<PUBLIC_HOST>:<USER_PORT>/
 ```
 
-如果需要审批设备、上传文件或查看下载列表，访问：
+实例端口内的 `/admin/` 兼容入口本期继续保留：
 
 ```text
 https://<PUBLIC_HOST>:<USER_PORT>/admin/
@@ -149,7 +171,7 @@ docker logs --tail 50 openclaw-manager-web
 
 ```bash
 curl -I http://127.0.0.1:18082/
-curl -I http://127.0.0.1:18082/users/<user_id>
+curl -I http://127.0.0.1:18082/me
 ```
 
 ## 5. Nginx 外部入口

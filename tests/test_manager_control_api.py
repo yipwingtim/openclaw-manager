@@ -218,6 +218,7 @@ class ManagerControlApiTests(unittest.TestCase):
                 "instances": [
                     {
                         "public_id": instance["public_id"],
+                        "legacy_user_id": None,
                         "product": "openclaw",
                         "instance_name": "Primary",
                         "status": "active",
@@ -309,6 +310,11 @@ class ManagerControlApiTests(unittest.TestCase):
             "viewer",
             db_file=self.db_file,
         )
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            conn.execute(
+                "UPDATE instances SET legacy_user_id = 'alice' WHERE id = ?",
+                (instance["id"],),
+            )
 
         with patch.object(
             self.control.request,
@@ -335,10 +341,53 @@ class ManagerControlApiTests(unittest.TestCase):
 
         self.assertEqual(visible_status, 200)
         self.assertEqual(visible.get_json()["instance"]["access_role"], "viewer")
+        self.assertEqual(
+            visible.get_json()["instance"]["legacy_user_id"],
+            "alice",
+        )
         self.assertNotIn("runtime_identifier", visible.get_json()["instance"])
         self.assertNotIn("data_path", visible.get_json()["instance"])
         self.assertEqual(hidden_status, 404)
         self.assertEqual(hidden.get_json(), {"error": "instance not found"})
+
+    def test_owner_adds_member_by_platform_username(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        member = self.control.metadata_store.create_user(
+            "Bob", db_file=self.db_file
+        )
+        headers = {
+            "Authorization": "Bearer user-token",
+            "X-Actor-User-Public-Id": self.user["public_id"],
+        }
+
+        with patch.object(self.control.request, "headers", headers):
+            with patch.object(
+                self.control.request,
+                "get_json",
+                return_value={"username": "bob", "role": "operator"},
+            ):
+                response, status = response_parts(
+                    self.control.add_instance_member_by_username(
+                        instance["public_id"]
+                    )
+                )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            response.get_json()["member"],
+            {
+                "user_public_id": member["public_id"],
+                "username": "Bob",
+                "display_name": None,
+                "role": "operator",
+            },
+        )
 
     def test_owner_can_add_and_list_instance_manager(self):
         instance = self.control.metadata_store.create_instance(

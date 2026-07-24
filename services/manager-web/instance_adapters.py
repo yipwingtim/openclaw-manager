@@ -8,7 +8,8 @@ class OpenClawDockerAdapter:
         {
             "status", "logs", "start", "stop", "restart", "create",
             "batch_create", "delete", "restore", "update_version",
-            "batch_set_model_provider", "basic_auth", "dashboard",
+            "batch_set_model_provider", "basic_auth", "dashboard", "access",
+            "device_pairing", "file_upload", "file_download", "file_delete",
         }
     )
 
@@ -226,7 +227,9 @@ class OpenClawDockerAdapter:
         )
 
 class EvoScientistDockerAdapter(OpenClawDockerAdapter):
-    CAPABILITIES = frozenset({"status", "logs", "start", "stop", "restart"})
+    CAPABILITIES = frozenset(
+        {"access", "status", "logs", "start", "stop", "restart"}
+    )
 
     def supports(self, action):
         return action in self.CAPABILITIES

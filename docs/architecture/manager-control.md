@@ -4,9 +4,9 @@
 `manager-user-web`, `manager-admin-web`, and `manager-executor` services.
 It is attached only to `manager-net` and has no published host port.
 
-The current combined `manager-web` still accesses SQLite directly. That
-compatibility path remains until the physical service-split PR switches all
-callers to this API and removes their database mounts.
+The current combined `manager-web` uses this API for user-facing instance and
+member authorization. Administrative compatibility paths still access SQLite
+directly until the physical service split removes their database mounts.
 
 ## Authentication
 
@@ -28,6 +28,7 @@ GET    /health
 GET    /internal/v1/users/{user_public_id}/instances
 GET    /internal/v1/instances/{instance_public_id}
 GET    /internal/v1/instances/{instance_public_id}/members
+POST   /internal/v1/instances/{instance_public_id}/members
 PUT    /internal/v1/instances/{instance_public_id}/members/{user_public_id}
 DELETE /internal/v1/instances/{instance_public_id}/members/{user_public_id}
 GET    /internal/v1/operations

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}我的实例 - 容器实例管理与运维平台{% endblock %}
+{% block nav_right %}当前用户：{{ current_user }}{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-end gap-3 flex-wrap mb-4">
+    <div>
+      <div class="page-kicker">统一用户门户</div>
+      <h1 class="page-title">我的实例</h1>
+      <div class="page-subtitle">查看自己拥有或被授权使用的智能体与科研应用。</div>
+    </div>
+    <div class="metric px-3 py-2">
+      <div class="metric-label">可访问实例</div>
+      <div class="metric-value">{{ instances|length }}</div>
+    </div>
+  </div>
+
+  {% if instances %}
+    <div class="row g-3">
+      {% for instance in instances %}
+        <div class="col-12 col-lg-6">
+          <article class="surface h-100 p-3 p-lg-4">
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-4">
+              <div>
+                <div class="page-kicker">{{ instance.product }}</div>
+                <h2 class="section-title mb-2">{{ instance.instance_name }}</h2>
+                <span class="badge-status badge-neutral">{{ instance.access_role }}</span>
+              </div>
+              {% if instance.status == "active" %}
+                <span class="badge-status badge-running">运行中</span>
+              {% elif instance.status == "stopped" %}
+                <span class="badge-status badge-stopped">已停止</span>
+              {% else %}
+                <span class="badge-status badge-neutral">{{ instance.status }}</span>
+              {% endif %}
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <a class="btn btn-oc" href="{{ url_for('instance_detail', instance_public_id=instance.public_id) }}">
+                查看实例
+              </a>
+              {% if instance.access_url and "access" in instance.allowed_actions %}
+                <a class="btn btn-oc-outline" href="{{ instance.access_url }}" target="_blank" rel="noreferrer">
+                  进入应用
+                </a>
+              {% endif %}
+            </div>
+          </article>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="surface p-4">
+      <div class="section-title mb-2">暂无可访问实例</div>
+      <div class="muted-small">管理员分配实例或实例所有者授予成员权限后，实例会显示在这里。</div>
+    </div>
+  {% endif %}
+{% endblock %}

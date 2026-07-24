@@ -19,6 +19,7 @@ from flask import Flask, Response, redirect, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
 import metadata_store
+import control_client
 from instance_adapters import EvoScientistDockerAdapter, OpenClawDockerAdapter
 
 
@@ -63,6 +64,28 @@ PROTECTED_FILENAMES = {
     for value in os.environ.get("MANAGER_PROTECTED_FILENAMES", DEFAULT_PROTECTED_FILENAMES).split(",")
     if value.strip()
 }
+INSTANCE_ROLE_ACTIONS = {
+    "owner": {
+        "access",
+        "status",
+        "logs",
+        "device_pairing",
+        "file_upload",
+        "file_download",
+        "file_delete",
+    },
+    "manager": {
+        "access",
+        "status",
+        "logs",
+        "device_pairing",
+        "file_upload",
+        "file_download",
+        "file_delete",
+    },
+    "operator": {"access", "status"},
+    "viewer": {"status"},
+}
 ADMIN_USERS = {user.strip() for user in os.environ.get("MANAGER_ADMIN_USERS", "openclaw").split(",") if user.strip()}
 LAST_CREATED_ACCOUNTS = {}
 CREATE_EVENTS = {}
@@ -75,7 +98,14 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 if not OPENCLAW_INTERNAL_TOKEN:
     app.logger.warning("OPENCLAW_INTERNAL_TOKEN is not configured; internal proxy token checks are disabled.")
 
-INTERNAL_PROXY_PATHS = ("/admin", "/instance-admin", "/users", "/me", "/go")
+INTERNAL_PROXY_PATHS = (
+    "/admin",
+    "/instance-admin",
+    "/instances",
+    "/users",
+    "/me",
+    "/go",
+)
 
 
 @app.before_request
@@ -1148,6 +1178,17 @@ def get_instance_capabilities(product):
     return sorted(get_instance_adapter(product).CAPABILITIES)
 
 
+def allowed_instance_actions(instance):
+    role = instance.get("access_role")
+    product = instance.get("product") or "openclaw"
+    allowed = INSTANCE_ROLE_ACTIONS.get(role, set()) & set(
+        get_instance_adapter(product).CAPABILITIES
+    )
+    if role in {"owner", "manager"}:
+        allowed.add("member_manage")
+    return allowed
+
+
 def get_container_status(user_id, product=None):
     resolved_product = product or get_instance_product(user_id)
     return get_instance_adapter(resolved_product).status(user_id)
@@ -1428,15 +1469,48 @@ def filter_users_by_user_id(users, user_id_filter):
     return [user for user in users if user_id_filter in user["user_id"].lower()]
 
 
-def render_user_dashboard(user_id, instance_mode=False):
-    product = get_instance_product(user_id)
-    if not get_instance_adapter(product).supports("dashboard"):
+def render_user_dashboard(
+    user_id,
+    instance_mode=False,
+    *,
+    instance=None,
+    allowed_actions=None,
+    actor_record=None,
+    members=None,
+):
+    product = (
+        instance.get("product")
+        if instance is not None
+        else get_instance_product(user_id)
+    ) or "openclaw"
+    if instance is None and not get_instance_adapter(product).supports("dashboard"):
         return redirect(build_access_url(detect_port(user_id)) or url_for("admin_users"))
 
     port = detect_port(user_id)
-    current_user = get_actor_user() or (user_id if instance_mode else "")
-    current_is_admin = False if instance_mode else is_admin_user(current_user)
-    current_can_manage = instance_mode or current_is_admin or current_user == user_id
+    current_user = (
+        actor_record["username"]
+        if actor_record is not None
+        else get_actor_user() or (user_id if instance_mode else "")
+    )
+    current_is_admin = (
+        False
+        if instance_mode or actor_record is not None
+        else is_admin_user(current_user)
+    )
+    resolved_actions = set(allowed_actions or ())
+    current_can_manage = (
+        bool(
+            resolved_actions
+            & {
+                "device_pairing",
+                "file_upload",
+                "file_download",
+                "file_delete",
+            }
+        )
+        if instance is not None
+        else instance_mode or current_is_admin or current_user == user_id
+    )
 
     if instance_mode:
         approve_url = "/admin/approve-latest"
@@ -1447,13 +1521,38 @@ def render_user_dashboard(user_id, instance_mode=False):
         download_endpoint = ""
         delete_endpoint = ""
     else:
-        approve_url = url_for("approve_latest", user_id=user_id)
-        refresh_url = url_for("refresh_devices", user_id=user_id)
-        upload_url = url_for("upload_file", user_id=user_id)
-        wechat_bind_url = url_for("user_wechat_bind_url", user_id=user_id)
-        wechat_bind_cancel_url = url_for("user_wechat_bind_cancel", user_id=user_id)
-        download_endpoint = "download_workspace_file"
-        delete_endpoint = "delete_workspace_file"
+        if instance is not None:
+            instance_public_id = instance["public_id"]
+            approve_url = url_for(
+                "portal_approve_latest",
+                instance_public_id=instance_public_id,
+            )
+            refresh_url = url_for(
+                "portal_refresh_devices",
+                instance_public_id=instance_public_id,
+            )
+            upload_url = url_for(
+                "portal_upload_file",
+                instance_public_id=instance_public_id,
+            )
+            wechat_bind_url = url_for(
+                "portal_wechat_bind_url",
+                instance_public_id=instance_public_id,
+            )
+            wechat_bind_cancel_url = url_for(
+                "portal_wechat_bind_cancel",
+                instance_public_id=instance_public_id,
+            )
+            download_endpoint = "portal_download_workspace_file"
+            delete_endpoint = "portal_delete_workspace_file"
+        else:
+            approve_url = url_for("approve_latest", user_id=user_id)
+            refresh_url = url_for("refresh_devices", user_id=user_id)
+            upload_url = url_for("upload_file", user_id=user_id)
+            wechat_bind_url = url_for("user_wechat_bind_url", user_id=user_id)
+            wechat_bind_cancel_url = url_for("user_wechat_bind_cancel", user_id=user_id)
+            download_endpoint = "download_workspace_file"
+            delete_endpoint = "delete_workspace_file"
 
     with WECHAT_BIND_JOBS_LOCK:
         wechat_bind_job = dict(WECHAT_BIND_JOBS.get(user_id, {}))
@@ -1462,6 +1561,10 @@ def render_user_dashboard(user_id, instance_mode=False):
     return render_template(
         "user.html",
         user_id=user_id,
+        instance_public_id=instance.get("public_id") if instance else None,
+        instance_name=instance.get("instance_name") if instance else user_id,
+        access_role=instance.get("access_role") if instance else "owner",
+        allowed_actions=resolved_actions,
         current_user=current_user,
         is_admin=current_is_admin,
         can_manage=current_can_manage,
@@ -1469,12 +1572,39 @@ def render_user_dashboard(user_id, instance_mode=False):
         show_global_admin_nav=(current_is_admin and not instance_mode),
         instance_mode=instance_mode,
         port=port,
-        access_url=build_access_url(port),
+        access_url=(
+            instance.get("access_url")
+            if instance is not None
+            else build_access_url(port)
+        ),
         status=get_container_status(user_id, product=product),
-        devices_cache=read_devices_cache(user_id),
-        recent_logs=get_container_logs(user_id, product=product),
-        uploaded_files=list_uploaded_files(user_id),
-        downloadable_files=list_downloadable_files(user_id),
+        devices_cache=(
+            read_devices_cache(user_id)
+            if instance is None or "device_pairing" in resolved_actions
+            else ""
+        ),
+        recent_logs=(
+            get_container_logs(user_id, product=product)
+            if instance is None or "logs" in resolved_actions
+            else ""
+        ),
+        uploaded_files=(
+            list_uploaded_files(user_id)
+            if instance is None or "file_upload" in resolved_actions
+            else []
+        ),
+        downloadable_files=(
+            list_downloadable_files(user_id)
+            if instance is None or "file_download" in resolved_actions
+            else []
+        ),
+        can_device_pairing=instance is None or "device_pairing" in resolved_actions,
+        can_file_upload=instance is None or "file_upload" in resolved_actions,
+        can_file_download=instance is None or "file_download" in resolved_actions,
+        can_file_delete=instance is None or "file_delete" in resolved_actions,
+        can_view_logs=instance is None or "logs" in resolved_actions,
+        can_manage_members=instance is not None and "member_manage" in resolved_actions,
+        members=members or [],
         download_extensions=", ".join(sorted(DOWNLOAD_EXTENSIONS)),
         protected_filenames=", ".join(sorted(PROTECTED_FILENAMES)),
         container_upload_dir=CONTAINER_UPLOAD_DIR,
@@ -1495,7 +1625,15 @@ def render_user_dashboard(user_id, instance_mode=False):
     )
 
 
-def redirect_to_user_dashboard(user_id, instance_mode=False, result="", error="", wechat_url=""):
+def redirect_to_user_dashboard(
+    user_id,
+    instance_mode=False,
+    *,
+    instance_public_id=None,
+    result="",
+    error="",
+    wechat_url="",
+):
     values = {}
     if result:
         values["result"] = result
@@ -1507,6 +1645,14 @@ def redirect_to_user_dashboard(user_id, instance_mode=False, result="", error=""
     if instance_mode:
         query = urlencode(values)
         return redirect("/admin/" + (f"?{query}" if query else ""))
+    if instance_public_id:
+        return redirect(
+            url_for(
+                "instance_detail",
+                instance_public_id=instance_public_id,
+                **values,
+            )
+        )
     return redirect(url_for("user_detail", user_id=user_id, **values))
 
 
@@ -1588,7 +1734,12 @@ def run_wechat_bind_job(user_id, container_name, job_id):
         )
 
 
-def cancel_wechat_bind_job_for_user(user_id, instance_mode=False):
+def cancel_wechat_bind_job_for_user(
+    user_id,
+    instance_mode=False,
+    *,
+    instance_public_id=None,
+):
     with WECHAT_BIND_JOBS_LOCK:
         job = WECHAT_BIND_JOBS.pop(user_id, None)
 
@@ -1599,13 +1750,28 @@ def cancel_wechat_bind_job_for_user(user_id, instance_mode=False):
         except Exception:
             pass
 
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result="微信绑定任务已取消，页面状态已清除。")
+    return redirect_to_user_dashboard(
+        user_id,
+        instance_mode=instance_mode,
+        instance_public_id=instance_public_id,
+        result="微信绑定任务已取消，页面状态已清除。",
+    )
 
 
-def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
+def generate_wechat_bind_url_for_user(
+    user_id,
+    instance_mode=False,
+    *,
+    instance_public_id=None,
+):
     container_name = f"openclaw_{user_id}"
     if get_container_status(user_id) == "STOPPED":
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="实例容器未运行，无法生成微信绑定链接。")
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error="实例容器未运行，无法生成微信绑定链接。",
+        )
 
     with WECHAT_BIND_JOBS_LOCK:
         existing_job = WECHAT_BIND_JOBS.get(user_id)
@@ -1619,6 +1785,7 @@ def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
             return redirect_to_user_dashboard(
                 user_id,
                 instance_mode=instance_mode,
+                instance_public_id=instance_public_id,
                 result=message,
                 wechat_url=bind_url,
             )
@@ -1631,6 +1798,7 @@ def generate_wechat_bind_url_for_user(user_id, instance_mode=False):
     return redirect_to_user_dashboard(
         user_id,
         instance_mode=instance_mode,
+        instance_public_id=instance_public_id,
         result="微信绑定任务已启动，页面会自动刷新并显示绑定链接。",
     )
 
@@ -1645,7 +1813,12 @@ def summarize_approval_output(output):
     return output[-800:]
 
 
-def approve_latest_for_user(user_id, instance_mode=False):
+def approve_latest_for_user(
+    user_id,
+    instance_mode=False,
+    *,
+    instance_public_id=None,
+):
     script = MANAGER_DIR / "scripts" / "approve_device.sh"
     result = subprocess.run(
         [str(script), user_id, "--latest"],
@@ -1657,14 +1830,29 @@ def approve_latest_for_user(user_id, instance_mode=False):
     )
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=summarize_approval_output(output))
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error=summarize_approval_output(output),
+        )
     summary = summarize_approval_output(output)
     operation_status = "skipped" if summary == "No pending device request found." else "success"
     summary += persist_operation_metadata("approve_device", user_id=user_id, status=operation_status, message=summary)
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=summary)
+    return redirect_to_user_dashboard(
+        user_id,
+        instance_mode=instance_mode,
+        instance_public_id=instance_public_id,
+        result=summary,
+    )
 
 
-def refresh_devices_for_user(user_id, instance_mode=False):
+def refresh_devices_for_user(
+    user_id,
+    instance_mode=False,
+    *,
+    instance_public_id=None,
+):
     script = MANAGER_DIR / "scripts" / "approve_device.sh"
     result = subprocess.run(
         [str(script), user_id, "--list-only"],
@@ -1676,29 +1864,64 @@ def refresh_devices_for_user(user_id, instance_mode=False):
     )
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=output[-1200:])
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error=output[-1200:],
+        )
     message = "Device cache refreshed."
     message += persist_operation_metadata("refresh_devices", user_id=user_id, message=message)
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message)
+    return redirect_to_user_dashboard(
+        user_id,
+        instance_mode=instance_mode,
+        instance_public_id=instance_public_id,
+        result=message,
+    )
 
 
-def upload_file_for_user(user_id, instance_mode=False):
+def upload_file_for_user(
+    user_id,
+    instance_mode=False,
+    *,
+    instance_public_id=None,
+):
     uploaded = request.files.get("file")
     if uploaded is None or uploaded.filename == "":
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="No file selected.")
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error="No file selected.",
+        )
 
     filename = secure_filename(uploaded.filename)
     if not filename:
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error="Invalid filename.")
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error="Invalid filename.",
+        )
     if Path(filename).suffix.lower() not in DOWNLOAD_EXTENSIONS:
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=f"Unsupported file type: {filename}")
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error=f"Unsupported file type: {filename}",
+        )
 
     upload_dir = get_upload_dir(user_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     target = upload_dir / filename
     if target.exists():
-        return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, error=f"File already exists: {filename}")
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error=f"File already exists: {filename}",
+        )
 
     uploaded.save(target)
     os.chmod(target, 0o644)
@@ -1708,6 +1931,7 @@ def upload_file_for_user(user_id, instance_mode=False):
     return redirect_to_user_dashboard(
         user_id,
         instance_mode=instance_mode,
+        instance_public_id=instance_public_id,
         result=message,
     )
 
@@ -1726,12 +1950,20 @@ def download_direct_file_for_user(user_id, filename):
     return send_file(target, as_attachment=True, download_name=target.name)
 
 
-def delete_file_for_user(user_id, root_key, relative_path, instance_mode=False):
+def delete_file_for_user(
+    user_id,
+    root_key,
+    relative_path,
+    instance_mode=False,
+    *,
+    instance_public_id=None,
+):
     target = resolve_deletable_file(user_id, root_key, relative_path)
     if target is None:
         return redirect_to_user_dashboard(
             user_id,
             instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
             error="File cannot be deleted from this panel.",
         )
 
@@ -1743,7 +1975,12 @@ def delete_file_for_user(user_id, root_key, relative_path, instance_mode=False):
         user_id=user_id,
         message=f"Deleted {root_key}/{relative_path}",
     )
-    return redirect_to_user_dashboard(user_id, instance_mode=instance_mode, result=message)
+    return redirect_to_user_dashboard(
+        user_id,
+        instance_mode=instance_mode,
+        instance_public_id=instance_public_id,
+        result=message,
+    )
 
 
 @app.get("/login")
@@ -1849,12 +2086,237 @@ def index():
 
 @app.get("/me")
 def my_instance():
-    actor = get_actor_user()
-    if not actor:
+    actor = get_actor_user_record()
+    if not actor or actor["status"] != "active":
         return forbidden("Forbidden: missing authenticated user.")
-    if is_admin_user(actor):
-        return redirect(url_for("admin_users"))
-    return redirect(url_for("user_detail", user_id=actor))
+    try:
+        instances = control_client.list_instances(actor["public_id"])
+    except control_client.ControlError as exc:
+        return render_template("error.html", message=str(exc)), exc.status
+    instances = [
+        {
+            **instance,
+            "allowed_actions": sorted(allowed_instance_actions(instance)),
+        }
+        for instance in instances
+    ]
+    return render_template(
+        "my_instances.html",
+        instances=instances,
+        current_user=actor["username"],
+        is_admin=actor["role"] == "admin",
+        show_global_admin_nav=actor["role"] == "admin",
+    )
+
+
+@app.get("/instances/<instance_public_id>")
+def instance_detail(instance_public_id):
+    actor = get_actor_user_record()
+    if not actor or actor["status"] != "active":
+        return forbidden("Forbidden: missing authenticated user.")
+    try:
+        instance = control_client.get_instance(
+            actor["public_id"],
+            instance_public_id,
+        )
+    except control_client.ControlError as exc:
+        return render_template("error.html", message=str(exc)), exc.status
+    actions = allowed_instance_actions(instance)
+    try:
+        members = (
+            control_client.list_members(actor["public_id"], instance_public_id)
+            if "member_manage" in actions
+            else []
+        )
+    except control_client.ControlError as exc:
+        return render_template("error.html", message=str(exc)), exc.status
+    user_id = validate_user_id(instance.get("legacy_user_id"))
+    if not user_id:
+        return render_template(
+            "instance_detail.html",
+            instance=instance,
+            instance_public_id=instance_public_id,
+            access_role=instance["access_role"],
+            allowed_actions=actions,
+            can_manage_members="member_manage" in actions,
+            members=members,
+            current_user=actor["username"],
+            is_admin=actor["role"] == "admin",
+            show_global_admin_nav=actor["role"] == "admin",
+        )
+    return render_user_dashboard(
+        user_id,
+        instance=instance,
+        allowed_actions=actions,
+        actor_record=actor,
+        members=members,
+    )
+
+
+def require_portal_action(instance_public_id, action):
+    actor = get_actor_user_record()
+    if not actor or actor["status"] != "active":
+        return None, forbidden("Forbidden: missing authenticated user.")
+    try:
+        instance = control_client.get_instance(
+            actor["public_id"],
+            instance_public_id,
+        )
+    except control_client.ControlError as exc:
+        return None, (render_template("error.html", message=str(exc)), exc.status)
+    if action not in allowed_instance_actions(instance):
+        return None, forbidden("Forbidden: instance action is not allowed.")
+    if action == "member_manage":
+        return "", None
+    user_id = validate_user_id(instance.get("legacy_user_id"))
+    if not user_id:
+        return None, (
+            render_template(
+                "error.html",
+                message="This instance does not support the legacy management panel.",
+            ),
+            409,
+        )
+    return user_id, None
+
+
+@app.post("/instances/<instance_public_id>/upload")
+def portal_upload_file(instance_public_id):
+    user_id, denied = require_portal_action(instance_public_id, "file_upload")
+    if denied:
+        return denied
+    return upload_file_for_user(
+        user_id,
+        instance_public_id=instance_public_id,
+    )
+
+
+@app.post("/instances/<instance_public_id>/approve-latest")
+def portal_approve_latest(instance_public_id):
+    user_id, denied = require_portal_action(instance_public_id, "device_pairing")
+    if denied:
+        return denied
+    return approve_latest_for_user(
+        user_id,
+        instance_public_id=instance_public_id,
+    )
+
+
+@app.post("/instances/<instance_public_id>/refresh-devices")
+def portal_refresh_devices(instance_public_id):
+    user_id, denied = require_portal_action(instance_public_id, "device_pairing")
+    if denied:
+        return denied
+    return refresh_devices_for_user(
+        user_id,
+        instance_public_id=instance_public_id,
+    )
+
+
+@app.post("/instances/<instance_public_id>/wechat-bind-url")
+def portal_wechat_bind_url(instance_public_id):
+    user_id, denied = require_portal_action(instance_public_id, "device_pairing")
+    if denied:
+        return denied
+    return generate_wechat_bind_url_for_user(
+        user_id,
+        instance_public_id=instance_public_id,
+    )
+
+
+@app.post("/instances/<instance_public_id>/wechat-bind-cancel")
+def portal_wechat_bind_cancel(instance_public_id):
+    user_id, denied = require_portal_action(instance_public_id, "device_pairing")
+    if denied:
+        return denied
+    return cancel_wechat_bind_job_for_user(
+        user_id,
+        instance_public_id=instance_public_id,
+    )
+
+
+@app.get("/instances/<instance_public_id>/files/<root_key>/<path:relative_path>")
+def portal_download_workspace_file(instance_public_id, root_key, relative_path):
+    user_id, denied = require_portal_action(instance_public_id, "file_download")
+    if denied:
+        return denied
+    return download_workspace_file_for_user(user_id, root_key, relative_path)
+
+
+@app.post(
+    "/instances/<instance_public_id>/files/<root_key>/<path:relative_path>/delete"
+)
+def portal_delete_workspace_file(instance_public_id, root_key, relative_path):
+    user_id, denied = require_portal_action(instance_public_id, "file_delete")
+    if denied:
+        return denied
+    return delete_file_for_user(
+        user_id,
+        root_key,
+        relative_path,
+        instance_public_id=instance_public_id,
+    )
+
+
+@app.post("/instances/<instance_public_id>/members")
+def portal_add_instance_member(instance_public_id):
+    _, denied = require_portal_action(instance_public_id, "member_manage")
+    if denied:
+        return denied
+    actor = get_actor_user_record()
+    try:
+        control_client.add_member(
+            actor["public_id"],
+            instance_public_id,
+            request.form.get("username", ""),
+            request.form.get("role", ""),
+        )
+    except control_client.ControlError as exc:
+        return redirect(
+            url_for(
+                "instance_detail",
+                instance_public_id=instance_public_id,
+                error=str(exc),
+            )
+        )
+    return redirect(
+        url_for(
+            "instance_detail",
+            instance_public_id=instance_public_id,
+            result="实例成员已保存。",
+        )
+    )
+
+
+@app.post(
+    "/instances/<instance_public_id>/members/<member_public_id>/delete"
+)
+def portal_remove_instance_member(instance_public_id, member_public_id):
+    _, denied = require_portal_action(instance_public_id, "member_manage")
+    if denied:
+        return denied
+    actor = get_actor_user_record()
+    try:
+        control_client.remove_member(
+            actor["public_id"],
+            instance_public_id,
+            member_public_id,
+        )
+    except control_client.ControlError as exc:
+        return redirect(
+            url_for(
+                "instance_detail",
+                instance_public_id=instance_public_id,
+                error=str(exc),
+            )
+        )
+    return redirect(
+        url_for(
+            "instance_detail",
+            instance_public_id=instance_public_id,
+            result="实例成员已移除。",
+        )
+    )
 
 
 @app.get("/admin")
@@ -2819,135 +3281,70 @@ def user_detail(user_id):
     user_id = validate_user_id(user_id)
     if not user_id:
         return render_template("error.html", message="Invalid user id."), 400
+    actor = get_actor_user_record()
+    if not actor or actor["status"] != "active":
+        return forbidden("Forbidden: missing authenticated user.")
+    try:
+        instances = control_client.list_instances(
+            actor["public_id"],
+        )
+    except control_client.ControlError as exc:
+        return render_template("error.html", message=str(exc)), exc.status
+    instance = next(
+        (
+            item
+            for item in instances
+            if item.get("legacy_user_id") == user_id
+        ),
+        None,
+    )
+    if instance is None:
+        return render_template("error.html", message="Instance not found."), 404
+    return redirect(
+        url_for("instance_detail", instance_public_id=instance["public_id"])
+    )
 
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
 
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return render_user_dashboard(user_id)
+def legacy_user_route_disabled():
+    return render_template(
+        "error.html",
+        message="Legacy user-id mutation routes are disabled; use the instance portal.",
+    ), 410
 
 
 @app.post("/users/<user_id>/approve-latest")
 def approve_latest(user_id):
-    user_id = validate_user_id(user_id)
-    if not user_id:
-        return render_template("error.html", message="Invalid user id."), 400
-
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
-
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return approve_latest_for_user(user_id)
+    return legacy_user_route_disabled()
 
 
 @app.post("/users/<user_id>/refresh-devices")
 def refresh_devices(user_id):
-    user_id = validate_user_id(user_id)
-    if not user_id:
-        return render_template("error.html", message="Invalid user id."), 400
-
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
-
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return refresh_devices_for_user(user_id)
+    return legacy_user_route_disabled()
 
 
 @app.post("/users/<user_id>/upload")
 def upload_file(user_id):
-    user_id = validate_user_id(user_id)
-    if not user_id:
-        return render_template("error.html", message="Invalid user id."), 400
-
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
-
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return upload_file_for_user(user_id)
+    return legacy_user_route_disabled()
 
 
 @app.post("/users/<user_id>/wechat-bind-url")
 def user_wechat_bind_url(user_id):
-    user_id = validate_user_id(user_id)
-    if not user_id:
-        return render_template("error.html", message="Invalid user id."), 400
-
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
-
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return generate_wechat_bind_url_for_user(user_id)
+    return legacy_user_route_disabled()
 
 
 @app.post("/users/<user_id>/wechat-bind-cancel")
 def user_wechat_bind_cancel(user_id):
-    user_id = validate_user_id(user_id)
-    if not user_id:
-        return render_template("error.html", message="Invalid user id."), 400
-
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
-
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return cancel_wechat_bind_job_for_user(user_id)
+    return legacy_user_route_disabled()
 
 
 @app.get("/users/<user_id>/files/<root_key>/<path:relative_path>")
 def download_workspace_file(user_id, root_key, relative_path):
-    user_id = validate_user_id(user_id)
-    if not user_id:
-        return render_template("error.html", message="Invalid user id."), 400
-
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
-
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return download_workspace_file_for_user(user_id, root_key, relative_path)
+    return legacy_user_route_disabled()
 
 
 @app.post("/users/<user_id>/files/<root_key>/<path:relative_path>/delete")
 def delete_workspace_file(user_id, root_key, relative_path):
-    user_id = validate_user_id(user_id)
-    if not user_id:
-        return render_template("error.html", message="Invalid user id."), 400
-
-    denied = require_instance_access(user_id)
-    if denied:
-        return denied
-
-    user_dir = get_user_dir(user_id)
-    if not user_dir.is_dir():
-        return render_template("error.html", message=f"User not found: {user_id}"), 404
-
-    return delete_file_for_user(user_id, root_key, relative_path)
+    return legacy_user_route_disabled()
 
 
 if __name__ == "__main__":

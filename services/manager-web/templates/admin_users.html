@@ -191,9 +191,6 @@
                           <span class="badge-status badge-neutral">&#26080;&#21487;&#29992;&#24674;&#22797;&#25968;&#25454;</span>
                         {% endif %}
                       {% else %}
-                        {% if "dashboard" in user.capabilities %}
-                          <a class="btn btn-sm btn-oc-outline" href="/users/{{ user.user_id }}">&#26597;&#30475;</a>
-                        {% endif %}
                         <form method="post" action="/admin/users/{{ user.user_id }}/lifecycle">
                           <input type="hidden" name="action" value="start">
                           <button class="btn btn-sm btn-oc-outline" type="submit">&#21551;&#21160;</button>

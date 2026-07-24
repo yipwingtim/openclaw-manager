@@ -46,6 +46,7 @@ app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 def portal_instance(instance):
     return {
         "public_id": instance["public_id"],
+        "legacy_user_id": instance.get("legacy_user_id"),
         "product": instance["product"],
         "instance_name": instance["instance_name"],
         "status": instance["status"],
@@ -238,7 +239,26 @@ def instance_members(instance_public_id):
 @require_services("manager-user-web")
 def set_instance_member(instance_public_id, member_public_id):
     payload = request.get_json(silent=True) or {}
-    role = payload.get("role")
+    return set_member(instance_public_id, member_public_id, payload.get("role"))
+
+
+@app.post("/internal/v1/instances/<instance_public_id>/members")
+@require_services("manager-user-web")
+def add_instance_member_by_username(instance_public_id):
+    payload = request.get_json(silent=True) or {}
+    username = payload.get("username")
+    if not isinstance(username, str) or not username.strip() or len(username) > 128:
+        return jsonify({"error": "valid username is required"}), 400
+    user = metadata_store.get_user_by_username(
+        username,
+        db_file=DB_FILE,
+    )
+    if user is None or user["status"] != "active":
+        return jsonify({"error": "active platform user not found"}), 404
+    return set_member(instance_public_id, user["public_id"], payload.get("role"))
+
+
+def set_member(instance_public_id, member_public_id, role):
     with metadata_store.connect(DB_FILE) as conn:
         instance, error = manageable_instance(instance_public_id, conn)
         if error:

@@ -25,6 +25,9 @@ services:
     build: ./manager-web
     container_name: openclaw-manager-web
     restart: unless-stopped
+    depends_on:
+      manager-control:
+        condition: service_healthy
     env_file:
       - ../config/openclaw-manager.env
     environment:

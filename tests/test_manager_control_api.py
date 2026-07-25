@@ -752,6 +752,134 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual([job["request_id"] for job in jobs], ["request-2"])
         self.assertEqual(jobs[0]["status"], "queued")
 
+    def test_executor_claims_queued_job_once_with_server_resolved_instance(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="request-1",
+            actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"],
+            action="instance.start",
+            params={},
+            db_file=self.db_file,
+        )
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer executor-token"},
+        ):
+            claimed, claimed_status = response_parts(
+                self.control.claim_execution_job()
+            )
+            empty, empty_status = response_parts(
+                self.control.claim_execution_job()
+            )
+
+        self.assertEqual(claimed_status, 200)
+        self.assertEqual(claimed.get_json()["job"]["status"], "running")
+        self.assertEqual(
+            claimed.get_json()["instance"],
+            {
+                "public_id": instance["public_id"],
+                "legacy_user_id": None,
+                "product": "openclaw",
+                "runtime_identifier": "openclaw_alice",
+            },
+        )
+        self.assertEqual(empty_status, 204)
+        self.assertEqual(empty, "")
+        self.assertEqual(
+            self.control.metadata_store.get_execution_job(
+                "request-1", db_file=self.db_file
+            )["status"],
+            "running",
+        )
+
+    def test_executor_does_not_claim_another_job_while_one_is_running(self):
+        for request_id in ("request-1", "request-2"):
+            self.control.metadata_store.create_execution_job(
+                request_id=request_id,
+                actor_user_id=self.user["id"],
+                action="instance.restart",
+                params={},
+                db_file=self.db_file,
+            )
+        self.control.metadata_store.update_execution_job(
+            "request-1", "running", db_file=self.db_file
+        )
+
+        job, instance = self.control.metadata_store.claim_next_execution_job(
+            db_file=self.db_file
+        )
+
+        self.assertIsNone(job)
+        self.assertIsNone(instance)
+
+    def test_executor_does_not_claim_job_after_its_instance_is_deleted(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="request-1",
+            actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"],
+            action="instance.start",
+            params={},
+            db_file=self.db_file,
+        )
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            conn.execute("DELETE FROM instances WHERE public_id = ?", (instance["public_id"],))
+
+        job, runtime_instance = self.control.metadata_store.claim_next_execution_job(
+            db_file=self.db_file
+        )
+
+        self.assertIsNone(job)
+        self.assertIsNone(runtime_instance)
+        self.assertEqual(
+            self.control.metadata_store.get_execution_job(
+                "request-1", db_file=self.db_file
+            )["status"],
+            "failed",
+        )
+
+    def test_executor_reclaims_job_after_stale_heartbeat(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="request-1",
+            actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"],
+            action="instance.start",
+            params={},
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.update_execution_job(
+            "request-1", "running", db_file=self.db_file
+        )
+
+        job, _ = self.control.metadata_store.claim_next_execution_job(
+            stale_seconds=0, db_file=self.db_file
+        )
+
+        self.assertEqual(job["request_id"], "request-1")
+        self.assertEqual(job["status"], "running")
+
 
 if __name__ == "__main__":
     unittest.main()

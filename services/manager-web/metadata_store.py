@@ -799,6 +799,77 @@ def update_execution_job(
         )
 
 
+def claim_next_execution_job(*, stale_seconds=900, db_file=None):
+    with connect(db_file) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        stale_before = (
+            datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
+        ).replace(microsecond=0).isoformat()
+        conn.execute(
+            """
+            UPDATE execution_jobs
+            SET status = 'queued', current_step = 'recovered after stale heartbeat',
+                updated_at = ?
+            WHERE status = 'running' AND heartbeat_at < ?
+            """,
+            (utc_now(), stale_before),
+        )
+        now = utc_now()
+        conn.execute(
+            """
+            UPDATE execution_jobs
+            SET status = 'failed', error_summary = 'instance not found',
+                updated_at = ?, finished_at = ?
+            WHERE status = 'queued' AND instance_id IS NULL
+            """,
+            (now, now),
+        )
+        if conn.execute(
+            "SELECT 1 FROM execution_jobs WHERE status = 'running' LIMIT 1"
+        ).fetchone():
+            return None, None
+        job = conn.execute(
+            """
+            SELECT job.* FROM execution_jobs job
+            JOIN instances instance ON instance.id = job.instance_id
+            WHERE job.status = 'queued'
+            ORDER BY job.created_at, job.id
+            LIMIT 1
+            """
+        ).fetchone()
+        if job is None:
+            return None, None
+        now = utc_now()
+        conn.execute(
+            """
+            UPDATE execution_jobs
+            SET status = 'running', started_at = ?, heartbeat_at = ?, updated_at = ?
+            WHERE id = ? AND status = 'queued'
+            """,
+            (now, now, now, job["id"]),
+        )
+        claimed = row_to_dict(
+            conn.execute(
+                """
+                SELECT job.*,
+                       actor.public_id AS actor_user_public_id,
+                       instance.public_id AS instance_public_id
+                FROM execution_jobs job
+                LEFT JOIN users actor ON actor.id = job.actor_user_id
+                LEFT JOIN instances instance ON instance.id = job.instance_id
+                WHERE job.id = ?
+                """,
+                (job["id"],),
+            ).fetchone()
+        )
+        instance = instance_dict(
+            conn.execute(
+                "SELECT * FROM instances WHERE id = ?", (job["instance_id"],)
+            ).fetchone()
+        )
+        return claimed, instance
+
+
 def get_execution_job(request_id, *, db_file=None, conn=None):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)

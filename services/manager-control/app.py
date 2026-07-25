@@ -17,6 +17,9 @@ DB_FILE = Path(
         "/data/docker/openclaw-public/manager.db",
     )
 )
+EXECUTOR_STALE_SECONDS = max(
+    1, int(os.environ.get("MANAGER_EXECUTOR_STALE_SECONDS", "900"))
+)
 TOKEN_ENV = {
     "manager-user-web": "MANAGER_CONTROL_USER_WEB_TOKEN",
     "manager-admin-web": "MANAGER_CONTROL_ADMIN_WEB_TOKEN",
@@ -108,6 +111,15 @@ def execution_job_payload(
         "current_step": job["current_step"],
         "error_summary": job["error_summary"],
         "output": job["output"],
+    }
+
+
+def executor_instance_payload(instance):
+    return {
+        "public_id": instance["public_id"],
+        "legacy_user_id": instance.get("legacy_user_id"),
+        "product": instance["product"],
+        "runtime_identifier": instance["runtime_identifier"],
     }
 
 
@@ -450,6 +462,23 @@ def list_execution_jobs():
         db_file=DB_FILE,
     )
     return jsonify({"jobs": [execution_job_payload(job) for job in jobs]})
+
+
+@app.post("/internal/v1/execution-jobs/claim")
+@require_services("manager-executor")
+def claim_execution_job():
+    job, instance = metadata_store.claim_next_execution_job(
+        stale_seconds=EXECUTOR_STALE_SECONDS,
+        db_file=DB_FILE,
+    )
+    if job is None:
+        return "", 204
+    return jsonify(
+        {
+            "job": execution_job_payload(job),
+            "instance": executor_instance_payload(instance),
+        }
+    )
 
 
 @app.get("/internal/v1/execution-jobs/<request_id>")

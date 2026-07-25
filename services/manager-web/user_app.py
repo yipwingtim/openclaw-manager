@@ -85,11 +85,87 @@ def instance_detail(instance_public_id):
         else []
     )
     snapshot = executor_client.snapshot(current["public_id"], instance_public_id)
+    job = None
+    job_id = request.args.get("job", "")
+    try:
+        if job_id:
+            job = control_client.get_execution_job(job_id, current["public_id"])
+        else:
+            job = control_client.get_wechat_bind_job(
+                current["public_id"], instance_public_id
+            )
+    except control_client.ControlError:
+        job = None
+    files = [
+        {
+            **item,
+            "root_label": item["root"],
+            "container_path": f'{item["root"]}/{item["relative_path"]}',
+        }
+        for item in snapshot["files"]
+    ]
+    wechat_job = None
+    wechat_url = ""
+    if job:
+        status = job["status"]
+        if status == "queued":
+            status = "starting"
+        elif status == "succeeded":
+            status = "success"
+        elif status == "running" and (job.get("output") or "").startswith(
+            "https://liteapp.weixin.qq.com/q/"
+        ):
+            status = "waiting_confirmation"
+            wechat_url = job["output"]
+        wechat_job = {
+            "request_id": job["request_id"],
+            "status": status,
+            "error": job.get("error_summary") or "",
+        }
     return render_template(
-        "instance_portal.html", instance=instance, members=members,
-        snapshot=snapshot,
-        current_user=current["username"], result=request.args.get("result", ""),
+        "user.html",
+        instance_name=instance["instance_name"],
+        instance_public_id=instance["public_id"],
+        instance_mode=False,
+        current_user=current["username"],
+        show_admin_links=False,
+        status=snapshot["status"],
+        port=instance.get("port"),
+        access_url=instance.get("access_url"),
+        allowed_actions=["access"],
+        result=request.args.get("result", ""),
         error=request.args.get("error", ""),
+        can_manage=snapshot["can_manage"],
+        can_device_pairing=snapshot["can_manage"] and instance["product"] == "openclaw",
+        can_file_upload=snapshot["can_manage"],
+        can_file_download=snapshot["can_manage"],
+        can_file_delete=snapshot["can_manage"],
+        can_view_logs=snapshot["can_manage"],
+        can_manage_members=instance["access_role"] in {"owner", "manager"},
+        members=members,
+        approve_url=url_for("device_action", instance_public_id=instance_public_id, action="approve-latest"),
+        refresh_url=url_for("device_action", instance_public_id=instance_public_id, action="refresh"),
+        wechat_bind_url=url_for("wechat_bind", instance_public_id=instance_public_id),
+        wechat_bind_cancel_url=(
+            url_for("cancel_wechat_bind", instance_public_id=instance_public_id, job_id=job["request_id"])
+            if job and job["status"] in {"queued", "running"}
+            else ""
+        ),
+        wechat_bind_timeout_minutes=5,
+        wechat_url=wechat_url,
+        wechat_bind_job=wechat_job,
+        upload_url=url_for("upload_file", instance_public_id=instance_public_id),
+        uploaded_files=[item for item in files if item["root"] == "uploads"],
+        downloadable_files=files,
+        download_endpoint="download_file",
+        delete_endpoint="delete_file",
+        download_extensions=snapshot["download_extensions"],
+        protected_filenames=snapshot["protected_filenames"],
+        container_upload_dir=snapshot["upload_dir"],
+        max_upload_mb=snapshot["max_upload_bytes"] // 1024 // 1024,
+        devices_cache=snapshot["devices"],
+        recent_logs=snapshot["logs"],
+        back_url=url_for("my_instances"),
     )
 
 
@@ -117,6 +193,30 @@ def device_action(instance_public_id, action):
         return render_template("error.html", message="Invalid action"), 400
     result = executor_client.device_action(current["public_id"], instance_public_id, action)
     return redirect(url_for("instance_detail", instance_public_id=instance_public_id, result=result.get("output", "")))
+
+
+@app.post("/instances/<instance_public_id>/wechat-bind")
+def wechat_bind(instance_public_id):
+    current = web_common.actor()
+    if not current:
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        job = control_client.create_wechat_bind(current["public_id"], instance_public_id)
+    except control_client.ControlError as exc:
+        return redirect(url_for("instance_detail", instance_public_id=instance_public_id, error=str(exc)))
+    return redirect(url_for("instance_detail", instance_public_id=instance_public_id, job=job["request_id"]))
+
+
+@app.post("/instances/<instance_public_id>/wechat-bind/<job_id>/cancel")
+def cancel_wechat_bind(instance_public_id, job_id):
+    current = web_common.actor()
+    if not current:
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        control_client.cancel_execution_job(job_id, current["public_id"])
+    except control_client.ControlError as exc:
+        return redirect(url_for("instance_detail", instance_public_id=instance_public_id, error=str(exc)))
+    return redirect(url_for("instance_detail", instance_public_id=instance_public_id, result="微信绑定任务已取消。"))
 
 
 @app.post("/instances/<instance_public_id>/files")

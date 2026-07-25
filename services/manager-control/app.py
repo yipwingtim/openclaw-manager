@@ -42,6 +42,7 @@ JOB_ACTION_PARAMS = {
     "instance.start": set(),
     "instance.stop": set(),
     "instance.restart": {"reason"},
+    "instance.wechat_bind": set(),
 }
 
 app = Flask(__name__)
@@ -56,6 +57,7 @@ def portal_instance(instance):
         "instance_name": instance["instance_name"],
         "status": instance["status"],
         "version": instance.get("openclaw_version"),
+        "port": instance.get("port"),
         "access_url": instance.get("access_url"),
         "access_role": instance["access_role"],
         "created_at": instance["created_at"],
@@ -588,7 +590,7 @@ def operation_events():
 
 
 @app.post("/internal/v1/execution-jobs")
-@require_services("manager-admin-web")
+@require_services("manager-admin-web", "manager-user-web")
 def create_execution_job():
     payload = request.get_json(silent=True) or {}
     request_id = payload.get("request_id")
@@ -623,18 +625,59 @@ def create_execution_job():
         actor_user_public_id,
         db_file=DB_FILE,
     )
-    if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+    if actor is None or actor["status"] != "active":
+        return jsonify({"error": "active actor is required"}), 403
+    if (
+        g.source_service == "manager-user-web"
+        and actor_public_id() != actor_user_public_id
+    ):
+        return jsonify({"error": "user service cannot impersonate another user"}), 403
+    if g.source_service == "manager-user-web" and action != "instance.wechat_bind":
+        return jsonify({"error": "user web action is not allowed"}), 403
+    if g.source_service == "manager-admin-web" and actor["role"] != "admin":
         return jsonify({"error": "active admin actor is required"}), 403
-    try:
-        job = metadata_store.create_execution_job(
-            request_id=request_id,
-            parent_request_id=parent_request_id,
-            actor_user_id=actor["id"],
-            instance_public_id=instance_public_id,
-            action=action,
-            params=params,
-            db_file=DB_FILE,
+    if action == "instance.wechat_bind":
+        if g.source_service != "manager-user-web":
+            return jsonify({"error": "wechat bind is only available to user web"}), 403
+        instance = metadata_store.get_instance_for_user(
+            instance_public_id, actor_user_public_id, db_file=DB_FILE
         )
+        if instance is None or instance.get("access_role") not in {"owner", "manager"}:
+            return jsonify({"error": "device pairing is not allowed"}), 403
+        if instance.get("product") != "openclaw":
+            return jsonify({"error": "device pairing is not supported"}), 400
+    try:
+        if action == "instance.wechat_bind":
+            with metadata_store.connect(DB_FILE) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                active_jobs = metadata_store.list_execution_jobs(
+                    limit=1,
+                    statuses=("queued", "running"),
+                    instance_public_id=instance_public_id,
+                    action=action,
+                    conn=conn,
+                )
+                if active_jobs:
+                    return jsonify({"error": "wechat bind is already running"}), 409
+                job = metadata_store.create_execution_job(
+                    request_id=request_id,
+                    parent_request_id=parent_request_id,
+                    actor_user_id=actor["id"],
+                    instance_public_id=instance_public_id,
+                    action=action,
+                    params=params,
+                    conn=conn,
+                )
+        else:
+            job = metadata_store.create_execution_job(
+                request_id=request_id,
+                parent_request_id=parent_request_id,
+                actor_user_id=actor["id"],
+                instance_public_id=instance_public_id,
+                action=action,
+                params=params,
+                db_file=DB_FILE,
+            )
     except ValueError as exc:
         status = 409 if "request_id already used" in str(exc) else 400
         return jsonify({"error": str(exc)}), status
@@ -691,11 +734,53 @@ def claim_execution_job():
 
 
 @app.get("/internal/v1/execution-jobs/<request_id>")
-@require_services("manager-admin-web")
+@require_services("manager-admin-web", "manager-user-web", "manager-executor")
 def get_execution_job(request_id):
     job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
     if job is None:
         return jsonify({"error": "execution job not found"}), 404
+    if g.source_service == "manager-user-web" and (
+        job.get("actor_user_public_id") != actor_public_id()
+        or job.get("action") != "instance.wechat_bind"
+    ):
+        return jsonify({"error": "execution job is not available"}), 403
+    return jsonify({"job": execution_job_payload(job)})
+
+
+@app.get("/internal/v1/instances/<instance_public_id>/wechat-bind-job")
+@require_services("manager-user-web")
+def current_wechat_bind_job(instance_public_id):
+    actor_id = actor_public_id()
+    if not actor_id:
+        return jsonify({"error": "actor user public ID is required"}), 400
+    jobs = metadata_store.list_execution_jobs(
+        limit=1,
+        actor_user_public_id=actor_id,
+        instance_public_id=instance_public_id,
+        action="instance.wechat_bind",
+        newest_first=True,
+        db_file=DB_FILE,
+    )
+    return jsonify({"job": execution_job_payload(jobs[0]) if jobs else None})
+
+
+@app.post("/internal/v1/execution-jobs/<request_id>/cancel")
+@require_services("manager-user-web")
+def cancel_execution_job(request_id):
+    job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if job is None:
+        return jsonify({"error": "execution job not found"}), 404
+    if (
+        job.get("actor_user_public_id") != actor_public_id()
+        or job.get("action") != "instance.wechat_bind"
+    ):
+        return jsonify({"error": "execution job is not available"}), 403
+    try:
+        job = metadata_store.update_execution_job(
+            request_id, "cancelled", db_file=DB_FILE
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
     return jsonify({"job": execution_job_payload(job)})
 
 

@@ -3,6 +3,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import secrets
 
 
 BASE_URL = os.environ.get(
@@ -139,3 +140,41 @@ def list_admin_instances():
 
 def create_execution_job(payload):
     return request_json("POST", "/internal/v1/execution-jobs", payload=payload)["job"]
+
+
+def create_wechat_bind(actor_public_id, instance_public_id):
+    return request_json(
+        "POST", "/internal/v1/execution-jobs",
+        actor_public_id=actor_public_id,
+        payload={
+            "request_id": f"wechat-bind-{secrets.token_urlsafe(12)}",
+            "actor_user_public_id": actor_public_id,
+            "instance_public_id": instance_public_id,
+            "action": "instance.wechat_bind",
+            "params": {},
+        },
+    )["job"]
+
+
+def get_execution_job(request_id, actor_public_id):
+    job_id = urllib.parse.quote(request_id, safe="")
+    return request_json(
+        "GET", f"/internal/v1/execution-jobs/{job_id}",
+        actor_public_id=actor_public_id,
+    )["job"]
+
+
+def get_wechat_bind_job(actor_public_id, instance_public_id):
+    instance_id = urllib.parse.quote(instance_public_id, safe="")
+    return request_json(
+        "GET", f"/internal/v1/instances/{instance_id}/wechat-bind-job",
+        actor_public_id=actor_public_id,
+    )["job"]
+
+
+def cancel_execution_job(request_id, actor_public_id):
+    job_id = urllib.parse.quote(request_id, safe="")
+    return request_json(
+        "POST", f"/internal/v1/execution-jobs/{job_id}/cancel",
+        actor_public_id=actor_public_id,
+    )["job"]

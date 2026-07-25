@@ -1059,9 +1059,9 @@ def get_instance(user_id, conn=None):
         return instance_dict(row)
 
 
-def list_instances(status=None, conn=None):
+def list_instances(status=None, db_file=None, conn=None):
     owns_conn = conn is None
-    context = connect() if owns_conn else nullcontext(conn)
+    context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
         if status:
             rows = active_conn.execute(

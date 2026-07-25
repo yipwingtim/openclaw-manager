@@ -232,6 +232,28 @@ class ManagerControlApiTests(unittest.TestCase):
             "/srv/openclaw/alice",
         )
 
+    def test_admin_lists_instances_from_control_database(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ):
+            response, status = response_parts(self.control.admin_instances())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            response.get_json()["instances"][0]["public_id"],
+            instance["public_id"],
+        )
+
     def test_health_does_not_create_a_missing_database(self):
         missing = Path(self.temp_dir.name) / "missing.db"
         self.control.DB_FILE = missing

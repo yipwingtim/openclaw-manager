@@ -9,7 +9,12 @@ BASE_URL = os.environ.get(
     "MANAGER_CONTROL_BASE_URL",
     "http://manager-control:8082",
 ).rstrip("/")
-SERVICE_TOKEN = os.environ.get("MANAGER_CONTROL_USER_WEB_TOKEN", "").strip()
+SERVICE_TOKEN = os.environ.get(
+    "MANAGER_CONTROL_ADMIN_WEB_TOKEN"
+    if os.environ.get("MANAGER_WEB_ROLE") == "admin"
+    else "MANAGER_CONTROL_USER_WEB_TOKEN",
+    "",
+).strip()
 TIMEOUT = int(os.environ.get("MANAGER_CONTROL_TIMEOUT", "5"))
 
 
@@ -98,3 +103,39 @@ def remove_member(user_public_id, instance_public_id, member_public_id):
         f"/internal/v1/instances/{instance_id}/members/{member_id}",
         actor_public_id=user_public_id,
     )
+
+
+def resolve_session(token_hash, provider):
+    query = urllib.parse.urlencode({"token_hash": token_hash, "provider": provider})
+    return request_json("GET", f"/internal/v1/auth/session?{query}")["user"]
+
+
+def resolve_identity(provider, subject):
+    query = urllib.parse.urlencode({"provider": provider, "subject": subject})
+    return request_json("GET", f"/internal/v1/auth/identity?{query}")["user"]
+
+
+def local_login(payload):
+    return request_json("POST", "/internal/v1/auth/local-login", payload=payload)["user"]
+
+
+def external_login(payload):
+    return request_json("POST", "/internal/v1/auth/external-login", payload=payload)["user"]
+
+
+def emergency_login(payload):
+    return request_json("POST", "/internal/v1/auth/emergency-login", payload=payload)["user"]
+
+
+def delete_session(token_hash):
+    request_json(
+        "DELETE", "/internal/v1/auth/session", payload={"token_hash": token_hash}
+    )
+
+
+def list_admin_instances():
+    return request_json("GET", "/internal/v1/admin/instances")["instances"]
+
+
+def create_execution_job(payload):
+    return request_json("POST", "/internal/v1/execution-jobs", payload=payload)["job"]

@@ -23,10 +23,13 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
     def test_manager_web_template_uses_runtime_resolved_upstream(self):
         template = MANAGER_TEMPLATE.read_text(encoding="utf-8")
 
-        self.assertIn("upstream manager_web_backend {", template)
+        self.assertIn("upstream manager_user_web_backend {", template)
+        self.assertIn("upstream manager_admin_web_backend {", template)
         self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", template)
-        self.assertIn("server openclaw-manager-web:8080 resolve;", template)
-        self.assertIn("proxy_pass http://manager_web_backend;", template)
+        self.assertIn("server openclaw-manager-user-web:8080 resolve;", template)
+        self.assertIn("server openclaw-manager-admin-web:8080 resolve;", template)
+        self.assertIn("proxy_pass http://manager_user_web_backend;", template)
+        self.assertIn("proxy_pass http://manager_admin_web_backend;", template)
 
     def test_services_deploy_migrates_nginx_upstreams(self):
         script = DEPLOY_SERVICES.read_text(encoding="utf-8")
@@ -92,8 +95,8 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", script)
         self.assertIn("server openclaw_${USER_ID}:18789 resolve;", script)
         self.assertIn("proxy_pass http://openclaw_backend_${PORT};", script)
-        self.assertIn("server openclaw-manager-web:8080 resolve;", script)
-        self.assertIn("proxy_pass http://manager_web_backend_${PORT}/instance-admin/;", script)
+        self.assertIn("server openclaw-manager-user-web:8080 resolve;", script)
+        self.assertIn("proxy_pass http://manager_user_web_backend_${PORT}/instance-admin/;", script)
         self.assertNotIn("proxy_pass http://openclaw_${USER_ID}:18789;", script)
         self.assertIn('TENANT_NETWORK="$(tenant_network_name "$USER_ID")"', script)
         self.assertIn('connect_container_to_network "$NGINX_CONTAINER_NAME" "$TENANT_NETWORK"', script)
@@ -220,11 +223,12 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             migrated_manager = manager_config.read_text(encoding="utf-8")
-            self.assertIn("upstream manager_web_backend {", migrated_manager)
+            self.assertIn("upstream manager_user_web_backend {", migrated_manager)
+            self.assertIn("upstream manager_admin_web_backend {", migrated_manager)
             self.assertIn(
-                "server openclaw-manager-web:8080 resolve;", migrated_manager
+                "server openclaw-manager-user-web:8080 resolve;", migrated_manager
             )
-            self.assertIn("proxy_pass http://manager_web_backend;", migrated_manager)
+            self.assertIn("proxy_pass http://manager_user_web_backend;", migrated_manager)
             self.assertIn(
                 'proxy_set_header X-OpenClaw-Internal-Token "secret";',
                 migrated_manager,

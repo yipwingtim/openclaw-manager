@@ -29,15 +29,14 @@ class ManagerAuthNginxTests(unittest.TestCase):
         self.assertIn("{provider_guard}", enable_admin)
         self.assertIn("Nginx root location marker not found", enable_admin)
 
-    def test_deploy_updates_nginx_before_restarting_manager_web(self):
+    def test_deploy_starts_services_before_switching_nginx(self):
         script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
 
         self.assertLess(
+            script.index("docker compose up -d --no-build --wait"),
             script.index('bash "$SCRIPT_DIR/update_manager_auth.sh"'),
-            script.index("docker compose up -d --no-build"),
         )
-        self.assertIn("actual_provider=", script)
-        self.assertIn('actual_provider="${actual_provider:-nginx-basic}"', script)
+        self.assertIn("Nginx configuration was not changed", script)
 
     def test_new_instance_guard_uses_configured_public_host(self):
         result = subprocess.run(

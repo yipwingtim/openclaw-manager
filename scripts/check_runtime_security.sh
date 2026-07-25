@@ -85,7 +85,8 @@ fi
 OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/data/docker/nginx/conf}"
 NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
-MANAGER_WEB_CONTAINER_NAME="${MANAGER_WEB_CONTAINER_NAME:-openclaw-manager-web}"
+MANAGER_USER_WEB_CONTAINER_NAME="${MANAGER_USER_WEB_CONTAINER_NAME:-openclaw-manager-user-web}"
+MANAGER_ADMIN_WEB_CONTAINER_NAME="${MANAGER_ADMIN_WEB_CONTAINER_NAME:-openclaw-manager-admin-web}"
 MODEL_PROXY_CONTAINER_NAME="${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
@@ -100,7 +101,7 @@ fi
 if [ -d "$NGINX_CONF_DIR" ]; then
   ok "Nginx conf dir exists: $NGINX_CONF_DIR"
 
-  manager_proxy_files="$(grep -rl --include='*.conf' "openclaw-manager-web:8080" "$NGINX_CONF_DIR" 2>/dev/null || true)"
+  manager_proxy_files="$(grep -rl --include='*.conf' -e "openclaw-manager-user-web:8080" -e "openclaw-manager-admin-web:8080" "$NGINX_CONF_DIR" 2>/dev/null || true)"
   if [ -n "$manager_proxy_files" ]; then
     while IFS= read -r file; do
       if nginx_internal_token_header_exists "$file"; then
@@ -119,7 +120,7 @@ if [ -d "$NGINX_CONF_DIR" ]; then
 $manager_proxy_files
 EOF
   else
-    warn "no Nginx conf proxies to openclaw-manager-web:8080"
+    warn "no Nginx conf proxies to split manager Web services"
   fi
 else
   error "Nginx conf dir missing: $NGINX_CONF_DIR"
@@ -150,21 +151,23 @@ else
 fi
 
 if has_cmd docker; then
-  if docker inspect "$MANAGER_WEB_CONTAINER_NAME" >/dev/null 2>&1; then
-    ok "container exists: $MANAGER_WEB_CONTAINER_NAME"
-    if container_has_network "$MANAGER_WEB_CONTAINER_NAME" manager-net; then
-      ok "$MANAGER_WEB_CONTAINER_NAME is attached to manager-net"
+  for manager_container in "$MANAGER_USER_WEB_CONTAINER_NAME" "$MANAGER_ADMIN_WEB_CONTAINER_NAME"; do
+    if docker inspect "$manager_container" >/dev/null 2>&1; then
+      ok "container exists: $manager_container"
+      if container_has_network "$manager_container" manager-net; then
+        ok "$manager_container is attached to manager-net"
+      else
+        error "$manager_container is not attached to manager-net"
+      fi
+      if container_has_network "$manager_container" agent-net; then
+        error "$manager_container is attached to agent-net"
+      else
+        ok "$manager_container is not attached to agent-net"
+      fi
     else
-      error "$MANAGER_WEB_CONTAINER_NAME is not attached to manager-net"
+      warn "container not found: $manager_container"
     fi
-    if container_has_network "$MANAGER_WEB_CONTAINER_NAME" agent-net; then
-      error "$MANAGER_WEB_CONTAINER_NAME is attached to agent-net"
-    else
-      ok "$MANAGER_WEB_CONTAINER_NAME is not attached to agent-net"
-    fi
-  else
-    warn "container not found: $MANAGER_WEB_CONTAINER_NAME"
-  fi
+  done
 
   if docker inspect "$NGINX_CONTAINER_NAME" >/dev/null 2>&1; then
     ok "container exists: $NGINX_CONTAINER_NAME"
@@ -231,8 +234,8 @@ EOF
   fi
 
   if docker inspect "$NGINX_CONTAINER_NAME" >/dev/null 2>&1; then
-    if docker exec "$NGINX_CONTAINER_NAME" sh -lc 'wget -S -O- -T 3 http://openclaw-manager-web:8080/admin/users 2>&1 | grep -q "403 FORBIDDEN"' >/dev/null 2>&1; then
-      ok "manager-web rejects direct internal admin request without token"
+    if docker exec "$NGINX_CONTAINER_NAME" sh -lc 'wget -S -O- -T 3 http://openclaw-manager-admin-web:8080/admin/instances 2>&1 | grep -q "403 FORBIDDEN"' >/dev/null 2>&1; then
+      ok "manager-admin-web rejects direct internal request without token"
     else
       warn "could not verify 403 for direct internal admin request without token"
     fi

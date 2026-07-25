@@ -1,8 +1,15 @@
-upstream manager_web_backend {
-    zone manager_web_backend 64k;
+upstream manager_user_web_backend {
+    zone manager_user_web_backend 64k;
     resolver 127.0.0.11 valid=10s ipv6=off;
     resolver_timeout 5s;
-    server openclaw-manager-web:8080 resolve;
+    server openclaw-manager-user-web:8080 resolve;
+}
+
+upstream manager_admin_web_backend {
+    zone manager_admin_web_backend 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    server openclaw-manager-admin-web:8080 resolve;
 }
 
 server {
@@ -18,8 +25,23 @@ server {
 
 {{MANAGER_EMERGENCY_LOCATION}}
 
+    location ^~ /admin {
+        proxy_pass http://manager_admin_web_backend;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Remote-User $remote_user;
+{{MANAGER_INTERNAL_TOKEN_HEADER}}
+    }
+
     location / {
-        proxy_pass http://manager_web_backend;
+        proxy_pass http://manager_user_web_backend;
 
         proxy_buffering off;
         proxy_request_buffering off;

@@ -7,7 +7,7 @@
         <div class="page-kicker">本地账号</div>
         <h1 class="page-title mb-3">登录 OpenClaw Manager</h1>
         {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
-        <form method="post" action="/login">
+        <form method="post" action="{{ login_action|default('/login') }}">
           <input type="hidden" name="csrf_token" value="{{ login_csrf }}">
           <label class="form-label" for="username">用户名</label>
           <input class="form-control mb-3" id="username" name="username" autocomplete="username" required autofocus>

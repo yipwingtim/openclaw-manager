@@ -1,12 +1,12 @@
 # Manager Control
 
-`manager-control` is the internal metadata authority for the future
+`manager-control` is the internal metadata authority for the
 `manager-user-web`, `manager-admin-web`, and `manager-executor` services.
 It is attached only to `manager-net` and has no published host port.
 
-The current combined `manager-web` uses this API for user-facing instance and
-member authorization. Administrative compatibility paths still access SQLite
-directly until the physical service split removes their database mounts.
+The split user and admin Web services use this API for authentication,
+sessions, instance authorization, and execution job creation. They do not
+mount SQLite directly.
 
 ## Authentication
 
@@ -26,7 +26,9 @@ different high-entropy secrets and must not be committed to the repository.
 ```text
 GET    /health
 GET    /internal/v1/users/{user_public_id}/instances
+GET    /internal/v1/admin/instances
 GET    /internal/v1/instances/{instance_public_id}
+GET    /internal/v1/executor/instances/{instance_public_id}
 GET    /internal/v1/instances/{instance_public_id}/members
 POST   /internal/v1/instances/{instance_public_id}/members
 PUT    /internal/v1/instances/{instance_public_id}/members/{user_public_id}
@@ -37,6 +39,12 @@ GET    /internal/v1/execution-jobs
 POST   /internal/v1/execution-jobs/claim
 GET    /internal/v1/execution-jobs/{request_id}
 PATCH  /internal/v1/execution-jobs/{request_id}
+GET    /internal/v1/auth/session
+DELETE /internal/v1/auth/session
+GET    /internal/v1/auth/identity
+POST   /internal/v1/auth/local-login
+POST   /internal/v1/auth/external-login
+POST   /internal/v1/auth/emergency-login
 ```
 
 User-facing member operations require

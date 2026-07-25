@@ -38,15 +38,19 @@ services:
       NGINX_USERS_CONF_DIR: ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
     volumes:
       - ..:/opt/openclaw-manager:ro
+      - ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}:${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
       - ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}:${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - manager-net
 
-  manager-web:
-    build: ./manager-web
-    container_name: openclaw-manager-web
+  manager-executor-api:
+    build:
+      context: ..
+      dockerfile: services/manager-executor/Dockerfile
+    container_name: openclaw-manager-executor-api
     restart: unless-stopped
+    command: ["gunicorn", "--bind", "0.0.0.0:8083", "--workers", "1", "--timeout", "120", "api:app"]
     depends_on:
       manager-control:
         condition: service_healthy
@@ -55,17 +59,59 @@ services:
     environment:
       OPENCLAW_MANAGER_DIR: /opt/openclaw-manager
       OPENCLAW_PUBLIC_DIR: ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
-      NGINX_USERS_CONF_DIR: ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
-    ports:
-      - "127.0.0.1:18082:8080"
     volumes:
       - ..:/opt/openclaw-manager:ro
       - ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}:${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
-      - ${NGINX_COMPOSE_DIR:-/data/docker/nginx/compose}:${NGINX_COMPOSE_DIR:-/data/docker/nginx/compose}
-      - ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}:${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
-      - ${NGINX_AUTH_DIR:-/data/docker/nginx/auth}:${NGINX_AUTH_DIR:-/data/docker/nginx/auth}:ro
-      - ${NGINX_AUTH_USERS_DIR:-/data/docker/nginx/auth/users}:${NGINX_AUTH_USERS_DIR:-/data/docker/nginx/auth/users}
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8083/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - manager-net
+
+  manager-user-web:
+    build: ./manager-web
+    container_name: openclaw-manager-user-web
+    restart: unless-stopped
+    depends_on:
+      manager-control:
+        condition: service_healthy
+    env_file:
+      - ../config/openclaw-manager.env
+    environment:
+      MANAGER_WEB_ROLE: user
+    command: ["python", "user_app.py"]
+    ports:
+      - "127.0.0.1:18082:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - manager-net
+
+  manager-admin-web:
+    build: ./manager-web
+    container_name: openclaw-manager-admin-web
+    restart: unless-stopped
+    depends_on:
+      manager-control:
+        condition: service_healthy
+    env_file:
+      - ../config/openclaw-manager.env
+    environment:
+      MANAGER_WEB_ROLE: admin
+    command: ["python", "admin_app.py"]
+    ports:
+      - "127.0.0.1:18083:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     networks:
       - manager-net
 

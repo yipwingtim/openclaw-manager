@@ -24,11 +24,13 @@ class OpenClawDockerAdapter:
             raise ValueError("instance runtime_identifier is required")
         return target.strip()
 
-    def get_legacy_user_id(self, instance):
+    def get_legacy_user_id(self, instance, required=True):
         if not isinstance(instance, dict):
             raise TypeError("adapter filesystem operations require an instance record")
         user_id = instance.get("legacy_user_id") or instance.get("user_id")
         if not isinstance(user_id, str) or not user_id.strip():
+            if not required:
+                return None
             raise ValueError("instance legacy_user_id is required")
         return user_id.strip()
 
@@ -141,14 +143,14 @@ class OpenClawDockerAdapter:
     def status(self, instance):
         runtime_target = self.get_runtime_target(instance)
         result = subprocess.run(
-            ["docker", "ps", "--filter", f"name=^{runtime_target}$", "--format", "{{.Status}}"],
+            ["docker", "inspect", "--format", "{{.State.Status}}", runtime_target],
             cwd=str(self.manager_dir),
             text=True,
             capture_output=True,
             timeout=10,
             check=False,
         )
-        return result.stdout.strip() or "STOPPED"
+        return "Up" if result.returncode == 0 and result.stdout.strip() == "running" else "STOPPED"
 
     def logs(self, instance, tail=120):
         runtime_target = self.get_runtime_target(instance)
@@ -167,9 +169,9 @@ class OpenClawDockerAdapter:
 
     def start(self, instance):
         runtime_target = self.get_runtime_target(instance)
-        legacy_user_id = self.get_legacy_user_id(instance)
+        legacy_user_id = self.get_legacy_user_id(instance, required=False)
         start_code, start_output = self.run_command(["docker", "start", runtime_target], timeout=90)
-        if start_code != 0:
+        if start_code != 0 or not legacy_user_id:
             return start_code, start_output
 
         nginx_code, nginx_output = self.enable_nginx_user_conf(legacy_user_id)
@@ -185,17 +187,21 @@ class OpenClawDockerAdapter:
 
     def stop(self, instance):
         runtime_target = self.get_runtime_target(instance)
-        legacy_user_id = self.get_legacy_user_id(instance)
-        nginx_code, nginx_output = self.disable_nginx_user_conf(legacy_user_id)
-        if nginx_code != 0:
-            return nginx_code, nginx_output
+        legacy_user_id = self.get_legacy_user_id(instance, required=False)
+        nginx_code, nginx_output = (0, "")
+        if legacy_user_id:
+            nginx_code, nginx_output = self.disable_nginx_user_conf(legacy_user_id)
+            if nginx_code != 0:
+                return nginx_code, nginx_output
 
         stop_code, stop_output = self.run_command(["docker", "stop", runtime_target], timeout=60)
         combined_output = "\n".join(part for part in [nginx_output, stop_output] if part)
         if stop_code == 0:
             return 0, combined_output
 
-        rollback_code, rollback_output = self.enable_nginx_user_conf(legacy_user_id)
+        rollback_code, rollback_output = (0, "")
+        if legacy_user_id:
+            rollback_code, rollback_output = self.enable_nginx_user_conf(legacy_user_id)
         rollback_note = "\nRolled back nginx config disable."
         if rollback_code != 0:
             rollback_note += f"\nRollback enable failed:\n{rollback_output}"
@@ -315,7 +321,10 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
                 return code, output
             started.append(container_name)
 
-        nginx_code, nginx_output = self.enable_nginx_user_conf(self.get_legacy_user_id(instance))
+        legacy_user_id = self.get_legacy_user_id(instance, required=False)
+        if not legacy_user_id:
+            return 0, ""
+        nginx_code, nginx_output = self.enable_nginx_user_conf(legacy_user_id)
         if nginx_code == 0:
             return 0, nginx_output
 
@@ -324,10 +333,12 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
         return nginx_code, nginx_output
 
     def stop(self, instance):
-        legacy_user_id = self.get_legacy_user_id(instance)
-        nginx_code, nginx_output = self.disable_nginx_user_conf(legacy_user_id)
-        if nginx_code != 0:
-            return nginx_code, nginx_output
+        legacy_user_id = self.get_legacy_user_id(instance, required=False)
+        nginx_code, nginx_output = (0, "")
+        if legacy_user_id:
+            nginx_code, nginx_output = self.disable_nginx_user_conf(legacy_user_id)
+            if nginx_code != 0:
+                return nginx_code, nginx_output
 
         outputs = [nginx_output]
         stopped = []
@@ -337,7 +348,8 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
             if code != 0:
                 for stopped_name in reversed(stopped):
                     self.run_command(["docker", "start", stopped_name], timeout=90)
-                self.enable_nginx_user_conf(legacy_user_id)
+                if legacy_user_id:
+                    self.enable_nginx_user_conf(legacy_user_id)
                 return code, "\n".join(part for part in outputs if part)
             stopped.append(container_name)
         return 0, "\n".join(part for part in outputs if part)

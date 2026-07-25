@@ -76,6 +76,20 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 ],
             )
 
+    def test_start_without_legacy_user_id_skips_nginx(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            instance = {"runtime_identifier": "evoscientist.project-1"}
+
+            with patch.object(adapter, "run_command", return_value=(0, "started")) as run, patch.object(
+                adapter, "enable_nginx_user_conf"
+            ) as enable_nginx:
+                result = adapter.start(instance)
+
+            self.assertEqual(result, (0, ""))
+            self.assertEqual(run.call_count, 2)
+            enable_nginx.assert_not_called()
+
     def test_status_is_degraded_when_proxy_is_stopped(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))

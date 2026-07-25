@@ -124,13 +124,14 @@ class LifecycleActionTests(unittest.TestCase):
             status=lambda value: "Up",
             logs=lambda value, tail=120: "logs",
         )
-        with patch.object(self.app_module, "get_instance_record", return_value=instance):
+        with patch.object(self.app_module, "get_instance_record", return_value=instance) as get_record:
             with patch.object(self.app_module, "get_instance_adapter", return_value=adapter) as get_adapter:
                 with patch.object(adapter, "status", return_value="Up") as status:
                     with patch.object(adapter, "logs", return_value="logs") as logs:
                         self.assertEqual(self.app_module.get_container_status("alice"), "Up")
                         self.assertEqual(self.app_module.get_container_logs("alice"), "logs")
 
+        self.assertEqual(get_record.call_count, 2)
         self.assertEqual(get_adapter.call_args_list[0].args, ("openclaw",))
         status.assert_called_once_with(instance)
         logs.assert_called_once_with(instance, tail=120)
@@ -244,6 +245,33 @@ class LifecycleActionTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "started alice")
+
+    def test_lifecycle_reports_invalid_instance_metadata(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            (Path(public_dir) / "users" / "alice").mkdir(parents=True)
+            adapter = types.SimpleNamespace(start=lambda instance: (_ for _ in ()).throw(
+                ValueError("instance runtime_identifier is required")
+            ))
+
+            with patch.object(self.app_module, "get_instance_record", return_value={"product": "openclaw"}), patch.object(
+                self.app_module, "get_instance_adapter", return_value=adapter
+            ):
+                result = self.app_module.run_instance_lifecycle_action("alice", "start")
+
+            self.assertEqual(result, (1, "instance runtime_identifier is required"))
+
+    def test_skill_install_reports_invalid_instance_metadata(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            (Path(public_dir) / "users" / "alice").mkdir(parents=True)
+
+            with patch.object(
+                self.app_module, "get_instance_record", return_value={"product": "openclaw"}
+            ), patch.object(self.app_module, "get_container_status", return_value="Up"):
+                result = self.app_module.install_skill_for_user("alice", "example-skill")
+
+            self.assertEqual(result, (1, "instance runtime_identifier is required"))
 
     def test_lifecycle_uses_metadata_product_for_adapter_selection(self):
         with TemporaryDirectory() as public_dir:
@@ -670,6 +698,18 @@ class BatchCreatePreflightTests(unittest.TestCase):
             actor=None,
             message="Instance not found: missing-user",
         )
+
+    def test_version_update_job_persists_invalid_instance_failure(self):
+        adapter = types.SimpleNamespace(update_version=lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("instance legacy_user_id is required")
+        ))
+        with patch.object(self.app_module, "get_instance_record", return_value={"product": "openclaw"}), patch.object(
+            self.app_module, "get_instance_adapter", return_value=adapter
+        ), patch.object(self.app_module, "persist_operation_metadata") as persist:
+            result = self.app_module.run_instance_version_update_job("alice", "2026.5.26")
+
+        self.assertEqual(result, (1, "instance legacy_user_id is required"))
+        self.assertEqual(persist.call_args.kwargs["status"], "failed")
 
 
 if __name__ == "__main__":

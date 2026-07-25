@@ -42,7 +42,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
             adapter = self.make_adapter(Path(temp_dir))
             instance = {"runtime_identifier": "openclaw_alice_custom"}
             completed = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="Up 5 minutes\n", stderr=""
+                args=[], returncode=0, stdout="running\n", stderr=""
             )
 
             with patch.object(
@@ -50,19 +50,32 @@ class AdapterInstanceModelTests(unittest.TestCase):
                 "run",
                 return_value=completed,
             ) as run:
-                self.assertEqual(adapter.status(instance), "Up 5 minutes")
+                self.assertEqual(adapter.status(instance), "Up")
 
             self.assertEqual(
                 run.call_args.args[0],
                 [
                     "docker",
-                    "ps",
-                    "--filter",
-                    "name=^openclaw_alice_custom$",
+                    "inspect",
                     "--format",
-                    "{{.Status}}",
+                    "{{.State.Status}}",
+                    "openclaw_alice_custom",
                 ],
             )
+
+    def test_start_without_legacy_user_id_skips_nginx(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            instance = {"runtime_identifier": "openclaw.project-1"}
+
+            with patch.object(adapter, "run_command", return_value=(0, "started")) as run, patch.object(
+                adapter, "enable_nginx_user_conf"
+            ) as enable_nginx:
+                result = adapter.start(instance)
+
+            self.assertEqual(result, (0, "started"))
+            run.assert_called_once_with(["docker", "start", "openclaw.project-1"], timeout=90)
+            enable_nginx.assert_not_called()
 
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:

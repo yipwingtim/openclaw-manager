@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -123,6 +124,31 @@ class ManagerExecutorTests(unittest.TestCase):
 
         adapter.restart.assert_called_once()
         self.assertEqual(control.update.call_args.args, ("request-1", "failed"))
+
+    def test_runtime_file_path_cannot_escape_instance_data_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            instance = {"data_path": temp_dir}
+            inside = self.executor.resolve_instance_file(
+                instance, "workspace", "notes.txt"
+            )
+            escaped = self.executor.resolve_instance_file(
+                instance, "workspace", "../../etc/passwd"
+            )
+
+        self.assertEqual(inside, Path(temp_dir) / "workspace" / "notes.txt")
+        self.assertIsNone(escaped)
+
+    def test_runtime_file_root_symlink_cannot_escape_instance_data_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_path = Path(temp_dir) / "instance"
+            data_path.mkdir()
+            (data_path / "workspace").symlink_to(Path(temp_dir))
+
+            target = self.executor.resolve_instance_file(
+                {"data_path": str(data_path)}, "workspace", "secret.txt"
+            )
+
+        self.assertIsNone(target)
 
 
 if __name__ == "__main__":

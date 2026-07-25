@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ instance.instance_name }} - 我的实例{% endblock %}
+{% block nav_right %}当前用户：{{ current_user }}{% endblock %}
+{% block content %}
+  <div class="page-kicker">{{ instance.product }}</div>
+  <h1 class="page-title">{{ instance.instance_name }}</h1>
+  {% if result %}<div class="alert soft-success">{{ result }}</div>{% endif %}
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+  <div class="surface p-3 mb-3">
+    <div>状态：{{ snapshot.status }}</div>
+    <div>权限：{{ instance.access_role }}</div>
+    {% if instance.access_url %}<a href="{{ instance.access_url }}" target="_blank" rel="noreferrer">进入应用</a>{% endif %}
+  </div>
+  {% if snapshot.can_manage %}<div class="surface p-3 mb-3">
+    <h2 class="section-title">设备</h2><pre>{{ snapshot.devices }}</pre>
+    <form method="post" action="/instances/{{ instance.public_id }}/devices/refresh"><button class="btn btn-oc-outline">刷新</button></form>
+    <form method="post" action="/instances/{{ instance.public_id }}/devices/approve-latest"><button class="btn btn-oc">审批最新请求</button></form>
+  </div>
+  <div class="surface p-3 mb-3">
+    <h2 class="section-title">文件</h2>
+    <form method="post" action="/instances/{{ instance.public_id }}/files" enctype="multipart/form-data"><input type="file" name="file" required><button class="btn btn-oc">上传</button></form>
+    {% for file in snapshot.files %}<div class="d-flex gap-2 mt-2"><a href="/instances/{{ instance.public_id }}/files/{{ file.root }}/{{ file.relative_path }}">{{ file.name }}</a>{% if file.can_delete %}<form method="post" action="/instances/{{ instance.public_id }}/files/{{ file.root }}/{{ file.relative_path }}/delete"><button class="btn btn-sm btn-outline-danger">删除</button></form>{% endif %}</div>{% endfor %}
+  </div>
+  <div class="surface p-3 mb-3"><h2 class="section-title">日志</h2><pre>{{ snapshot.logs }}</pre></div>{% endif %}
+  {% set instance_public_id = instance.public_id %}
+  {% set access_role = instance.access_role %}
+  {% if access_role in ["owner", "manager"] %}{% include "_instance_members.html" %}{% endif %}
+{% endblock %}

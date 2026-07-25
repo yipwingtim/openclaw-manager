@@ -116,7 +116,7 @@ admin_block = f"""    location = /admin {{
     location /admin/ {{
 {provider_guard}
 {auth_block}
-        proxy_pass http://openclaw-manager-web:8080/instance-admin/;
+        proxy_pass http://openclaw-manager-user-web:8080/instance-admin/;
 
         proxy_buffering off;
         proxy_request_buffering off;

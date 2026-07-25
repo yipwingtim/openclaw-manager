@@ -543,6 +543,17 @@ def get_instance_for_user(instance_public_id, user_public_id, *, db_file=None, c
         return instance_dict(row)
 
 
+def get_instance_by_public_id(instance_public_id, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        return instance_dict(
+            active_conn.execute(
+                "SELECT * FROM instances WHERE public_id = ?", (instance_public_id,)
+            ).fetchone()
+        )
+
+
 def list_instance_members(instance_public_id, *, db_file=None, conn=None):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)

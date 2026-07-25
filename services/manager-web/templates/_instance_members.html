@@ -1,7 +1,7 @@
 <div class="surface p-3 p-lg-4 mb-3">
   <div class="section-title mb-1">实例成员</div>
   <div class="muted-small mb-3">成员必须是管理员已创建的有效平台用户。</div>
-  <form method="post" action="{{ url_for('portal_add_instance_member', instance_public_id=instance_public_id) }}" class="row g-2 mb-3">
+  <form method="post" action="{{ url_for('add_member', instance_public_id=instance_public_id) }}" class="row g-2 mb-3">
     <div class="col-12 col-md-6">
       <label class="form-label" for="member-username">平台用户名</label>
       <input class="form-control" id="member-username" name="username" required maxlength="128">
@@ -29,7 +29,7 @@
               <td><span class="badge-status badge-neutral">{{ member.role }}</span></td>
               <td>
                 {% if access_role == "owner" or member.role != "manager" %}
-                  <form method="post" action="{{ url_for('portal_remove_instance_member', instance_public_id=instance_public_id, member_public_id=member.user_public_id) }}" onsubmit="return confirm('确认移除成员 {{ member.username }}？');">
+                  <form method="post" action="{{ url_for('remove_member', instance_public_id=instance_public_id, member_public_id=member.user_public_id) }}" onsubmit="return confirm('确认移除成员 {{ member.username }}？');">
                     <button class="btn btn-sm btn-outline-danger" type="submit">移除</button>
                   </form>
                 {% endif %}

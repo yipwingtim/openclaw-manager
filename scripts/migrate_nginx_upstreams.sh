@@ -157,11 +157,17 @@ manager_static_proxy = re.compile(
     r"(?P<prefix>proxy_pass\s+http://)openclaw-manager-web:8080(?P<uri>/[^;\s]*)?;"
 )
 manager_upstream = (
-    "upstream manager_web_backend {\n"
-    "    zone manager_web_backend 64k;\n"
+    "upstream manager_user_web_backend {\n"
+    "    zone manager_user_web_backend 64k;\n"
     "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
     "    resolver_timeout 5s;\n"
-    "    server openclaw-manager-web:8080 resolve;\n"
+    "    server openclaw-manager-user-web:8080 resolve;\n"
+    "}\n\n"
+    "upstream manager_admin_web_backend {\n"
+    "    zone manager_admin_web_backend 64k;\n"
+    "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+    "    resolver_timeout 5s;\n"
+    "    server openclaw-manager-admin-web:8080 resolve;\n"
     "}\n\n"
 )
 
@@ -170,8 +176,8 @@ for path in config_files:
     text = path.read_text(encoding="utf-8")
     if path.name == "manager-web.conf":
         if (
-            "server openclaw-manager-web:8080 resolve;" in text
-            and "proxy_pass http://manager_web_backend" in text
+            "server openclaw-manager-user-web:8080 resolve;" in text
+            and "server openclaw-manager-admin-web:8080 resolve;" in text
         ):
             continue
         if not manager_static_proxy.search(text):
@@ -180,13 +186,16 @@ for path in config_files:
             raise SystemExit(f"Could not find manager-web upstream in {path}")
         updated = manager_upstream + manager_static_proxy.sub(
             lambda match: (
-                f'{match.group("prefix")}manager_web_backend'
+                f'{match.group("prefix")}manager_user_web_backend'
                 f'{match.group("uri") or ""};'
             ),
             text,
         )
         updates.append((path, updated))
         continue
+
+    text = text.replace("openclaw-manager-web:8080", "openclaw-manager-user-web:8080")
+    text = text.replace("manager_web_backend_", "manager_user_web_backend_")
 
     user_id = path.stem
     if not user_id_pattern.fullmatch(user_id):

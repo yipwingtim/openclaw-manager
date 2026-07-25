@@ -1,0 +1,177 @@
+import hashlib
+import hmac
+import os
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from flask import redirect, render_template, request, url_for
+
+import control_client
+import auth_providers
+
+
+AUTH_PROVIDER = os.environ.get("MANAGER_AUTH_PROVIDER", "nginx-basic").strip()
+COOKIE_NAME = "openclaw_manager_session"
+COOKIE_SECURE = os.environ.get("MANAGER_COOKIE_SECURE", "true").lower() not in {
+    "0", "false", "no"
+}
+SESSION_HOURS = int(os.environ.get("MANAGER_SESSION_HOURS", "8"))
+INTERNAL_TOKEN = os.environ.get("OPENCLAW_INTERNAL_TOKEN", "").strip()
+SESSION_SECRET = os.environ.get("MANAGER_SESSION_SECRET", "").strip()
+
+
+def token_hash(value):
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def actor():
+    try:
+        if AUTH_PROVIDER == "nginx-basic":
+            subject = (
+                request.headers.get("X-Remote-User")
+                or request.headers.get("X-Forwarded-User")
+                or ""
+            ).strip()
+            return control_client.resolve_identity("nginx-basic", subject) if subject else None
+        raw_token = request.cookies.get(COOKIE_NAME, "")
+        return control_client.resolve_session(token_hash(raw_token), AUTH_PROVIDER) if raw_token else None
+    except control_client.ControlError:
+        return None
+
+
+def require_internal_token():
+    if request.path == "/health":
+        return None
+    if not INTERNAL_TOKEN:
+        return None
+    if not hmac.compare_digest(
+        request.headers.get("X-OpenClaw-Internal-Token", ""), INTERNAL_TOKEN
+    ):
+        return render_template("error.html", message="Forbidden"), 403
+    return None
+
+
+def external_auth_enabled():
+    return AUTH_PROVIDER not in {"nginx-basic", "local"}
+
+
+def external_client(app):
+    if not SESSION_SECRET:
+        raise auth_providers.AuthConfigurationError("MANAGER_SESSION_SECRET is required")
+    config = auth_providers.external_auth_config()
+    return auth_providers.register_external_client(app, config), config
+
+
+def external_callback(app):
+    try:
+        client, config = external_client(app)
+        identity = auth_providers.external_identity(
+            client, client.authorize_access_token(), config
+        )
+        raw_token = secrets.token_urlsafe(48)
+        csrf_token = secrets.token_urlsafe(32)
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)
+        ).replace(microsecond=0).isoformat()
+        user = control_client.external_login(
+            {
+                **identity,
+                "token_hash": token_hash(raw_token),
+                "csrf_token": csrf_token,
+                "expires_at": expires_at,
+            }
+        )
+    except Exception:
+        return render_template("error.html", message="External authentication failed."), 401
+    response = app.make_response(redirect("/admin" if user["role"] == "admin" else url_for("index")))
+    response.set_cookie(
+        COOKIE_NAME, raw_token, secure=COOKIE_SECURE, httponly=True,
+        samesite="Lax", max_age=SESSION_HOURS * 3600,
+    )
+    return response
+
+
+def login_page(app, action="/login"):
+    if external_auth_enabled():
+        client, config = external_client(app)
+        return client.authorize_redirect(config["redirect_uri"])
+    login_csrf = secrets.token_urlsafe(32)
+    response = render_template(
+        "login.html", error="", login_csrf=login_csrf, login_action=action
+    )
+    response = app.make_response(response)
+    response.set_cookie(
+        "openclaw_manager_login_csrf", login_csrf, secure=COOKIE_SECURE,
+        httponly=True, samesite="Lax", max_age=600,
+    )
+    return response
+
+
+def local_login(app, login_action="/login"):
+    cookie_csrf = request.cookies.get("openclaw_manager_login_csrf", "")
+    if not cookie_csrf or not hmac.compare_digest(
+        cookie_csrf, request.form.get("csrf_token", "")
+    ):
+        return render_template("error.html", message="Forbidden: invalid CSRF token."), 403
+    raw_token = secrets.token_urlsafe(48)
+    csrf_token = secrets.token_urlsafe(32)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)
+    ).replace(microsecond=0).isoformat()
+    try:
+        control_client.local_login(
+            {
+                "username": request.form.get("username", ""),
+                "password": request.form.get("password", ""),
+                "token_hash": token_hash(raw_token),
+                "csrf_token": csrf_token,
+                "expires_at": expires_at,
+            }
+        )
+    except control_client.ControlError:
+        return render_template(
+            "login.html", error="Invalid username or password.",
+            login_csrf=cookie_csrf, login_action=login_action,
+        ), 401
+    response = app.make_response(redirect(url_for("index")))
+    response.set_cookie(
+        COOKIE_NAME, raw_token, secure=COOKIE_SECURE, httponly=True,
+        samesite="Lax", max_age=SESSION_HOURS * 3600,
+    )
+    response.delete_cookie("openclaw_manager_login_csrf")
+    return response
+
+
+def logout():
+    raw_token = request.cookies.get(COOKIE_NAME, "")
+    if raw_token:
+        control_client.delete_session(token_hash(raw_token))
+    response = redirect(url_for("login"))
+    response.delete_cookie(COOKIE_NAME)
+    return response
+
+
+def require_csrf():
+    if (
+        AUTH_PROVIDER == "nginx-basic"
+        or request.method != "POST"
+        or request.path in {"/login", "/admin/login"}
+    ):
+        return None
+    current = actor()
+    if not current or not hmac.compare_digest(
+        request.form.get("csrf_token", ""), current.get("csrf_token", "")
+    ):
+        return render_template("error.html", message="Forbidden: invalid CSRF token."), 403
+    return None
+
+
+def context():
+    current = actor()
+    return {
+        "current_user": current["username"] if current else "",
+        "is_admin": bool(current and current["role"] == "admin"),
+        "show_global_admin_nav": False,
+        "csrf_token": current.get("csrf_token", "") if current else "",
+        "auth_provider": AUTH_PROVIDER,
+    }

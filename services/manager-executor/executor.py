@@ -17,6 +17,7 @@ TIMEOUT = int(os.environ.get("MANAGER_CONTROL_TIMEOUT", "5"))
 POLL_SECONDS = float(os.environ.get("MANAGER_EXECUTOR_POLL_SECONDS", "2"))
 MAX_ATTEMPTS = max(1, int(os.environ.get("MANAGER_EXECUTOR_MAX_ATTEMPTS", "2")))
 MAX_OUTPUT_LENGTH = 32 * 1024
+FILE_ROOTS = {"workspace": "workspace", "workspaces": "workspaces", "uploads": "uploads"}
 
 
 class ControlClient:
@@ -52,6 +53,34 @@ class ControlClient:
             f"/internal/v1/execution-jobs/{request_id}",
             {"status": status, **fields},
         )
+
+    def get_runtime_instance(self, instance_public_id, actor_user_public_id, admin=False):
+        query = urllib.parse.urlencode(
+            {
+                "actor_user_public_id": actor_user_public_id,
+                "admin": "true" if admin else "false",
+            }
+        )
+        instance_id = urllib.parse.quote(instance_public_id, safe="")
+        return self.request(
+            "GET", f"/internal/v1/executor/instances/{instance_id}?{query}"
+        )["instance"]
+
+
+def resolve_instance_file(instance, root_key, relative_path):
+    relative_root = FILE_ROOTS.get(root_key)
+    data_path = instance.get("data_path")
+    if relative_root is None or not isinstance(data_path, str) or not data_path:
+        return None
+    data_root = Path(data_path).resolve()
+    root = (data_root / relative_root).resolve()
+    target = (root / relative_path).resolve()
+    try:
+        root.relative_to(data_root)
+        target.relative_to(root)
+    except ValueError:
+        return None
+    return target
 
 
 def get_adapter(product):

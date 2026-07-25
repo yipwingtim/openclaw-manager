@@ -3,10 +3,12 @@ import json
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request
+from werkzeug.security import check_password_hash
 
 import metadata_store
 
@@ -114,12 +116,29 @@ def execution_job_payload(
     }
 
 
+def authenticated_user_payload(user):
+    return {
+        "id": user["id"],
+        "public_id": user["public_id"],
+        "username": user["username"],
+        "display_name": user["display_name"],
+        "email": user["email"],
+        "role": user["role"],
+        "status": user["status"],
+        "provider": user["provider"],
+        "session_kind": user["session_kind"],
+        "csrf_token": user["csrf_token"],
+    }
+
+
 def executor_instance_payload(instance):
     return {
         "public_id": instance["public_id"],
         "legacy_user_id": instance.get("legacy_user_id"),
         "product": instance["product"],
         "runtime_identifier": instance["runtime_identifier"],
+        "data_path": instance.get("data_path"),
+        "access_role": instance.get("access_role"),
     }
 
 
@@ -180,6 +199,150 @@ def health():
     )
 
 
+@app.get("/internal/v1/auth/session")
+@require_services("manager-user-web", "manager-admin-web")
+def resolve_auth_session():
+    token_hash = request.args.get("token_hash", "")
+    provider = request.args.get("provider", "")
+    if not token_hash or not provider:
+        return jsonify({"error": "token_hash and provider are required"}), 400
+    metadata_store.activate_auth_provider(provider, db_file=DB_FILE)
+    user = metadata_store.get_session(token_hash, db_file=DB_FILE)
+    if user is None or user["provider"] != provider or user["status"] != "active":
+        return jsonify({"error": "active session not found"}), 404
+    if g.source_service == "manager-admin-web" and user["role"] != "admin":
+        return jsonify({"error": "administrator role is required"}), 403
+    return jsonify({"user": authenticated_user_payload(user)})
+
+
+@app.delete("/internal/v1/auth/session")
+@require_services("manager-user-web", "manager-admin-web")
+def delete_auth_session():
+    payload = request.get_json(silent=True) or {}
+    token_hash = payload.get("token_hash")
+    if not isinstance(token_hash, str) or not token_hash:
+        return jsonify({"error": "token_hash is required"}), 400
+    metadata_store.delete_session(token_hash, db_file=DB_FILE)
+    return "", 204
+
+
+@app.get("/internal/v1/auth/identity")
+@require_services("manager-user-web", "manager-admin-web")
+def resolve_auth_identity():
+    provider = request.args.get("provider", "")
+    subject = request.args.get("subject", "")
+    if not provider or not subject:
+        return jsonify({"error": "provider and subject are required"}), 400
+    metadata_store.activate_auth_provider(provider, db_file=DB_FILE)
+    user = metadata_store.get_user_by_identity(provider, subject, db_file=DB_FILE)
+    if user is None or user["status"] != "active":
+        return jsonify({"error": "active identity not found"}), 404
+    if g.source_service == "manager-admin-web" and user["role"] != "admin":
+        return jsonify({"error": "administrator role is required"}), 403
+    user = {**user, "provider": provider, "session_kind": "proxy", "csrf_token": ""}
+    return jsonify({"user": authenticated_user_payload(user)})
+
+
+@app.post("/internal/v1/auth/external-login")
+@require_services("manager-user-web", "manager-admin-web")
+def external_auth_login():
+    payload = request.get_json(silent=True) or {}
+    required = {"provider", "subject", "token_hash", "csrf_token", "expires_at"}
+    if any(not isinstance(payload.get(field), str) or not payload[field] for field in required):
+        return jsonify({"error": "invalid external login payload"}), 400
+    metadata_store.activate_auth_provider(payload["provider"], db_file=DB_FILE)
+    user = metadata_store.get_user_by_identity(
+        payload["provider"], payload["subject"], db_file=DB_FILE
+    )
+    if user is None or user["status"] != "active":
+        return jsonify({"error": "active identity not found"}), 403
+    if g.source_service == "manager-admin-web" and user["role"] != "admin":
+        return jsonify({"error": "administrator role is required"}), 403
+    metadata_store.record_identity_login(
+        payload["provider"], payload["subject"], payload.get("profile", {}), db_file=DB_FILE
+    )
+    metadata_store.create_session(
+        payload["token_hash"], user["id"], payload["provider"],
+        payload["csrf_token"], payload["expires_at"],
+        session_kind="admin" if g.source_service == "manager-admin-web" else "user",
+        db_file=DB_FILE,
+    )
+    session = metadata_store.get_session(payload["token_hash"], db_file=DB_FILE)
+    return jsonify({"user": authenticated_user_payload(session)})
+
+
+@app.post("/internal/v1/auth/emergency-login")
+@require_services("manager-admin-web")
+def emergency_auth_login():
+    payload = request.get_json(silent=True) or {}
+    required = {"username", "provider", "token_hash", "csrf_token", "expires_at"}
+    if any(not isinstance(payload.get(field), str) or not payload[field] for field in required):
+        return jsonify({"error": "invalid emergency login payload"}), 400
+    user = metadata_store.get_user_by_username(payload["username"], db_file=DB_FILE)
+    if user is None or user["status"] != "active" or user["role"] != "admin":
+        return jsonify({"error": "active administrator not found"}), 403
+    metadata_store.create_session(
+        payload["token_hash"], user["id"], payload["provider"],
+        payload["csrf_token"], payload["expires_at"], session_kind="emergency",
+        db_file=DB_FILE,
+    )
+    session = metadata_store.get_session(payload["token_hash"], db_file=DB_FILE)
+    return jsonify({"user": authenticated_user_payload(session)})
+
+
+@app.post("/internal/v1/auth/local-login")
+@require_services("manager-user-web", "manager-admin-web")
+def local_auth_login():
+    payload = request.get_json(silent=True) or {}
+    required = {"username", "password", "token_hash", "csrf_token", "expires_at"}
+    if any(not isinstance(payload.get(field), str) or not payload[field] for field in required):
+        return jsonify({"error": "invalid local login payload"}), 400
+    metadata_store.activate_auth_provider("local", db_file=DB_FILE)
+    user = metadata_store.get_user_by_identity(
+        "local",
+        metadata_store.normalize_username(payload["username"]),
+        db_file=DB_FILE,
+    )
+    credential = (
+        metadata_store.get_local_credential(user["id"], db_file=DB_FILE)
+        if user
+        else None
+    )
+    locked = False
+    if credential and credential.get("locked_until"):
+        try:
+            locked = datetime.fromisoformat(credential["locked_until"]) > datetime.now(
+                timezone.utc
+            )
+        except ValueError:
+            locked = True
+    valid = (
+        user is not None
+        and user["status"] == "active"
+        and credential is not None
+        and not locked
+        and check_password_hash(credential["password_hash"], payload["password"])
+    )
+    if not valid:
+        if user and credential and not locked:
+            metadata_store.record_login_failure(user["id"], db_file=DB_FILE)
+        return jsonify({"error": "invalid username or password"}), 401
+    if g.source_service == "manager-admin-web" and user["role"] != "admin":
+        return jsonify({"error": "administrator role is required"}), 403
+    metadata_store.reset_login_failures(user["id"], db_file=DB_FILE)
+    metadata_store.create_session(
+        payload["token_hash"],
+        user["id"],
+        "local",
+        payload["csrf_token"],
+        payload["expires_at"],
+        session_kind="admin" if g.source_service == "manager-admin-web" else "user",
+        db_file=DB_FILE,
+    )
+    session = metadata_store.get_session(payload["token_hash"], db_file=DB_FILE)
+    return jsonify({"user": authenticated_user_payload(session)})
+
+
 @app.get("/internal/v1/users/<user_public_id>/instances")
 @require_services("manager-user-web", "manager-admin-web")
 def user_instances(user_public_id):
@@ -199,6 +362,27 @@ def user_instances(user_public_id):
     return jsonify({"instances": [portal_instance(instance) for instance in instances]})
 
 
+@app.get("/internal/v1/admin/instances")
+@require_services("manager-admin-web")
+def admin_instances():
+    instances = metadata_store.list_instances(db_file=DB_FILE)
+    return jsonify(
+        {
+            "instances": [
+                {
+                    "public_id": instance["public_id"],
+                    "legacy_user_id": instance.get("legacy_user_id"),
+                    "product": instance["product"],
+                    "instance_name": instance["instance_name"],
+                    "status": instance["status"],
+                    "access_url": instance.get("access_url"),
+                }
+                for instance in instances
+            ]
+        }
+    )
+
+
 @app.get("/internal/v1/instances/<instance_public_id>")
 @require_services("manager-user-web")
 def get_instance(instance_public_id):
@@ -213,6 +397,31 @@ def get_instance(instance_public_id):
     if instance is None:
         return jsonify({"error": "instance not found"}), 404
     return jsonify({"instance": portal_instance(instance)})
+
+
+@app.get("/internal/v1/executor/instances/<instance_public_id>")
+@require_services("manager-executor")
+def executor_instance(instance_public_id):
+    actor_user_public_id = request.args.get("actor_user_public_id", "")
+    if not actor_user_public_id:
+        return jsonify({"error": "actor_user_public_id is required"}), 400
+    admin = request.args.get("admin") == "true"
+    actor = metadata_store.get_user_by_public_id(actor_user_public_id, db_file=DB_FILE)
+    if admin:
+        instance = (
+            metadata_store.get_instance_by_public_id(instance_public_id, db_file=DB_FILE)
+            if actor and actor["status"] == "active" and actor["role"] == "admin"
+            else None
+        )
+        if instance is not None:
+            instance["access_role"] = "admin"
+    else:
+        instance = metadata_store.get_instance_for_user(
+            instance_public_id, actor_user_public_id, db_file=DB_FILE
+        )
+    if instance is None:
+        return jsonify({"error": "instance not found"}), 404
+    return jsonify({"instance": executor_instance_payload(instance)})
 
 
 def manageable_instance(instance_public_id, conn):

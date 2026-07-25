@@ -331,11 +331,11 @@ upstream openclaw_backend_${PORT} {
     server openclaw_${USER_ID}:18789 resolve;
 }
 
-upstream manager_web_backend_${PORT} {
-    zone manager_web_backend_${PORT} 64k;
+upstream manager_user_web_backend_${PORT} {
+    zone manager_user_web_backend_${PORT} 64k;
     resolver 127.0.0.11 valid=10s ipv6=off;
     resolver_timeout 5s;
-    server openclaw-manager-web:8080 resolve;
+    server openclaw-manager-user-web:8080 resolve;
 }
 
 server {
@@ -354,7 +354,7 @@ server {
     location /admin/ {
 $NGINX_ADMIN_PROVIDER_GUARD
 $NGINX_ADMIN_AUTH_BLOCK
-        proxy_pass http://manager_web_backend_${PORT}/instance-admin/;
+        proxy_pass http://manager_user_web_backend_${PORT}/instance-admin/;
 
         proxy_buffering off;
         proxy_request_buffering off;

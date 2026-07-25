@@ -151,14 +151,16 @@ def get_external_auth():
 
 def get_actor_user_record():
     try:
-        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
-        metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
         if MANAGER_AUTH_PROVIDER == "nginx-basic":
             subject = proxy_subject()
-            return metadata_store.get_user_by_identity("nginx-basic", subject) if subject else None
+            return control_client.resolve_identity("nginx-basic", subject) if subject else None
         if MANAGER_AUTH_PROVIDER == "local" or external_auth_enabled():
             raw_token = getattr(request, "cookies", {}).get(MANAGER_SESSION_COOKIE, "")
-            session = metadata_store.get_session(token_hash(raw_token)) if raw_token else None
+            session = (
+                control_client.resolve_session(token_hash(raw_token), MANAGER_AUTH_PROVIDER)
+                if raw_token
+                else None
+            )
             if not session or session["provider"] != MANAGER_AUTH_PROVIDER or session["status"] != "active":
                 return None
             return session
@@ -2096,9 +2098,15 @@ def create_manager_session(user, provider, session_kind="user"):
     raw_token = secrets.token_urlsafe(48)
     csrf_token = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=MANAGER_SESSION_HOURS)).replace(microsecond=0).isoformat()
-    metadata_store.create_session(
-        token_hash(raw_token), user["id"], provider, csrf_token, expires_at,
-        session_kind=session_kind,
+    control_client.external_login(
+        {
+            "provider": provider,
+            "subject": user["subject"],
+            "profile": user.get("profile", {}),
+            "token_hash": token_hash(raw_token),
+            "csrf_token": csrf_token,
+            "expires_at": expires_at,
+        }
     )
     response = redirect(url_for("index"))
     response.set_cookie(
@@ -2123,15 +2131,7 @@ def external_auth_callback():
         app.logger.warning("External authentication failed: %s", exc)
         return render_template("error.html", message="External authentication failed."), 401
 
-    metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
-    metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
-    user = metadata_store.get_user_by_identity(identity["provider"], identity["subject"])
-    if not user or user["status"] != "active":
-        return forbidden("Forbidden: external identity is not linked to an active platform user.")
-    metadata_store.record_identity_login(
-        identity["provider"], identity["subject"], identity["profile"]
-    )
-    return create_manager_session(user, MANAGER_AUTH_PROVIDER)
+    return create_manager_session(identity, MANAGER_AUTH_PROVIDER)
 
 
 @app.get("/emergency/login")
@@ -2144,23 +2144,24 @@ def emergency_login():
         or username not in MANAGER_EMERGENCY_USERS
     ):
         return forbidden("Forbidden: emergency access is unavailable.")
-    metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
-    metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
-    user = metadata_store.get_user_by_username(username)
-    if not user or user["status"] != "active" or user["role"] != "admin":
+    try:
+        user = control_client.resolve_identity("nginx-basic", username)
+    except control_client.ControlError:
+        user = None
+    if not user or user["role"] != "admin":
         return forbidden("Forbidden: emergency administrator is not active.")
     app.logger.warning("Emergency manager login used by %s", username)
-    return create_manager_session(user, MANAGER_AUTH_PROVIDER, session_kind="emergency")
+    return create_manager_session(
+        {"subject": username, "profile": {}},
+        MANAGER_AUTH_PROVIDER,
+        session_kind="emergency",
+    )
 
 
 @app.post("/login")
 def login_submit():
-    from werkzeug.security import check_password_hash
-
     if MANAGER_AUTH_PROVIDER != "local":
         return render_template("error.html", message="Local login is disabled."), 404
-    metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
-    metadata_store.activate_auth_provider(MANAGER_AUTH_PROVIDER)
     cookie_csrf = getattr(request, "cookies", {}).get("openclaw_manager_login_csrf", "")
     form_csrf = request.form.get("csrf_token", "")
     if not cookie_csrf or not form_csrf or not hmac.compare_digest(cookie_csrf, form_csrf):
@@ -2168,33 +2169,31 @@ def login_submit():
 
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
-    user = metadata_store.get_user_by_identity(
-        "local", metadata_store.normalize_username(username)
-    ) if username else None
-    credential = metadata_store.get_local_credential(user["id"]) if user else None
-    locked = False
-    if credential and credential.get("locked_until"):
-        try:
-            locked = datetime.fromisoformat(credential["locked_until"]) > datetime.now(timezone.utc)
-        except ValueError:
-            locked = True
-    valid = (
-        user is not None
-        and user["status"] == "active"
-        and credential is not None
-        and not locked
-        and check_password_hash(credential["password_hash"], password)
-    )
-    if not valid:
-        if user and credential and not locked:
-            metadata_store.record_login_failure(user["id"])
+    raw_token = secrets.token_urlsafe(48)
+    csrf_token = secrets.token_urlsafe(32)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=MANAGER_SESSION_HOURS)
+    ).replace(microsecond=0).isoformat()
+    try:
+        control_client.local_login(
+            {
+                "username": username,
+                "password": password,
+                "token_hash": token_hash(raw_token),
+                "csrf_token": csrf_token,
+                "expires_at": expires_at,
+            }
+        )
+    except control_client.ControlError:
         response = app.make_response(
             render_template("login.html", error="Invalid username or password.", login_csrf=cookie_csrf)
         )
         return response, 401
-
-    metadata_store.reset_login_failures(user["id"])
-    response = create_manager_session(user, "local")
+    response = redirect(url_for("index"))
+    response.set_cookie(
+        MANAGER_SESSION_COOKIE, raw_token, secure=MANAGER_COOKIE_SECURE,
+        httponly=True, samesite="Lax", max_age=MANAGER_SESSION_HOURS * 3600,
+    )
     response.delete_cookie("openclaw_manager_login_csrf")
     return response
 
@@ -2203,7 +2202,7 @@ def login_submit():
 def logout():
     raw_token = getattr(request, "cookies", {}).get(MANAGER_SESSION_COOKIE, "")
     if raw_token:
-        metadata_store.delete_session(token_hash(raw_token))
+        control_client.delete_session(token_hash(raw_token))
     response = redirect(url_for("login_page"))
     response.delete_cookie(MANAGER_SESSION_COOKIE)
     return response

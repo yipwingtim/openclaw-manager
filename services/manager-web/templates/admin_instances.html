@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}实例管理{% endblock %}
+{% block content %}
+  <div class="page-kicker">管理员控制台</div>
+  <h1 class="page-title">实例管理</h1>
+  {% if result %}<div class="alert soft-success">{{ result }}</div>{% endif %}
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+  <div class="surface table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for instance in instances %}
+        <tr>
+          <td>{{ instance.instance_name }} <span class="muted-small">{{ instance.legacy_user_id or instance.public_id }}</span></td>
+          <td>{{ instance.product }}</td><td>{{ instance.status }}</td>
+          <td><form method="post" action="/admin/instances/{{ instance.public_id }}/lifecycle" class="d-flex gap-2">
+            {% for action in ["start", "stop", "restart"] %}<button class="btn btn-sm btn-oc-outline" name="action" value="{{ action }}">{{ action }}</button>{% endfor %}
+          </form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

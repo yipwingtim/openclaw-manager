@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,6 +50,10 @@ def load_control_app():
         args={},
         get_json=lambda **kwargs: {},
     )
+    werkzeug_security_stub = types.ModuleType("werkzeug.security")
+    werkzeug_security_stub.check_password_hash = (
+        lambda stored, provided: stored == f"hash:{provided}"
+    )
 
     sys.path.insert(0, str(MANAGER_WEB_DIR))
     spec = importlib.util.spec_from_file_location(
@@ -56,7 +61,9 @@ def load_control_app():
     )
     module = importlib.util.module_from_spec(spec)
     previous_flask = sys.modules.get("flask")
+    previous_security = sys.modules.get("werkzeug.security")
     sys.modules["flask"] = flask_stub
+    sys.modules["werkzeug.security"] = werkzeug_security_stub
     try:
         spec.loader.exec_module(module)
     finally:
@@ -64,6 +71,10 @@ def load_control_app():
             del sys.modules["flask"]
         else:
             sys.modules["flask"] = previous_flask
+        if previous_security is None:
+            del sys.modules["werkzeug.security"]
+        else:
+            sys.modules["werkzeug.security"] = previous_security
     return module
 
 
@@ -112,6 +123,113 @@ class ManagerControlApiTests(unittest.TestCase):
                 "schema_version": 4,
                 "service_tokens_configured": True,
             },
+        )
+
+    def test_web_resolves_session_and_admin_service_rejects_user_role(self):
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        self.control.metadata_store.create_session(
+            "session-hash",
+            self.user["id"],
+            "local",
+            "csrf-token",
+            expires_at,
+            db_file=self.db_file,
+        )
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer user-token"},
+        ), patch.object(
+            self.control.request,
+            "args",
+            {"token_hash": "session-hash", "provider": "local"},
+        ):
+            resolved, resolved_status = response_parts(
+                self.control.resolve_auth_session()
+            )
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(
+            self.control.request,
+            "args",
+            {"token_hash": "session-hash", "provider": "local"},
+        ):
+            denied, denied_status = response_parts(
+                self.control.resolve_auth_session()
+            )
+
+        self.assertEqual(resolved_status, 200)
+        self.assertEqual(resolved.get_json()["user"]["username"], "alice")
+        self.assertEqual(denied_status, 403)
+        self.assertEqual(denied.get_json(), {"error": "administrator role is required"})
+
+    def test_local_login_creates_session_without_exposing_password_hash(self):
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "local", "alice", "alice", db_file=self.db_file
+        )
+        self.control.metadata_store.set_local_credential(
+            self.user["id"],
+            "hash:correct-password",
+            db_file=self.db_file,
+        )
+        payload = {
+            "username": "alice",
+            "password": "correct-password",
+            "token_hash": "new-session-hash",
+            "csrf_token": "csrf-token",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        }
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer user-token"},
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.local_auth_login())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["user"]["username"], "alice")
+        self.assertNotIn("password_hash", response.get_json()["user"])
+        self.assertIsNotNone(
+            self.control.metadata_store.get_session(
+                "new-session-hash", db_file=self.db_file
+            )
+        )
+
+    def test_executor_resolves_runtime_instance_only_after_actor_authorization(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            data_path="/srv/openclaw/alice",
+            db_file=self.db_file,
+        )
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer executor-token"},
+        ), patch.object(
+            self.control.request,
+            "args",
+            {"actor_user_public_id": self.user["public_id"]},
+        ):
+            response, status = response_parts(
+                self.control.executor_instance(instance["public_id"])
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            response.get_json()["instance"]["runtime_identifier"],
+            "openclaw_alice",
+        )
+        self.assertEqual(
+            response.get_json()["instance"]["data_path"],
+            "/srv/openclaw/alice",
         )
 
     def test_health_does_not_create_a_missing_database(self):

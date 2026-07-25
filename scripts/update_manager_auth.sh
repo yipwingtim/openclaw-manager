@@ -103,11 +103,17 @@ NGINX_SSL_CERT="${NGINX_SSL_CERT:-/etc/nginx/certs/openclaw.crt}"
 NGINX_SSL_KEY="${NGINX_SSL_KEY:-/etc/nginx/certs/openclaw.key}"
 PUBLIC_HOST="${PUBLIC_HOST:?Missing PUBLIC_HOST}"
 OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:?Missing OPENCLAW_PUBLIC_DIR}"
-INSTANCE_ADMIN_GUARD="$(render_instance_admin_provider_guard "$MANAGER_AUTH_PROVIDER" "$PUBLIC_HOST")" || {
+INSTANCE_ADMIN_GUARD="$(render_instance_admin_provider_guard "$MANAGER_AUTH_PROVIDER" "$PUBLIC_HOST" "${MANAGER_AUTH_TYPE:-}")" || {
   echo "[ERROR] Authentication provider is not implemented: $MANAGER_AUTH_PROVIDER" >&2
   exit 1
 }
 backup_dir="$(mktemp -d "$backup_root/$(date +%Y%m%d_%H%M%S).XXXXXX")"
+
+MANAGER_EMERGENCY_LOCATION=""
+MANAGER_INTERNAL_TOKEN_HEADER=""
+if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
+  MANAGER_INTERNAL_TOKEN_HEADER="        proxy_set_header X-OpenClaw-Internal-Token \"$OPENCLAW_INTERNAL_TOKEN\";"
+fi
 
 case "$MANAGER_AUTH_PROVIDER" in
   nginx-basic)
@@ -116,18 +122,27 @@ case "$MANAGER_AUTH_PROVIDER" in
     ;;
   local)
     MANAGER_NGINX_AUTH_DIRECTIVES="    auth_basic off;"
+    MANAGER_EMERGENCY_LOCATION=""
     ;;
   *)
-    echo "[ERROR] Authentication provider is not implemented: $MANAGER_AUTH_PROVIDER" >&2
-    exit 1
+    case "${MANAGER_AUTH_TYPE:-}" in
+      oidc|oauth2) ;;
+      *) echo "[ERROR] MANAGER_AUTH_TYPE must be oidc or oauth2 for external providers" >&2; exit 1 ;;
+    esac
+    MANAGER_NGINX_AUTH_DIRECTIVES="    auth_basic off;"
+    MANAGER_EMERGENCY_LOCATION="    location = /emergency/login {
+        auth_basic \"OpenClaw Manager Emergency\";
+        auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;
+        proxy_pass http://manager_web_backend;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Remote-User \$remote_user;
+${MANAGER_INTERNAL_TOKEN_HEADER:-}
+    }"
     ;;
 esac
 
-MANAGER_INTERNAL_TOKEN_HEADER=""
-if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
-  MANAGER_INTERNAL_TOKEN_HEADER="        proxy_set_header X-OpenClaw-Internal-Token \"$OPENCLAW_INTERNAL_TOKEN\";"
-fi
-export NGINX_SSL_CERT NGINX_SSL_KEY MANAGER_NGINX_AUTH_DIRECTIVES MANAGER_INTERNAL_TOKEN_HEADER
+export NGINX_SSL_CERT NGINX_SSL_KEY MANAGER_NGINX_AUTH_DIRECTIVES MANAGER_INTERNAL_TOKEN_HEADER MANAGER_EMERGENCY_LOCATION
 
 tmp="$(mktemp "$NGINX_USERS_CONF_DIR/.manager-web.conf.XXXXXX")"
 python3 - "$TEMPLATE" > "$tmp" <<'PY'
@@ -136,7 +151,7 @@ import sys
 from pathlib import Path
 
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
-for key in ("NGINX_SSL_CERT", "NGINX_SSL_KEY", "MANAGER_NGINX_AUTH_DIRECTIVES", "MANAGER_INTERNAL_TOKEN_HEADER"):
+for key in ("NGINX_SSL_CERT", "NGINX_SSL_KEY", "MANAGER_NGINX_AUTH_DIRECTIVES", "MANAGER_INTERNAL_TOKEN_HEADER", "MANAGER_EMERGENCY_LOCATION"):
     text = text.replace("{{" + key + "}}", os.environ.get(key, ""))
 print(text, end="")
 PY

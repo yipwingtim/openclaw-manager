@@ -16,6 +16,8 @@ server {
 
 {{MANAGER_NGINX_AUTH_DIRECTIVES}}
 
+{{MANAGER_EMERGENCY_LOCATION}}
+
     location / {
         proxy_pass http://manager_web_backend;
 

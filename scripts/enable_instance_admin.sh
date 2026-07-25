@@ -48,7 +48,7 @@ for user_id in "$@"; do
   fi
 done
 
-NGINX_ADMIN_PROVIDER_GUARD="$(render_instance_admin_provider_guard "${MANAGER_AUTH_PROVIDER:-nginx-basic}" "${PUBLIC_HOST:-}")" || {
+NGINX_ADMIN_PROVIDER_GUARD="$(render_instance_admin_provider_guard "${MANAGER_AUTH_PROVIDER:-nginx-basic}" "${PUBLIC_HOST:-}" "${MANAGER_AUTH_TYPE:-}")" || {
   echo "[ERROR] Unsupported manager authentication configuration" >&2
   exit 1
 }

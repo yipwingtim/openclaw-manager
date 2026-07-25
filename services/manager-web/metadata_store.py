@@ -101,6 +101,21 @@ def get_user_by_identity(provider, subject, db_file=None, conn=None):
         )
 
 
+def record_identity_login(provider, subject, profile, db_file=None, conn=None):
+    now = utc_now()
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            """
+            UPDATE user_identities
+            SET profile_json = ?, last_login_at = ?, updated_at = ?
+            WHERE provider = ? AND subject = ?
+            """,
+            (json.dumps(profile, ensure_ascii=True), now, now, provider, subject),
+        )
+
+
 def upsert_identity(user_id, provider, subject, external_username=None, db_file=None, conn=None):
     now = utc_now()
     owns_conn = conn is None

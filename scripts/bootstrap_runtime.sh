@@ -175,6 +175,11 @@ NGINX_HTPASSWD_FILE_IN_CONTAINER="${NGINX_HTPASSWD_FILE_IN_CONTAINER:-/etc/nginx
 NGINX_SSL_CERT="${NGINX_SSL_CERT:-/etc/nginx/certs/openclaw.crt}"
 NGINX_SSL_KEY="${NGINX_SSL_KEY:-/etc/nginx/certs/openclaw.key}"
 MANAGER_AUTH_PROVIDER="${MANAGER_AUTH_PROVIDER:-nginx-basic}"
+MANAGER_EMERGENCY_LOCATION=""
+MANAGER_INTERNAL_TOKEN_HEADER=""
+if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
+  MANAGER_INTERNAL_TOKEN_HEADER="        proxy_set_header X-OpenClaw-Internal-Token \"$OPENCLAW_INTERNAL_TOKEN\";"
+fi
 
 case "$MANAGER_AUTH_PROVIDER" in
   nginx-basic)
@@ -183,16 +188,25 @@ case "$MANAGER_AUTH_PROVIDER" in
     ;;
   local)
     MANAGER_NGINX_AUTH_DIRECTIVES="    auth_basic off;"
+    MANAGER_EMERGENCY_LOCATION=""
     ;;
   *)
-    fail "Unsupported MANAGER_AUTH_PROVIDER during bootstrap: $MANAGER_AUTH_PROVIDER"
+    case "${MANAGER_AUTH_TYPE:-}" in
+      oidc|oauth2) ;;
+      *) fail "MANAGER_AUTH_TYPE must be oidc or oauth2 for external providers" ;;
+    esac
+    MANAGER_NGINX_AUTH_DIRECTIVES="    auth_basic off;"
+    MANAGER_EMERGENCY_LOCATION="    location = /emergency/login {
+        auth_basic \"OpenClaw Manager Emergency\";
+        auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;
+        proxy_pass http://manager_web_backend;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Remote-User \$remote_user;
+${MANAGER_INTERNAL_TOKEN_HEADER}
+    }"
     ;;
 esac
-MANAGER_INTERNAL_TOKEN_HEADER=""
-if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
-  MANAGER_INTERNAL_TOKEN_HEADER="        proxy_set_header X-OpenClaw-Internal-Token \"$OPENCLAW_INTERNAL_TOKEN\";"
-fi
-
 export NGINX_CONF_DIR
 export NGINX_CERTS_DIR
 export NGINX_LOGS_DIR
@@ -202,6 +216,7 @@ export NGINX_SSL_KEY
 export NGINX_HTPASSWD_FILE_IN_CONTAINER
 export MANAGER_NGINX_AUTH_DIRECTIVES
 export MANAGER_INTERNAL_TOKEN_HEADER
+export MANAGER_EMERGENCY_LOCATION
 
 mkdir_or_sudo "$OPENCLAW_PUBLIC_DIR/users"
 mkdir_or_sudo "$OPENCLAW_PUBLIC_DIR/deleted"

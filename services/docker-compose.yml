@@ -21,6 +21,28 @@ services:
     networks:
       - manager-net
 
+  manager-executor:
+    build:
+      context: ..
+      dockerfile: services/manager-executor/Dockerfile
+    container_name: openclaw-manager-executor
+    restart: unless-stopped
+    depends_on:
+      manager-control:
+        condition: service_healthy
+    env_file:
+      - ../config/openclaw-manager.env
+    environment:
+      OPENCLAW_MANAGER_DIR: /opt/openclaw-manager
+      OPENCLAW_PUBLIC_DIR: ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
+      NGINX_USERS_CONF_DIR: ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
+    volumes:
+      - ..:/opt/openclaw-manager:ro
+      - ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}:${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - manager-net
+
   manager-web:
     build: ./manager-web
     container_name: openclaw-manager-web

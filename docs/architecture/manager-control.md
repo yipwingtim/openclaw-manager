@@ -34,6 +34,7 @@ DELETE /internal/v1/instances/{instance_public_id}/members/{user_public_id}
 GET    /internal/v1/operations
 POST   /internal/v1/execution-jobs
 GET    /internal/v1/execution-jobs
+POST   /internal/v1/execution-jobs/claim
 GET    /internal/v1/execution-jobs/{request_id}
 PATCH  /internal/v1/execution-jobs/{request_id}
 ```
@@ -48,10 +49,21 @@ viewers. Member mutations and their audit records commit in one transaction.
 
 Only the admin service may create allowlisted execution jobs. This PR permits
 `instance.start`, `instance.stop`, and `instance.restart`; each action accepts
-only its documented fields. The executor may list only queued jobs and may
+only its documented fields. The executor atomically claims the oldest queued
+job, resolves its instance runtime identifier on the control service, and may
 advance job state, while full task history remains admin-only. Reusing a
 `request_id` with identical semantics returns the existing job; conflicting
 reuse is rejected.
+
+`manager-executor` processes one claimed job at a time. It prechecks start and
+stop state, retries failed Adapter calls up to
+`MANAGER_EXECUTOR_MAX_ATTEMPTS`, and records progress, heartbeat, output, and
+the terminal result through `manager-control`. It accepts no container name or
+shell command from callers and has no direct metadata database mount. Control
+allows only one running job and requeues it after
+`MANAGER_EXECUTOR_STALE_SECONDS` without a heartbeat, so executor restarts do
+not leave the queue permanently blocked. Set this timeout above the longest
+single Adapter operation.
 
 ## Deployment
 
@@ -63,6 +75,14 @@ cd services
 docker compose up -d --build manager-control
 docker compose ps manager-control
 docker compose logs --tail=100 manager-control
+```
+
+Start the executor after control is healthy:
+
+```bash
+docker compose up -d --build manager-executor
+docker compose ps manager-executor
+docker compose logs --tail=100 manager-executor
 ```
 
 The service requires metadata schema v4. It does not run migrations.

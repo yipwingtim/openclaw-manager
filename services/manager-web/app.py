@@ -238,12 +238,16 @@ def get_instance_adapter(product="openclaw"):
 
 def get_instance_product(user_id):
     try:
-        metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
-        instance = metadata_store.get_instance(user_id) or {}
+        instance = get_instance_record(user_id)
     except Exception as exc:
         app.logger.warning("Could not read instance product for %s: %s", user_id, exc)
         return "openclaw"
     return (instance.get("product") or "openclaw").strip() or "openclaw"
+
+
+def get_instance_record(user_id):
+    metadata_store.initialize(schema_file=MANAGER_DIR / "db" / "schema.sql")
+    return metadata_store.get_instance(user_id) or {}
 
 
 def get_actor_user():
@@ -1211,13 +1215,27 @@ def allowed_instance_actions(instance):
 
 
 def get_container_status(user_id, product=None):
-    resolved_product = product or get_instance_product(user_id)
-    return get_instance_adapter(resolved_product).status(user_id)
+    instance = get_instance_record(user_id)
+    if not instance:
+        return "STOPPED"
+    resolved_product = product or (instance.get("product") or "openclaw").strip() or "openclaw"
+    try:
+        return get_instance_adapter(resolved_product).status(instance)
+    except (TypeError, ValueError) as exc:
+        app.logger.warning("Invalid instance metadata for %s status: %s", user_id, exc)
+        return "STOPPED"
 
 
 def get_container_logs(user_id, tail=120, product=None):
-    resolved_product = product or get_instance_product(user_id)
-    return get_instance_adapter(resolved_product).logs(user_id, tail=tail)
+    instance = get_instance_record(user_id)
+    if not instance:
+        return "No recent logs."
+    resolved_product = product or (instance.get("product") or "openclaw").strip() or "openclaw"
+    try:
+        return get_instance_adapter(resolved_product).logs(instance, tail=tail)
+    except (TypeError, ValueError) as exc:
+        app.logger.warning("Invalid instance metadata for %s logs: %s", user_id, exc)
+        return f"Could not read container logs: {exc}"
 
 
 def install_skill_for_user(user_id, skill_id):
@@ -1229,7 +1247,15 @@ def install_skill_for_user(user_id, skill_id):
     if not status.startswith("Up"):
         return 1, f"Instance is not running: {status}"
 
-    container_name = f"openclaw_{user_id}"
+    instance = get_instance_record(user_id)
+    if not instance:
+        return 1, f"Instance not found: {user_id}"
+    try:
+        container_name = get_instance_adapter(
+            instance.get("product") or "openclaw"
+        ).get_runtime_target(instance)
+    except (TypeError, ValueError) as exc:
+        return 1, str(exc)
     result = subprocess.run(
         ["docker", "exec", container_name, "openclaw", "skills", "install", skill_id],
         cwd=str(MANAGER_DIR),
@@ -1247,7 +1273,10 @@ def run_instance_lifecycle_action(user_id, action):
     if action not in {"delete", "restore"} and not user_dir.is_dir():
         return 1, f"User not found: {user_id}"
 
-    product = get_instance_product(user_id)
+    instance = get_instance_record(user_id)
+    if not instance:
+        return 1, f"Instance not found: {user_id}"
+    product = (instance.get("product") or "openclaw").strip() or "openclaw"
     try:
         adapter = get_instance_adapter(product)
     except ValueError as exc:
@@ -1257,21 +1286,23 @@ def run_instance_lifecycle_action(user_id, action):
     if supports is not None and not supports(action):
         return 1, f"{product} does not support lifecycle action: {action}"
 
-    if action == "start":
-        return adapter.start(user_id)
-    elif action == "stop":
-        return adapter.stop(user_id)
-    elif action == "restart":
-        return adapter.restart(user_id)
-    elif action == "delete":
-        return adapter.delete(user_id)
-    elif action == "restore":
-        if user_dir.is_dir():
-            return 1, f"User already exists: {user_id}"
-        instance = metadata_store.get_instance(user_id) or {}
-        if instance.get("restore_state") != "restorable":
-            return 1, f"Deleted instance is not restorable: {user_id}"
-        return adapter.restore(user_id)
+    try:
+        if action == "start":
+            return adapter.start(instance)
+        elif action == "stop":
+            return adapter.stop(instance)
+        elif action == "restart":
+            return adapter.restart(instance)
+        elif action == "delete":
+            return adapter.delete(instance)
+        elif action == "restore":
+            if user_dir.is_dir():
+                return 1, f"User already exists: {user_id}"
+            if instance.get("restore_state") != "restorable":
+                return 1, f"Deleted instance is not restorable: {user_id}"
+            return adapter.restore(instance)
+    except (TypeError, ValueError) as exc:
+        return 1, str(exc)
 
     return 1, "Invalid lifecycle action."
 
@@ -1348,12 +1379,26 @@ def run_bulk_lifecycle_action_job(user_ids, action, actor=None):
 
 
 def run_instance_version_update_job(user_id, version, restore_model_provider=False, actor=None):
-    product = get_instance_product(user_id)
-    returncode, output = get_instance_adapter(product).update_version(
-        user_id,
-        version,
-        restore_model_provider=restore_model_provider,
-    )
+    instance = get_instance_record(user_id)
+    if not instance:
+        message = f"Instance not found: {user_id}"
+        persist_operation_metadata(
+            "update_version",
+            user_id=user_id,
+            status="failed",
+            actor=actor,
+            message=message,
+        )
+        return 1, message
+    product = (instance.get("product") or "openclaw").strip() or "openclaw"
+    try:
+        returncode, output = get_instance_adapter(product).update_version(
+            instance,
+            version,
+            restore_model_provider=restore_model_provider,
+        )
+    except (TypeError, ValueError) as exc:
+        returncode, output = 1, str(exc)
     persist_operation_metadata(
         "update_version",
         user_id=user_id,
@@ -1785,7 +1830,24 @@ def generate_wechat_bind_url_for_user(
     *,
     instance_public_id=None,
 ):
-    container_name = f"openclaw_{user_id}"
+    instance = get_instance_record(user_id)
+    if not instance:
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error="实例记录不存在，无法生成微信绑定链接。",
+        )
+    try:
+        adapter = get_instance_adapter(instance.get("product") or "openclaw")
+        container_name = adapter.get_runtime_target(instance)
+    except (TypeError, ValueError) as exc:
+        return redirect_to_user_dashboard(
+            user_id,
+            instance_mode=instance_mode,
+            instance_public_id=instance_public_id,
+            error=f"实例运行信息无效：{exc}",
+        )
     if get_container_status(user_id) == "STOPPED":
         return redirect_to_user_dashboard(
             user_id,

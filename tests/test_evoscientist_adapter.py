@@ -19,6 +19,11 @@ from instance_adapters import EvoScientistDockerAdapter
 
 
 class EvoScientistAdapterTests(unittest.TestCase):
+    INSTANCE = {
+        "legacy_user_id": "alice",
+        "runtime_identifier": "evoscientist_alice",
+    }
+
     def make_adapter(self, root):
         return EvoScientistDockerAdapter(
             manager_dir=root,
@@ -38,7 +43,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 return 0, command[-1]
 
             with patch.object(adapter, "run_command", side_effect=run_command):
-                code, _ = adapter.restart("alice")
+                code, _ = adapter.restart(self.INSTANCE)
 
             self.assertEqual(code, 0)
             self.assertEqual(
@@ -60,7 +65,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
 
             with patch.object(adapter, "disable_nginx_user_conf", return_value=(0, "disabled")):
                 with patch.object(adapter, "run_command", side_effect=run_command):
-                    code, _ = adapter.stop("alice")
+                    code, _ = adapter.stop(self.INSTANCE)
 
             self.assertEqual(code, 0)
             self.assertEqual(
@@ -71,6 +76,20 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 ],
             )
 
+    def test_start_without_legacy_user_id_skips_nginx(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            instance = {"runtime_identifier": "evoscientist.project-1"}
+
+            with patch.object(adapter, "run_command", return_value=(0, "started")) as run, patch.object(
+                adapter, "enable_nginx_user_conf"
+            ) as enable_nginx:
+                result = adapter.start(instance)
+
+            self.assertEqual(result, (0, ""))
+            self.assertEqual(run.call_count, 2)
+            enable_nginx.assert_not_called()
+
     def test_status_is_degraded_when_proxy_is_stopped(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
@@ -79,7 +98,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 "_container_status",
                 side_effect=["Up 10 minutes", "STOPPED"],
             ):
-                status = adapter.status("alice")
+                status = adapter.status(self.INSTANCE)
 
             self.assertTrue(status.startswith("DEGRADED"))
             self.assertIn("evoscientist_alice-proxy=STOPPED", status)
@@ -88,7 +107,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
 
-            code, output = adapter.update_version("alice", "2026.6.11")
+            code, output = adapter.update_version(self.INSTANCE, "2026.6.11")
 
             self.assertNotEqual(code, 0)
             self.assertIn("not supported", output)

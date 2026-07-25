@@ -238,6 +238,82 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             self.assertIn("proxy_pass http://agent_alice_1;", migrated_user)
             self.assertIn("Migrated 2 Nginx config(s)", result.stdout)
 
+    def test_migrates_legacy_manager_upstream_inside_instance_config(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            conf_dir = root / "nginx" / "conf"
+            conf_dir.mkdir(parents=True)
+            self.write_config(manager, conf_dir)
+            self.write_fake_docker(root)
+            config = conf_dir / "alice.conf"
+            config.write_text(
+                textwrap.dedent(
+                    """
+                    upstream agent_alice_1 {
+                        resolver 127.0.0.11 valid=10s ipv6=off;
+                        server openclaw_alice:18789 resolve;
+                    }
+                    upstream manager_web_backend_alice {
+                        resolver 127.0.0.11 valid=10s ipv6=off;
+                        server openclaw-manager-web:8080 resolve;
+                    }
+                    location / {
+                        proxy_pass http://agent_alice_1;
+                    }
+                    location /instance-admin/ {
+                        proxy_pass http://manager_web_backend_alice/instance-admin/;
+                    }
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+
+            result = self.run_migration(manager, root, "alice")
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            migrated = config.read_text(encoding="utf-8")
+            self.assertIn("server openclaw-manager-user-web:8080 resolve;", migrated)
+            self.assertIn("proxy_pass http://manager_user_web_backend_alice/instance-admin/;", migrated)
+            self.assertIn("server openclaw_alice:18789 resolve;", migrated)
+            self.assertIn("Migrated 1 Nginx config(s)", result.stdout)
+
+    def test_migrates_legacy_manager_upstream_with_variable_instance_proxy(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = self.make_manager(root)
+            conf_dir = root / "nginx" / "conf"
+            conf_dir.mkdir(parents=True)
+            self.write_config(manager, conf_dir)
+            self.write_fake_docker(root)
+            config = conf_dir / "alice.conf"
+            config.write_text(
+                textwrap.dedent(
+                    """
+                    upstream manager_web_backend_alice {
+                        resolver 127.0.0.11 valid=10s ipv6=off;
+                        server openclaw-manager-web:8080 resolve;
+                    }
+                    server {
+                        location / {
+                            resolver 127.0.0.11 valid=10s ipv6=off;
+                            set $openclaw_upstream "openclaw_alice:18789";
+                            proxy_pass http://$openclaw_upstream;
+                        }
+                    }
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+
+            result = self.run_migration(manager, root, "alice")
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            migrated = config.read_text(encoding="utf-8")
+            self.assertIn("server openclaw-manager-user-web:8080 resolve;", migrated)
+            self.assertIn('set $openclaw_upstream "openclaw_alice:18789";', migrated)
+            self.assertIn("Migrated 1 Nginx config(s)", result.stdout)
+
     def test_bulk_migration_converts_evoscientist_multi_port_config(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

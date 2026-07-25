@@ -194,6 +194,7 @@ for path in config_files:
         updates.append((path, updated))
         continue
 
+    has_legacy_manager_upstream = "openclaw-manager-web:8080" in text
     text = text.replace("openclaw-manager-web:8080", "openclaw-manager-user-web:8080")
     text = text.replace("manager_web_backend_", "manager_user_web_backend_")
 
@@ -209,6 +210,8 @@ for path in config_files:
         and "proxy_pass http://$openclaw_upstream;" in root_body
         and not static_proxy.search(text)
     ):
+        if has_legacy_manager_upstream:
+            updates.append((path, text))
         continue
 
     endpoints = {}
@@ -236,6 +239,8 @@ for path in config_files:
             and re.search(r"proxy_pass\s+http://[A-Za-z0-9_.-]+(?:[/;])", text)
         )
         if generic_dynamic:
+            if has_legacy_manager_upstream:
+                updates.append((path, text))
             continue
         if scan_mode == "bulk":
             continue

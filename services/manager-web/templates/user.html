@@ -23,7 +23,7 @@
       {% if show_admin_links %}
         <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
       {% endif %}
-      <a class="btn btn-oc-outline" href="{% if instance_public_id %}{{ url_for('my_instance') }}{% else %}/{% endif %}">{% if instance_mode %}返回首页{% elif instance_public_id %}返回我的实例{% else %}切换用户{% endif %}</a>
+      <a class="btn btn-oc-outline" href="{{ back_url|default('/') }}">{% if instance_mode %}返回首页{% elif instance_public_id %}返回我的实例{% else %}切换用户{% endif %}</a>
     </div>
   </div>
 

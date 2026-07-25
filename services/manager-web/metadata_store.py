@@ -901,12 +901,42 @@ def get_execution_job(request_id, *, db_file=None, conn=None):
         )
 
 
-def list_execution_jobs(status=None, limit=100, *, db_file=None, conn=None):
+def list_execution_jobs(
+    status=None,
+    statuses=None,
+    limit=100,
+    *,
+    actor_user_public_id=None,
+    instance_public_id=None,
+    action=None,
+    newest_first=False,
+    db_file=None,
+    conn=None,
+):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
-        where = "WHERE job.status = ?" if status else ""
-        params = (status, limit) if status else (limit,)
+        conditions = []
+        params = []
+        if status:
+            conditions.append("job.status = ?")
+            params.append(status)
+        if statuses:
+            conditions.append(
+                f"job.status IN ({','.join('?' for _ in statuses)})"
+            )
+            params.extend(statuses)
+        if actor_user_public_id:
+            conditions.append("actor.public_id = ?")
+            params.append(actor_user_public_id)
+        if instance_public_id:
+            conditions.append("instance.public_id = ?")
+            params.append(instance_public_id)
+        if action:
+            conditions.append("job.action = ?")
+            params.append(action)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
         rows = active_conn.execute(
             f"""
             SELECT job.*,
@@ -916,10 +946,11 @@ def list_execution_jobs(status=None, limit=100, *, db_file=None, conn=None):
             LEFT JOIN users actor ON actor.id = job.actor_user_id
             LEFT JOIN instances instance ON instance.id = job.instance_id
             {where}
-            ORDER BY job.created_at, job.id
+            ORDER BY job.created_at {"DESC" if newest_first else "ASC"},
+                     job.id {"DESC" if newest_first else "ASC"}
             LIMIT ?
             """,
-            params,
+            tuple(params),
         ).fetchall()
         return [row_to_dict(row) for row in rows]
 

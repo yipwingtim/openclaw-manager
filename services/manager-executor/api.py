@@ -103,6 +103,10 @@ def snapshot(instance_public_id):
             if can_manage and devices and devices.is_file()
             else "No device cache found yet.",
             "can_manage": can_manage,
+            "download_extensions": ", ".join(sorted(DOWNLOAD_EXTENSIONS)),
+            "protected_filenames": ", ".join(sorted(PROTECTED_FILENAMES)),
+            "upload_dir": "uploads",
+            "max_upload_bytes": app.config["MAX_CONTENT_LENGTH"],
         }
     )
 

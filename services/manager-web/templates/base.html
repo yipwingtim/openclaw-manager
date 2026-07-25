@@ -558,6 +558,12 @@
         </div>
         <div class="sidebar-section">功能菜单</div>
         <div class="sidebar-nav">
+          {% if show_admin_instance_nav %}
+            <a href="/admin/instances">
+              <svg class="oc-nav-icon"><use href="#oc-icon-database"/></svg>
+              <span>实例列表</span>
+            </a>
+          {% endif %}
           {% if show_global_admin_nav %}
             <a href="/admin/users">
               <svg class="oc-nav-icon"><use href="#oc-icon-users"/></svg>
@@ -635,5 +641,6 @@
         });
       })();
     </script>
+    {% block scripts %}{% endblock %}
   </body>
 </html>

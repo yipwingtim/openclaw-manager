@@ -171,6 +171,7 @@ def context():
     return {
         "current_user": current["username"] if current else "",
         "is_admin": bool(current and current["role"] == "admin"),
+        "show_admin_instance_nav": bool(current and current["role"] == "admin"),
         "show_global_admin_nav": False,
         "csrf_token": current.get("csrf_token", "") if current else "",
         "auth_provider": AUTH_PROVIDER,

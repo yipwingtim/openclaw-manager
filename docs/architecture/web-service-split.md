@@ -10,11 +10,16 @@ legacy `/instance-admin/` redirect. Runtime status, logs, devices, and files go
 through `manager-executor-api`, which resolves the instance from the actor and
 instance UUID before using an Adapter or data path.
 
-`manager-admin-web` serves `/admin/*` and creates allowlisted execution jobs.
-It cannot call Docker or write metadata directly. The current admin portal
-supports instance listing and start, stop, and restart. Legacy batch creation,
-version, Basic Auth, Skill, and batch-device screens are intentionally absent
-until each operation has a structured executor action.
+`manager-admin-web` remains the target for the completed admin migration. Until
+all existing admin operations have structured executor actions, `/admin/*` is
+routed to the Compose-managed legacy `manager-web` compatibility service. This
+service retains its existing privileged mounts, is not published on a host
+port, and must not serve the user portal.
+
+`manager-admin-web` cannot call Docker or write metadata directly. Its current
+portal supports instance listing and start, stop, and restart. Legacy batch
+creation, version, Basic Auth, Skill, and batch-device screens remain on the
+compatibility service until each operation is migrated.
 
 ## Production switch
 
@@ -25,14 +30,17 @@ before deployment.
 
 1. Build and start `manager-control`, `manager-executor`,
    `manager-executor-api`, `manager-user-web`, and `manager-admin-web`.
-2. Verify both Web containers are reachable from Nginx on `manager-net` and
-   have no Docker, database, or Nginx mounts.
+2. Verify the user, admin, and legacy compatibility Web containers are reachable
+   from Nginx on `manager-net`. Only the legacy compatibility service retains
+   Docker, database, and Nginx mounts.
 3. Run `scripts/update_manager_auth.sh`. It backs up the manager and instance
    configuration, validates with `nginx -t`, reloads Nginx, and restores the
    backup if validation or reload fails.
-4. Verify `/me`, `/instances/{uuid}`, `/admin/instances`, local or external
-   login, instance `/admin/`, and one idempotent lifecycle task.
-5. Remove the old container only after the checks pass.
+4. Verify `/me`, `/instances/{uuid}`, `/admin/users`, local login, instance
+   `/admin/`, and one idempotent lifecycle task.
+5. Remove the compatibility service only after all admin operations have moved
+   to structured control and executor APIs and `/admin/*` is routed back to
+   `manager-admin-web`.
 
 ## Rollback
 

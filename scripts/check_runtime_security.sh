@@ -101,7 +101,7 @@ fi
 if [ -d "$NGINX_CONF_DIR" ]; then
   ok "Nginx conf dir exists: $NGINX_CONF_DIR"
 
-  manager_proxy_files="$(grep -rl --include='*.conf' -e "openclaw-manager-user-web:8080" -e "openclaw-manager-admin-web:8080" "$NGINX_CONF_DIR" 2>/dev/null || true)"
+  manager_proxy_files="$(grep -rl --include='*.conf' -e "openclaw-manager-user-web:8080" -e "openclaw-manager-admin-web:8080" -e "openclaw-manager-web:8080" "$NGINX_CONF_DIR" 2>/dev/null || true)"
   if [ -n "$manager_proxy_files" ]; then
     while IFS= read -r file; do
       if nginx_internal_token_header_exists "$file"; then

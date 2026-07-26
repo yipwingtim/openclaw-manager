@@ -12,12 +12,15 @@ class WebServiceSplitTests(unittest.TestCase):
 
         self.assertIn("  manager-user-web:\n", compose)
         self.assertIn("  manager-admin-web:\n", compose)
-        self.assertNotIn("  manager-web:\n", compose)
+        self.assertIn("  manager-web:\n", compose)
 
         user_block = compose.split("  manager-user-web:\n", 1)[1].split(
             "  manager-admin-web:\n", 1
         )[0]
         admin_block = compose.split("  manager-admin-web:\n", 1)[1].split(
+            "  manager-web:\n", 1
+        )[0]
+        legacy_admin_block = compose.split("  manager-web:\n", 1)[1].split(
             "  pdf-extract-text:\n", 1
         )[0]
         for name, block in (("user", user_block), ("admin", admin_block)):
@@ -32,6 +35,10 @@ class WebServiceSplitTests(unittest.TestCase):
         self.assertIn("MANAGER_WEB_ROLE: admin", admin_block)
         self.assertIn("healthcheck:", user_block)
         self.assertIn("healthcheck:", admin_block)
+        self.assertIn("container_name: openclaw-manager-web", legacy_admin_block)
+        self.assertIn("dockerfile: Dockerfile.legacy", legacy_admin_block)
+        self.assertIn("/var/run/docker.sock", legacy_admin_block)
+        self.assertNotIn("ports:", legacy_admin_block)
 
         executor_api_block = compose.split("  manager-executor-api:\n", 1)[1].split(
             "  manager-user-web:\n", 1
@@ -55,9 +62,9 @@ class WebServiceSplitTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("server openclaw-manager-user-web:8080 resolve;", template)
-        self.assertIn("server openclaw-manager-admin-web:8080 resolve;", template)
+        self.assertIn("server openclaw-manager-web:8080 resolve;", template)
         self.assertIn("location ^~ /admin", template)
-        self.assertIn("proxy_pass http://manager_admin_web_backend;", template)
+        self.assertIn("proxy_pass http://manager_legacy_admin_backend;", template)
         self.assertIn("proxy_pass http://manager_user_web_backend;", template)
 
     def test_user_web_keeps_legacy_instance_admin_entry(self):
@@ -82,6 +89,16 @@ class WebServiceSplitTests(unittest.TestCase):
         )
 
         self.assertIn('{"/login", "/admin/login"}', source)
+
+    def test_legacy_admin_has_namespaced_auth_routes(self):
+        source = (ROOT_DIR / "services" / "manager-web" / "app.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('@app.get("/admin/login")', source)
+        self.assertIn('@app.post("/admin/login")', source)
+        self.assertIn('@app.post("/admin/logout")', source)
+        self.assertIn('@app.get("/health")', source)
 
 
 if __name__ == "__main__":

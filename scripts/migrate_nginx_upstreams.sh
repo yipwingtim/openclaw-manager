@@ -153,45 +153,12 @@ static_proxy = re.compile(
     r"(?P<host>[A-Za-z0-9_.-]+):(?P<port>[0-9]+)(?P<uri>/[^;\s]*)?;"
 )
 ipv4_address = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
-manager_static_proxy = re.compile(
-    r"(?P<prefix>proxy_pass\s+http://)openclaw-manager-web:8080(?P<uri>/[^;\s]*)?;"
-)
-manager_upstream = (
-    "upstream manager_user_web_backend {\n"
-    "    zone manager_user_web_backend 64k;\n"
-    "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
-    "    resolver_timeout 5s;\n"
-    "    server openclaw-manager-user-web:8080 resolve;\n"
-    "}\n\n"
-    "upstream manager_admin_web_backend {\n"
-    "    zone manager_admin_web_backend 64k;\n"
-    "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
-    "    resolver_timeout 5s;\n"
-    "    server openclaw-manager-admin-web:8080 resolve;\n"
-    "}\n\n"
-)
-
 updates = []
 for path in config_files:
     text = path.read_text(encoding="utf-8")
     if path.name == "manager-web.conf":
-        if (
-            "server openclaw-manager-user-web:8080 resolve;" in text
-            and "server openclaw-manager-admin-web:8080 resolve;" in text
-        ):
-            continue
-        if not manager_static_proxy.search(text):
-            if scan_mode == "bulk":
-                continue
-            raise SystemExit(f"Could not find manager-web upstream in {path}")
-        updated = manager_upstream + manager_static_proxy.sub(
-            lambda match: (
-                f'{match.group("prefix")}manager_user_web_backend'
-                f'{match.group("uri") or ""};'
-            ),
-            text,
-        )
-        updates.append((path, updated))
+        # The manager entry has multiple auth-aware routes and is rendered atomically
+        # by update_manager_auth.sh; this script only migrates tenant configs.
         continue
 
     has_legacy_manager_upstream = "openclaw-manager-web:8080" in text

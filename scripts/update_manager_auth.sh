@@ -133,7 +133,7 @@ case "$MANAGER_AUTH_PROVIDER" in
     MANAGER_EMERGENCY_LOCATION="    location = /emergency/login {
         auth_basic \"OpenClaw Manager Emergency\";
         auth_basic_user_file $NGINX_HTPASSWD_FILE_IN_CONTAINER;
-        proxy_pass http://manager_admin_web_backend;
+        proxy_pass http://manager_legacy_admin_backend;
         proxy_set_header Host \$host;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-Remote-User \$remote_user;

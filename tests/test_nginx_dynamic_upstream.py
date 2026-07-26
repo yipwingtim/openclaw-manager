@@ -24,12 +24,12 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         template = MANAGER_TEMPLATE.read_text(encoding="utf-8")
 
         self.assertIn("upstream manager_user_web_backend {", template)
-        self.assertIn("upstream manager_admin_web_backend {", template)
+        self.assertIn("upstream manager_legacy_admin_backend {", template)
         self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", template)
         self.assertIn("server openclaw-manager-user-web:8080 resolve;", template)
-        self.assertIn("server openclaw-manager-admin-web:8080 resolve;", template)
+        self.assertIn("server openclaw-manager-web:8080 resolve;", template)
         self.assertIn("proxy_pass http://manager_user_web_backend;", template)
-        self.assertIn("proxy_pass http://manager_admin_web_backend;", template)
+        self.assertIn("proxy_pass http://manager_legacy_admin_backend;", template)
 
     def test_services_deploy_migrates_nginx_upstreams(self):
         script = DEPLOY_SERVICES.read_text(encoding="utf-8")
@@ -197,7 +197,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             self.assertIn("already use Docker DNS", repeated.stdout)
 
 
-    def test_bulk_migration_converts_manager_web_config(self):
+    def test_bulk_migration_leaves_manager_web_config_to_auth_renderer(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             manager = self.make_manager(root)
@@ -222,21 +222,11 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
             result = self.run_migration(manager, root)
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            migrated_manager = manager_config.read_text(encoding="utf-8")
-            self.assertIn("upstream manager_user_web_backend {", migrated_manager)
-            self.assertIn("upstream manager_admin_web_backend {", migrated_manager)
-            self.assertIn(
-                "server openclaw-manager-user-web:8080 resolve;", migrated_manager
-            )
-            self.assertIn("proxy_pass http://manager_user_web_backend;", migrated_manager)
-            self.assertIn(
-                'proxy_set_header X-OpenClaw-Internal-Token "secret";',
-                migrated_manager,
-            )
+            self.assertEqual(manager_config.read_text(encoding="utf-8"), manager_text)
             migrated_user = user_config.read_text(encoding="utf-8")
             self.assertIn("server openclaw_alice:18789 resolve;", migrated_user)
             self.assertIn("proxy_pass http://agent_alice_1;", migrated_user)
-            self.assertIn("Migrated 2 Nginx config(s)", result.stdout)
+            self.assertIn("Migrated 1 Nginx config(s)", result.stdout)
 
     def test_migrates_legacy_manager_upstream_inside_instance_config(self):
         with TemporaryDirectory() as temp_dir:

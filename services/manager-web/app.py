@@ -171,7 +171,11 @@ def get_actor_user_record():
 
 @app.before_request
 def require_csrf_token():
-    if MANAGER_AUTH_PROVIDER == "nginx-basic" or request.method != "POST" or request.path == "/login":
+    if (
+        MANAGER_AUTH_PROVIDER == "nginx-basic"
+        or request.method != "POST"
+        or request.path in {"/login", "/admin/login"}
+    ):
         return None
     actor = get_actor_user_record()
     provided = request.form.get("csrf_token", "")
@@ -191,7 +195,13 @@ def inject_actor_context():
         "show_global_admin_nav": actor_is_admin,
         "csrf_token": actor_record.get("csrf_token", "") if actor_record else "",
         "auth_provider": MANAGER_AUTH_PROVIDER,
+        "logout_url": "/admin/logout" if actor_is_admin else "/logout",
     }
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
 def validate_user_id(user_id):
@@ -2068,6 +2078,7 @@ def delete_file_for_user(
     )
 
 
+@app.get("/admin/login")
 @app.get("/login")
 def login_page():
     if get_actor_user_record():
@@ -2082,7 +2093,10 @@ def login_page():
     if MANAGER_AUTH_PROVIDER != "local":
         return render_template("error.html", message="Local login is disabled."), 404
     login_csrf = secrets.token_urlsafe(32)
-    response = app.make_response(render_template("login.html", error="", login_csrf=login_csrf))
+    response = app.make_response(render_template(
+        "login.html", error="", login_csrf=login_csrf,
+        login_action="/admin/login" if request.path.startswith("/admin/") else "/login",
+    ))
     response.set_cookie(
         "openclaw_manager_login_csrf",
         login_csrf,
@@ -2158,6 +2172,7 @@ def emergency_login():
     )
 
 
+@app.post("/admin/login")
 @app.post("/login")
 def login_submit():
     if MANAGER_AUTH_PROVIDER != "local":
@@ -2186,10 +2201,15 @@ def login_submit():
         )
     except control_client.ControlError:
         response = app.make_response(
-            render_template("login.html", error="Invalid username or password.", login_csrf=cookie_csrf)
+            render_template(
+                "login.html",
+                error="Invalid username or password.",
+                login_csrf=cookie_csrf,
+                login_action="/admin/login",
+            )
         )
         return response, 401
-    response = redirect(url_for("index"))
+    response = redirect(url_for("admin_users"))
     response.set_cookie(
         MANAGER_SESSION_COOKIE, raw_token, secure=MANAGER_COOKIE_SECURE,
         httponly=True, samesite="Lax", max_age=MANAGER_SESSION_HOURS * 3600,
@@ -2198,12 +2218,13 @@ def login_submit():
     return response
 
 
+@app.post("/admin/logout")
 @app.post("/logout")
 def logout():
     raw_token = getattr(request, "cookies", {}).get(MANAGER_SESSION_COOKIE, "")
     if raw_token:
         control_client.delete_session(token_hash(raw_token))
-    response = redirect(url_for("login_page"))
+    response = redirect("/admin/login" if request.path.startswith("/admin/") else "/login")
     response.delete_cookie(MANAGER_SESSION_COOKIE)
     return response
 

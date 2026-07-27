@@ -281,6 +281,69 @@ class ManagerAuthNginxTests(unittest.TestCase):
             self.assertIn("previous configs restored", result.stderr)
             self.assertEqual(instance_config.read_text(encoding="utf-8"), original)
 
+    def test_enable_instance_admin_refreshes_existing_internal_token(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = root / "manager"
+            scripts = manager / "scripts"
+            conf_dir = root / "nginx" / "conf"
+            scripts.mkdir(parents=True)
+            conf_dir.mkdir(parents=True)
+            shutil.copy2(ENABLE_INSTANCE_ADMIN_SCRIPT, scripts / ENABLE_INSTANCE_ADMIN_SCRIPT.name)
+            shutil.copy2(NGINX_AUTH_LIBRARY, scripts / NGINX_AUTH_LIBRARY.name)
+            (scripts / "update_manager_auth.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            (scripts / "update_manager_auth.sh").chmod(0o755)
+            (manager / "config").mkdir()
+            (manager / "config" / "openclaw-manager.env").write_text(
+                textwrap.dedent(
+                    f"""
+                    MANAGER_AUTH_PROVIDER=local
+                    PUBLIC_HOST=manager.example.test
+                    OPENCLAW_INTERNAL_TOKEN=new-token
+                    NGINX_USERS_CONF_DIR={conf_dir}
+                    NGINX_HTPASSWD_FILE={root / 'auth' / '.htpasswd'}
+                    NGINX_HTPASSWD_FILE_IN_CONTAINER=/etc/nginx/auth/.htpasswd
+                    NGINX_CONTAINER_NAME=openclaw-nginx
+                    """
+                ).strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            instance_config = conf_dir / "alice.conf"
+            instance_config.write_text(
+                textwrap.dedent(
+                    """
+                    server {
+                        location /admin/ {
+                            proxy_pass http://openclaw-manager-user-web:8080/instance-admin/;
+                            proxy_set_header X-OpenClaw-User "alice";
+                            proxy_set_header X-OpenClaw-Internal-Token "old-token";
+                        }
+                    }
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            docker = bin_dir / "docker"
+            docker.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            docker.chmod(0o755)
+
+            result = subprocess.run(
+                ["bash", str(scripts / "enable_instance_admin.sh"), "alice"],
+                text=True,
+                capture_output=True,
+                env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            updated = instance_config.read_text(encoding="utf-8")
+            self.assertIn('X-OpenClaw-Internal-Token "new-token";', updated)
+            self.assertNotIn("old-token", updated)
+            self.assertIn("Refreshed instance admin token: alice", result.stdout)
+
     def test_explicit_restore_reinstates_previous_configs(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

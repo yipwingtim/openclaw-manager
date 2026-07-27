@@ -21,6 +21,30 @@ portal supports instance listing and start, stop, and restart. Legacy batch
 creation, version, Basic Auth, Skill, and batch-device screens remain on the
 compatibility service until each operation is migrated.
 
+## Remaining migration order
+
+The remaining split is implemented in this order:
+
+1. Stabilize the existing Adapter lifecycle contract and enforce product
+   capabilities in the backend and executor. Keep authentication, routes,
+   creation, and ingress unchanged in this step.
+2. Move the legacy admin screens to `manager-admin-web`, including batch
+   creation, version management, Basic Auth, Skill management, device actions,
+   metadata views, and operation history. Each screen must retain its current
+   behavior before production routing changes.
+3. Add structured, allowlisted control and executor actions for every migrated
+   privileged operation. Browser requests identify instances by UUID and never
+   supply container names, host paths, or shell commands.
+4. Move instance creation only after its record, runtime, endpoint, audit, and
+   rollback sequence has an explicit contract.
+5. Route `/admin/*` to `manager-admin-web`, remove privileged mounts from Web
+   services, and retire the compatibility container after acceptance and a
+   tested rollback window.
+
+The legacy compatibility service is therefore transitional, not the target
+architecture. Hermes work starts after the Adapter contract and admin/executor
+boundaries are stable; it does not require unified HTTPS ingress.
+
 ## Production switch
 
 This changes Nginx upstreams and container names. Keep the previous

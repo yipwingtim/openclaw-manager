@@ -2478,6 +2478,7 @@ def portal_remove_instance_member(instance_public_id, member_public_id):
 
 @app.get("/admin")
 @app.get("/admin/")
+@app.get("/admin/instances")
 def admin_home():
     denied = require_admin()
     if denied:

@@ -50,6 +50,62 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             script,
         )
 
+    def test_runtime_check_ignores_nginx_backup_tokens_and_summarizes_active_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = root / "manager"
+            scripts_dir = manager / "scripts"
+            config_dir = manager / "config"
+            conf_dir = root / "nginx"
+            bin_dir = root / "bin"
+            scripts_dir.mkdir(parents=True)
+            config_dir.mkdir()
+            conf_dir.mkdir()
+            bin_dir.mkdir()
+            shutil.copy2(RUNTIME_SECURITY_CHECK, scripts_dir / RUNTIME_SECURITY_CHECK.name)
+            shutil.copy2(NETWORK_HELPER, scripts_dir / NETWORK_HELPER.name)
+            (config_dir / "openclaw-manager.env").write_text(
+                f"OPENCLAW_INTERNAL_TOKEN=current\nNGINX_CONF_DIR={conf_dir}\n",
+                encoding="utf-8",
+            )
+            active = conf_dir / "manager-web.conf"
+            active.write_text(
+                'server openclaw-manager-web:8080;\nproxy_set_header X-OpenClaw-Internal-Token "current";\n',
+                encoding="utf-8",
+            )
+            backup = conf_dir / ".dynamic-upstream-backups" / "old"
+            backup.mkdir(parents=True)
+            (backup / "manager-web.conf").write_text(
+                'server openclaw-manager-web:8080;\nproxy_set_header X-OpenClaw-Internal-Token "old";\n',
+                encoding="utf-8",
+            )
+            fake_docker = bin_dir / "docker"
+            fake_docker.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            fake_docker.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+
+            result = subprocess.run(
+                ["bash", str(scripts_dir / RUNTIME_SECURITY_CHECK.name)],
+                text=True, capture_output=True, env=env, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("[SUMMARY] errors=0", result.stdout)
+
+            active.write_text(
+                'server openclaw-manager-web:8080;\nproxy_set_header X-OpenClaw-Internal-Token "old";\n',
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["bash", str(scripts_dir / RUNTIME_SECURITY_CHECK.name)],
+                text=True, capture_output=True, env=env, check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(
+                "[SUMMARY] error_type=nginx_internal_token_mismatch count=1",
+                result.stdout,
+            )
+
     def test_tenant_network_name_does_not_collapse_distinct_ids(self):
         result = subprocess.run(
             [

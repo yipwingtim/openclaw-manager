@@ -10,6 +10,7 @@ CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
 
 ERRORS=0
 WARNINGS=0
+declare -A ERROR_TYPES=()
 
 ok() {
   echo "[OK] $*"
@@ -21,7 +22,23 @@ warn() {
 }
 
 error() {
+  local type="other"
+  case "$*" in
+    "internal token header value does not match"*) type="nginx_internal_token_mismatch" ;;
+    "internal token header missing"*) type="nginx_internal_token_missing" ;;
+    "model allowlist is empty"*) type="model_allowlist_empty" ;;
+    "model allowlist missing"*) type="model_allowlist_missing" ;;
+    *"not attached to manager-net"*) type="manager_network_missing" ;;
+    *"attached to manager-net"*) type="tenant_attached_to_manager_network" ;;
+    *"attached to shared agent-net"*) type="tenant_attached_to_shared_network" ;;
+    *"missing tenant network"*) type="tenant_network_missing" ;;
+    "docker command not found") type="docker_missing" ;;
+    "config missing"*) type="config_missing" ;;
+    "Nginx conf dir missing"*) type="nginx_conf_dir_missing" ;;
+    "OPENCLAW_INTERNAL_TOKEN is empty"*) type="internal_token_missing" ;;
+  esac
   ERRORS=$((ERRORS + 1))
+  ERROR_TYPES["$type"]=$(( ${ERROR_TYPES["$type"]:-0} + 1 ))
   echo "[ERROR] $*"
 }
 
@@ -101,7 +118,7 @@ fi
 if [ -d "$NGINX_CONF_DIR" ]; then
   ok "Nginx conf dir exists: $NGINX_CONF_DIR"
 
-  manager_proxy_files="$(grep -rl --include='*.conf' -e "openclaw-manager-user-web:8080" -e "openclaw-manager-admin-web:8080" -e "openclaw-manager-web:8080" "$NGINX_CONF_DIR" 2>/dev/null || true)"
+  manager_proxy_files="$(find "$NGINX_CONF_DIR" -maxdepth 1 -type f -name '*.conf' -exec grep -l -e "openclaw-manager-user-web:8080" -e "openclaw-manager-admin-web:8080" -e "openclaw-manager-web:8080" {} + 2>/dev/null | sort || true)"
   if [ -n "$manager_proxy_files" ]; then
     while IFS= read -r file; do
       if nginx_internal_token_header_exists "$file"; then
@@ -245,6 +262,11 @@ else
 fi
 
 echo "[SUMMARY] errors=$ERRORS warnings=$WARNINGS"
+if [ "${#ERROR_TYPES[@]}" -gt 0 ]; then
+  for type in "${!ERROR_TYPES[@]}"; do
+    printf '[SUMMARY] error_type=%s count=%s\n' "$type" "${ERROR_TYPES[$type]}"
+  done | sort
+fi
 
 if [ "$ERRORS" -gt 0 ]; then
   exit 1

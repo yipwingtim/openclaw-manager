@@ -100,6 +100,14 @@ class WebServiceSplitTests(unittest.TestCase):
         self.assertIn('@app.post("/admin/logout")', source)
         self.assertIn('@app.get("/health")', source)
 
+    def test_legacy_admin_redirects_split_instance_entry(self):
+        source = (ROOT_DIR / "services" / "manager-web" / "app.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('@app.get("/admin/instances")', source)
+        self.assertIn('return redirect(url_for("admin_users"))', source)
+
 
 if __name__ == "__main__":
     unittest.main()

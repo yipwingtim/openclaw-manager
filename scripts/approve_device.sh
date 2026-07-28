@@ -48,7 +48,7 @@ NGINX_CONF_DIR="${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}"
 NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
 
 USER_DIR="$BASE_DIR/users/$USER_ID"
-CONTAINER_NAME="openclaw_${USER_ID}"
+CONTAINER_NAME="${OPENCLAW_RUNTIME_TARGET:-openclaw_${USER_ID}}"
 NGINX_USER_CONF="$NGINX_CONF_DIR/${USER_ID}.conf"
 
 log() {
@@ -62,10 +62,6 @@ warn() {
 fail() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >&2
   exit 1
-}
-
-approval_output_is_terminal() {
-  echo "$1" | grep -Eiq 'approved|success|no pending|already approved|already paired|not found'
 }
 
 if [ ! -d "$USER_DIR" ]; then
@@ -117,18 +113,22 @@ echo "=============================="
 echo " Pending device requests"
 echo "=============================="
 
-LIST_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices list 2>&1 || true)"
+if ! LIST_OUTPUT="$(docker exec "$CONTAINER_NAME" timeout 45s openclaw devices list 2>&1)"; then
+  fail "Could not list devices: $LIST_OUTPUT"
+fi
 echo "$LIST_OUTPUT"
 CACHE_DIR="$BASE_DIR/users/$USER_ID"
 CACHE_FILE="$CACHE_DIR/devices.txt"
 
 mkdir -p "$CACHE_DIR"
 
+TEMP_CACHE_FILE="$(mktemp "$CACHE_DIR/.devices.txt.XXXXXX")"
 {
   echo "Generated at: $(date '+%Y-%m-%d %H:%M:%S')"
   echo
   echo "$LIST_OUTPUT"
-} > "$CACHE_FILE"
+} > "$TEMP_CACHE_FILE"
+mv "$TEMP_CACHE_FILE" "$CACHE_FILE"
 
 log "Device cache updated: $CACHE_FILE"
 
@@ -181,43 +181,27 @@ if [ "$TARGET_REQUEST_ID" = "--list-only" ]; then
 fi
 
 if [ "$TARGET_REQUEST_ID" = "--latest" ]; then
-  log "Explicit --latest requested. Previewing latest pending request."
-  LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices approve --latest 2>&1 || true)"
-  echo "$LATEST_OUTPUT"
-
-  LATEST_REQUEST_ID="$(
-    echo "$LATEST_OUTPUT" \
-      | sed -nE 's/.*Selected pending device request[[:space:]]+([A-Za-z0-9._-]+).*/\1/p' \
-      | head -n 1
-  )"
-
-  if [ -z "$LATEST_REQUEST_ID" ]; then
-    if approval_output_is_terminal "$LATEST_OUTPUT"; then
-      log "Latest approval completed without explicit requestId."
-      exit 0
+  EXECUTION_REQUEST_ID="${OPENCLAW_EXECUTION_REQUEST_ID:-}"
+  if [ -n "$EXECUTION_REQUEST_ID" ]; then
+    APPROVAL_STATE_DIR="$USER_DIR/backups/device-approvals"
+    APPROVAL_STATE_KEY="$(printf '%s' "$EXECUTION_REQUEST_ID" | sha256sum | awk '{print $1}')"
+    mkdir -p "$APPROVAL_STATE_DIR"
+    if ! mkdir "$APPROVAL_STATE_DIR/$APPROVAL_STATE_KEY" 2>/dev/null; then
+      fail "This device approval task was already attempted; refusing to approve a different latest request."
     fi
-
-    warn "Could not extract latest requestId from OpenClaw output. Falling back to legacy --latest approval."
-    LEGACY_OUTPUT="$(docker exec "$CONTAINER_NAME" openclaw devices approve --latest 2>&1 || true)"
-    echo "$LEGACY_OUTPUT"
-
-    if approval_output_is_terminal "$LEGACY_OUTPUT"; then
-      log "Latest approval completed via legacy --latest flow."
-      exit 0
-    fi
-
-    fail "Could not approve latest device request."
   fi
-
-  log "Approving latest requestId explicitly: $LATEST_REQUEST_ID"
-  docker exec "$CONTAINER_NAME" openclaw devices approve "$LATEST_REQUEST_ID"
+  log "Explicit --latest requested. Approving latest pending request."
+  if ! LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" timeout 45s openclaw devices approve --latest 2>&1)"; then
+    fail "Could not approve latest device request: $LATEST_OUTPUT"
+  fi
+  echo "$LATEST_OUTPUT"
   log "Approved latest request for user: $USER_ID"
   exit 0
 fi
 
 if [ -n "$TARGET_REQUEST_ID" ]; then
   log "Approving specified requestId: $TARGET_REQUEST_ID"
-  docker exec "$CONTAINER_NAME" openclaw devices approve "$TARGET_REQUEST_ID"
+  docker exec "$CONTAINER_NAME" timeout 45s openclaw devices approve "$TARGET_REQUEST_ID"
   log "Approved request for user: $USER_ID"
   exit 0
 fi
@@ -235,7 +219,7 @@ fi
 if [ "$REQUEST_COUNT" -eq 1 ]; then
   ONLY_REQUEST_ID="$(echo "$REQUEST_IDS" | awk 'NF' | head -n 1)"
   log "Only one pending request found. Approving requestId: $ONLY_REQUEST_ID"
-  docker exec "$CONTAINER_NAME" openclaw devices approve "$ONLY_REQUEST_ID"
+  docker exec "$CONTAINER_NAME" timeout 45s openclaw devices approve "$ONLY_REQUEST_ID"
   log "Approved request for user: $USER_ID"
   exit 0
 fi

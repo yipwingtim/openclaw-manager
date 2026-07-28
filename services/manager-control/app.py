@@ -48,6 +48,8 @@ JOB_ACTION_PARAMS = {
     "instance.set_basic_auth": {"enabled"},
     "instance.update_version": {"version", "restore_model_provider"},
     "instance.install_skill": {"skill_id"},
+    "instance.refresh_devices": set(),
+    "instance.approve_latest_device": set(),
     "instance.wechat_bind": set(),
 }
 
@@ -403,7 +405,9 @@ def admin_instances():
                     "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
                     "capabilities": sorted(
                         capability
-                        for capability in ("basic_auth", "update_version", "skill_install")
+                        for capability in (
+                            "basic_auth", "update_version", "skill_install", "device_pairing"
+                        )
                         if product_supports(instance["product"], capability)
                     ),
                 }
@@ -727,7 +731,7 @@ def create_execution_job():
             {"error": f"instance product does not support {capability or action}"}
         ), 400
     try:
-        if action == "instance.wechat_bind":
+        if action in {"instance.wechat_bind", "instance.approve_latest_device"}:
             with metadata_store.connect(DB_FILE) as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 active_jobs = metadata_store.list_execution_jobs(
@@ -738,7 +742,12 @@ def create_execution_job():
                     conn=conn,
                 )
                 if active_jobs:
-                    return jsonify({"error": "wechat bind is already running"}), 409
+                    message = (
+                        "wechat bind is already running"
+                        if action == "instance.wechat_bind"
+                        else "approve_latest_device is already running"
+                    )
+                    return jsonify({"error": message}), 409
                 job = metadata_store.create_execution_job(
                     request_id=request_id,
                     parent_request_id=parent_request_id,
@@ -911,6 +920,8 @@ def update_execution_job(request_id):
                     "instance.set_basic_auth",
                     "instance.update_version",
                     "instance.install_skill",
+                    "instance.refresh_devices",
+                    "instance.approve_latest_device",
                 }
             ):
                 params = json.loads(job["params_json"])
@@ -918,15 +929,24 @@ def update_execution_job(request_id):
                     message = f"Basic Auth {'enabled' if params['enabled'] else 'disabled'}"
                 elif job["action"] == "instance.update_version":
                     message = f"version={params['version']}"
-                else:
+                elif job["action"] == "instance.install_skill":
                     message = f"skill={params['skill_id']}"
+                else:
+                    message = "device cache refreshed" if job["action"] == "instance.refresh_devices" else "latest device request approved"
+                operation_status = "success" if status == "succeeded" else "failed"
+                if (
+                    job["action"] == "instance.approve_latest_device"
+                    and "No pending device request found" in (payload.get("output") or "")
+                ):
+                    operation_status = "skipped"
+                    message = "No pending device request found."
                 metadata_store.record_operation(
                     request_id=request_id,
                     actor_user_id=job["actor_user_id"],
                     instance_id=job["instance_id"],
                     source_service="manager-executor",
                     action=job["action"],
-                    status="success" if status == "succeeded" else "failed",
+                    status=operation_status,
                     message=message,
                     conn=conn,
                 )

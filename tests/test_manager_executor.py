@@ -230,6 +230,57 @@ class ManagerExecutorTests(unittest.TestCase):
         )
         self.assertEqual(control.update.call_args.args, ("skill-1", "succeeded"))
 
+    def test_run_once_refreshes_devices_without_retry(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {
+                "request_id": "devices-1",
+                "action": "instance.refresh_devices",
+                "params": {},
+            },
+            "instance": {
+                "product": "openclaw",
+                "legacy_user_id": "alice",
+                "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.status.return_value = "Up"
+        adapter.refresh_devices.return_value = (0, "refreshed")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.refresh_devices.assert_called_once_with(
+            control.claim.return_value["instance"]
+        )
+        self.assertEqual(control.update.call_args.args, ("devices-1", "succeeded"))
+
+    def test_run_once_approves_latest_device_with_stable_request_id(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {
+                "request_id": "device-approval-1",
+                "action": "instance.approve_latest_device",
+                "params": {},
+            },
+            "instance": {
+                "product": "openclaw",
+                "legacy_user_id": "alice",
+                "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.status.return_value = "Up"
+        adapter.approve_latest_device.return_value = (0, "approved")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.approve_latest_device.assert_called_once_with(
+            control.claim.return_value["instance"], request_id="device-approval-1"
+        )
+
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()
         control.claim.return_value = {

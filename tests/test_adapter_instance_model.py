@@ -342,6 +342,39 @@ class AdapterInstanceModelTests(unittest.TestCase):
 
             self.assertEqual(result, (0, "Verified unique Skill source: trusted/weather"))
 
+    def test_device_actions_use_server_resolved_instance_targets(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            instance = {
+                "legacy_user_id": "alice",
+                "runtime_identifier": "openclaw_custom_runtime",
+            }
+            process = Mock()
+            process.communicate.return_value = ("ok", None)
+            process.returncode = 0
+            process.poll.return_value = 0
+            with patch("subprocess.Popen", return_value=process) as popen:
+                adapter.refresh_devices(instance)
+                refresh = popen.call_args
+                adapter.approve_latest_device(instance, request_id="devices-1")
+                approve = popen.call_args
+
+            self.assertEqual(refresh.args[0][-1], "--list-only")
+            self.assertEqual(approve.args[0][-1], "--latest")
+            self.assertEqual(
+                refresh.kwargs["env"]["OPENCLAW_RUNTIME_TARGET"],
+                "openclaw_custom_runtime",
+            )
+            self.assertEqual(
+                approve.kwargs["env"]["OPENCLAW_RUNTIME_TARGET"],
+                "openclaw_custom_runtime",
+            )
+            self.assertEqual(
+                approve.kwargs["env"]["OPENCLAW_EXECUTION_REQUEST_ID"],
+                "devices-1",
+            )
+            self.assertTrue(approve.kwargs["start_new_session"])
+
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
@@ -364,6 +397,10 @@ class AdapterInstanceModelTests(unittest.TestCase):
         self.assertEqual(
             execution_action_capability("instance.update_version"),
             "update_version",
+        )
+        self.assertEqual(
+            execution_action_capability("instance.refresh_devices"),
+            "device_pairing",
         )
         self.assertIsNone(execution_action_capability("shell.run"))
 

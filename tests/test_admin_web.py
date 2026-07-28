@@ -147,6 +147,21 @@ class AdminWebTests(unittest.TestCase):
         self.assertNotIn("legacy_user_id", payload)
         self.assertEqual(response, "instances")
 
+    def test_admin_device_action_queues_structured_action(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {"action": "approve_latest"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "create_execution_job"
+        ) as create_job:
+            response = self.admin.devices("instance-1")
+
+        payload = create_job.call_args.args[0]
+        self.assertEqual(payload["instance_public_id"], "instance-1")
+        self.assertEqual(payload["action"], "instance.approve_latest_device")
+        self.assertEqual(payload["params"], {})
+        self.assertNotIn("legacy_user_id", payload)
+        self.assertEqual(response, "instances")
+
 
 if __name__ == "__main__":
     unittest.main()

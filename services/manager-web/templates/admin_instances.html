@@ -10,7 +10,7 @@
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
   <div class="surface table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>Basic Auth</th><th>操作</th><th>Skill</th></tr></thead>
+      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>Basic Auth</th><th>操作</th><th>Skill</th><th>设备</th></tr></thead>
       <tbody>
       {% for instance in instances %}
         <tr>
@@ -50,6 +50,15 @@
               </form>
             {% elif "skill_install" in instance.capabilities %}
               <span class="muted-small">未配置 Skill 白名单</span>
+            {% else %}<span class="muted-small">不支持</span>{% endif %}
+          </td>
+          <td>
+            {% if "device_pairing" in instance.capabilities %}
+              <form method="post" action="/admin/instances/{{ instance.public_id }}/devices" class="d-flex gap-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="btn btn-sm btn-oc-outline" name="action" value="refresh">刷新</button>
+                <button class="btn btn-sm btn-oc" name="action" value="approve_latest" onclick="return confirm('确认审批最新设备请求？');">审批最新</button>
+              </form>
             {% else %}<span class="muted-small">不支持</span>{% endif %}
           </td>
         </tr>

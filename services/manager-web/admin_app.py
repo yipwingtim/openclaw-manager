@@ -98,7 +98,53 @@ def instances():
     return render_template(
         "admin_instances.html", instances=control_client.list_admin_instances(),
         skill_presets=configured_skill_presets(),
+        batch_result=None,
         result=request.args.get("result", ""), error=request.args.get("error", ""),
+    )
+
+
+@app.post("/admin/action-batches")
+def run_action_batch():
+    current = web_common.actor()
+    action = request.form.get("action", "")
+    instance_public_ids = request.form.getlist("instance_public_ids")
+    skill_id = request.form.get("skill_id", "").strip()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    if action not in {"start", "stop", "restart", "install_skill"}:
+        return render_template("admin_instances.html", instances=[], skill_presets=configured_skill_presets(), batch_result=None, result="", error="无效的批量操作。"), 400
+    if not instance_public_ids or len(instance_public_ids) > 100 or len(set(instance_public_ids)) != len(instance_public_ids):
+        return render_template("admin_instances.html", instances=control_client.list_admin_instances(), skill_presets=configured_skill_presets(), batch_result=None, result="", error="请选择 1-100 个不同实例。"), 400
+    payload = {
+        "request_id": "action-batch-" + uuid.uuid4().hex,
+        "actor_user_public_id": current["public_id"],
+        "action": action,
+        "instance_public_ids": instance_public_ids,
+    }
+    if action == "install_skill":
+        if skill_id not in configured_skill_presets():
+            return render_template("admin_instances.html", instances=control_client.list_admin_instances(), skill_presets=configured_skill_presets(), batch_result=None, result="", error="请选择已配置的 Skill。"), 400
+        payload["skill_id"] = skill_id
+    try:
+        result = control_client.create_action_batch(payload)
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    return redirect(url_for("action_batch", request_id=result["parent"]["request_id"]))
+
+
+@app.get("/admin/action-batches/<request_id>")
+def action_batch(request_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        result = control_client.get_action_batch(request_id)
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    return render_template(
+        "admin_instances.html", instances=control_client.list_admin_instances(),
+        skill_presets=configured_skill_presets(), batch_result=result,
+        result="", error="",
     )
 
 

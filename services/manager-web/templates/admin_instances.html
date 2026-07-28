@@ -8,6 +8,45 @@
   </div>
   {% if result %}<div class="alert soft-success">{{ result }}</div>{% endif %}
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+  <form method="post" action="/admin/action-batches" class="surface p-3 mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="row g-2 align-items-end">
+      <div class="col-lg-5">
+        <label class="form-label" for="batch_instances">批量实例</label>
+        <select class="form-select" id="batch_instances" name="instance_public_ids" multiple required size="4">
+          {% for instance in instances if instance.status != "deleted" %}
+            <option value="{{ instance.public_id }}">{{ instance.instance_name }} ({{ instance.product }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="batch_action">批量操作</label>
+        <select class="form-select" id="batch_action" name="action" required>
+          <option value="start">启动</option><option value="stop">停止</option>
+          <option value="restart">重启</option><option value="install_skill">安装 Skill</option>
+        </select>
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="batch_skill">Skill（安装时必选）</label>
+        <select class="form-select" id="batch_skill" name="skill_id">
+          <option value="">请选择</option>
+          {% for skill in skill_presets %}<option value="{{ skill }}">{{ skill }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-1"><button class="btn btn-oc" type="submit" onclick="return confirm('确认提交批量操作？');">提交</button></div>
+    </div>
+  </form>
+  {% if batch_result %}
+    <div class="surface table-responsive mb-3">
+      <table class="table align-middle mb-0">
+        <thead><tr><th>实例 UUID</th><th>动作</th><th>状态</th><th>结果</th></tr></thead>
+        <tbody>{% for child in batch_result.children %}<tr>
+          <td>{{ child.instance_public_id }}</td><td>{{ child.action }}</td>
+          <td>{{ child.status }}</td><td>{{ child.summary }}</td>
+        </tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  {% endif %}
   <div class="surface table-responsive">
     <table class="table align-middle mb-0">
       <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>Basic Auth</th><th>操作</th><th>Skill</th><th>设备</th><th>保留策略</th></tr></thead>

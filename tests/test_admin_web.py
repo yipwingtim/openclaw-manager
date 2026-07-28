@@ -45,6 +45,8 @@ def load_admin_app():
     control_client.list_admin_instances = lambda: []
     control_client.create_device_batch = lambda payload: payload
     control_client.get_device_batch = lambda request_id: {}
+    control_client.create_action_batch = lambda payload: payload
+    control_client.get_action_batch = lambda request_id: {}
     control_client.create_execution_job = lambda payload: payload
     web_common = types.ModuleType("web_common")
     web_common.SESSION_SECRET = "test"
@@ -180,6 +182,49 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(payload["params"], {})
         self.assertNotIn("legacy_user_id", payload)
         self.assertEqual(response, "instances")
+
+    def test_admin_batch_action_submits_instance_uuids_and_configured_skill(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        values = {
+            "action": "install_skill", "skill_id": "weather@1.0",
+            "instance_public_ids": ["instance-1", "instance-2"],
+        }
+        self.admin.request.form = types.SimpleNamespace(
+            get=lambda key, default="": values.get(key, default),
+            getlist=lambda key: values.get(key, []),
+        )
+        with patch.dict(self.admin.os.environ, {"MANAGER_SKILL_PRESETS": "weather@1.0"}), \
+             patch.object(self.admin.web_common, "actor", return_value=actor), \
+             patch.object(self.admin.control_client, "create_action_batch",
+                          return_value={"parent": {"request_id": "batch-1"}}) as create_batch, \
+             patch.object(self.admin, "url_for", return_value="batch-url"):
+            response = self.admin.run_action_batch()
+
+        payload = create_batch.call_args.args[0]
+        self.assertEqual(payload["actor_user_public_id"], "admin-1")
+        self.assertEqual(payload["action"], "install_skill")
+        self.assertEqual(payload["skill_id"], "weather@1.0")
+        self.assertEqual(payload["instance_public_ids"], ["instance-1", "instance-2"])
+        self.assertEqual(response, "batch-url")
+
+    def test_admin_batch_action_rejects_unconfigured_skill(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        values = {
+            "action": "install_skill", "skill_id": "unknown",
+            "instance_public_ids": ["instance-1"],
+        }
+        self.admin.request.form = types.SimpleNamespace(
+            get=lambda key, default="": values.get(key, default),
+            getlist=lambda key: values.get(key, []),
+        )
+        with patch.dict(self.admin.os.environ, {"MANAGER_SKILL_PRESETS": "weather@1.0"}), \
+             patch.object(self.admin.web_common, "actor", return_value=actor), \
+             patch.object(self.admin.control_client, "create_action_batch") as create_batch:
+            response, status = self.admin.run_action_batch()
+
+        self.assertEqual(status, 400)
+        self.assertIn("Skill", response[1]["error"])
+        create_batch.assert_not_called()
 
     def test_admin_device_batch_resolves_legacy_ids_to_instance_uuids(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

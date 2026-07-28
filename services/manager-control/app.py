@@ -165,6 +165,17 @@ def device_batch_child_payload(job):
     return value
 
 
+def action_batch_child_payload(job):
+    value = execution_job_payload(job)
+    value["summary"] = (
+        job["status"]
+        if job["status"] in {"queued", "running", "succeeded"}
+        else job.get("error_summary") or job["status"]
+    )
+    value["output"] = None
+    return value
+
+
 def authenticated_user_payload(user):
     return {
         "id": user["id"],
@@ -605,6 +616,152 @@ def get_device_batch(request_id):
             "children": [device_batch_child_payload(job) for job in children],
         }
     )
+
+
+@app.post("/internal/v1/admin/action-batches")
+@require_services("manager-admin-web")
+def create_action_batch():
+    payload = request.get_json(silent=True) or {}
+    allowed = {
+        "request_id", "actor_user_public_id", "action",
+        "instance_public_ids", "skill_id",
+    }
+    if set(payload) - allowed:
+        return jsonify({"error": "unsupported batch fields"}), 400
+    request_id = payload.get("request_id")
+    actor_public_id = payload.get("actor_user_public_id")
+    batch_action = payload.get("action")
+    instance_public_ids = payload.get("instance_public_ids")
+    actions = {
+        "start": ("instance.start", {}),
+        "stop": ("instance.stop", {}),
+        "restart": ("instance.restart", {}),
+        "install_skill": (
+            "instance.install_skill", {"skill_id": payload.get("skill_id")}
+        ),
+    }
+    if (
+        not isinstance(request_id, str)
+        or not REQUEST_ID_RE.fullmatch(request_id)
+        or len(request_id) > 120
+    ):
+        return jsonify({"error": "invalid request_id"}), 400
+    if batch_action not in actions:
+        return jsonify({"error": "invalid batch action"}), 400
+    if (
+        not isinstance(instance_public_ids, list)
+        or not 1 <= len(instance_public_ids) <= 100
+        or any(not isinstance(value, str) or not value for value in instance_public_ids)
+        or len(set(instance_public_ids)) != len(instance_public_ids)
+    ):
+        return jsonify({"error": "instance_public_ids must contain 1-100 unique IDs"}), 400
+    child_action, child_params = actions[batch_action]
+    if batch_action == "install_skill":
+        presets = {
+            value.strip()
+            for value in re.split(r"[,\n]", os.environ.get("MANAGER_SKILL_PRESETS", ""))
+            if value.strip() and SKILL_ID_RE.fullmatch(value.strip())
+        }
+        if child_params["skill_id"] not in presets:
+            return jsonify({"error": "invalid or unconfigured skill preset"}), 400
+    elif "skill_id" in payload:
+        return jsonify({"error": "skill_id is only valid for install_skill"}), 400
+    actor = metadata_store.get_user_by_public_id(actor_public_id, db_file=DB_FILE)
+    if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+        return jsonify({"error": "active admin actor is required"}), 403
+
+    parent_action = f"batch.{batch_action}"
+    params = {"instance_public_ids": instance_public_ids, **child_params}
+    try:
+        with metadata_store.connect(DB_FILE) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = metadata_store.get_execution_job(request_id, conn=conn)
+            if existing is None:
+                instances = []
+                capability = execution_action_capability(child_action)
+                for instance_public_id in instance_public_ids:
+                    instance = metadata_store.get_instance_by_public_id(
+                        instance_public_id, conn=conn
+                    )
+                    if instance is None:
+                        raise ValueError(f"instance not found: {instance_public_id}")
+                    if instance["status"] == "deleted" or not product_supports(
+                        instance["product"], capability
+                    ):
+                        raise ValueError(
+                            f"action is not available: {instance_public_id}"
+                        )
+                    active_jobs = metadata_store.list_execution_jobs(
+                        statuses=("queued", "running"), limit=1,
+                        instance_public_id=instance_public_id,
+                        action=child_action, conn=conn,
+                    )
+                    retention_jobs = any(
+                        metadata_store.list_execution_jobs(
+                            statuses=("queued", "running"), limit=1,
+                            instance_public_id=instance_public_id,
+                            action=action, conn=conn,
+                        )
+                        for action in ("instance.delete", "instance.restore")
+                    )
+                    if active_jobs or retention_jobs:
+                        raise ValueError(f"instance task is already active: {instance_public_id}")
+                    instances.append(instance)
+                metadata_store.create_execution_job(
+                    request_id=request_id, actor_user_id=actor["id"],
+                    action=parent_action, params=params, conn=conn,
+                )
+                metadata_store.update_execution_job(
+                    request_id, "running", current_step="creating child jobs", conn=conn
+                )
+                for index, instance in enumerate(instances, 1):
+                    metadata_store.create_execution_job(
+                        request_id=f"{request_id}:{index}", parent_request_id=request_id,
+                        actor_user_id=actor["id"], instance_public_id=instance["public_id"],
+                        action=child_action, params=child_params, conn=conn,
+                    )
+                metadata_store.update_execution_job(
+                    request_id, "succeeded", output=f"queued {len(instances)} child jobs",
+                    conn=conn,
+                )
+                metadata_store.record_operation(
+                    request_id=request_id, actor_user_id=actor["id"],
+                    source_service="manager-control", action=parent_action,
+                    status="success", message=f"queued {len(instances)} child jobs",
+                    conn=conn,
+                )
+            parent = metadata_store.create_execution_job(
+                request_id=request_id, actor_user_id=actor["id"],
+                action=parent_action, params=params, conn=conn,
+            )
+            children = metadata_store.list_execution_jobs(
+                parent_request_id=request_id, limit=100, conn=conn
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "could not create action batch"}), 409
+    return jsonify({
+        "parent": execution_job_payload(parent, actor_public_id),
+        "children": [action_batch_child_payload(job) for job in children],
+    })
+
+
+@app.get("/internal/v1/admin/action-batches/<request_id>")
+@require_services("manager-admin-web")
+def get_action_batch(request_id):
+    parent = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if parent is None or parent["action"] not in {
+        "batch.start", "batch.stop", "batch.restart", "batch.install_skill",
+    }:
+        return jsonify({"error": "action batch not found"}), 404
+    children = metadata_store.list_execution_jobs(
+        parent_request_id=request_id, limit=100, db_file=DB_FILE
+    )
+    return jsonify({
+        "parent": execution_job_payload(parent),
+        "children": [action_batch_child_payload(job) for job in children],
+    })
 
 
 @app.get("/internal/v1/instances/<instance_public_id>")

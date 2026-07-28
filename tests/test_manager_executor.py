@@ -125,6 +125,28 @@ class ManagerExecutorTests(unittest.TestCase):
         adapter.restart.assert_called_once()
         self.assertEqual(control.update.call_args.args, ("request-1", "failed"))
 
+    def test_run_once_rejects_action_not_supported_by_adapter(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {"request_id": "request-1", "action": "instance.restart"},
+            "instance": {
+                "product": "evoscientist",
+                "runtime_identifier": "evosci",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = False
+
+        self.executor.run_once(control, lambda product: adapter)
+
+        adapter.status.assert_not_called()
+        adapter.restart.assert_not_called()
+        self.assertEqual(control.update.call_args.args, ("request-1", "failed"))
+        self.assertEqual(
+            control.update.call_args.kwargs["error_summary"],
+            "instance product does not support restart",
+        )
+
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()
         control.claim.return_value = {

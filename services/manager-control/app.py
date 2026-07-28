@@ -11,6 +11,7 @@ from flask import Flask, g, jsonify, request
 from werkzeug.security import check_password_hash
 
 import metadata_store
+from product_capabilities import execution_action_capability, product_supports
 
 
 DB_FILE = Path(
@@ -644,8 +645,18 @@ def create_execution_job():
         )
         if instance is None or instance.get("access_role") not in {"owner", "manager"}:
             return jsonify({"error": "device pairing is not allowed"}), 403
-        if instance.get("product") != "openclaw":
-            return jsonify({"error": "device pairing is not supported"}), 400
+    else:
+        instance = metadata_store.get_instance_by_public_id(
+            instance_public_id,
+            db_file=DB_FILE,
+        )
+        if instance is None:
+            return jsonify({"error": "instance not found"}), 404
+    capability = execution_action_capability(action)
+    if capability is None or not product_supports(instance.get("product"), capability):
+        return jsonify(
+            {"error": f"instance product does not support {capability or action}"}
+        ), 400
     try:
         if action == "instance.wechat_bind":
             with metadata_store.connect(DB_FILE) as conn:

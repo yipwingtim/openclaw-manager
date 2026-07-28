@@ -2,16 +2,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from product_capabilities import product_capabilities
+
 
 class OpenClawDockerAdapter:
-    CAPABILITIES = frozenset(
-        {
-            "status", "logs", "start", "stop", "restart", "create",
-            "batch_create", "delete", "restore", "update_version",
-            "batch_set_model_provider", "basic_auth", "dashboard", "access",
-            "device_pairing", "file_upload", "file_download", "file_delete",
-        }
-    )
+    CAPABILITIES = product_capabilities("openclaw")
 
     def supports(self, action):
         return action in self.CAPABILITIES
@@ -262,9 +257,7 @@ class OpenClawDockerAdapter:
         )
 
 class EvoScientistDockerAdapter(OpenClawDockerAdapter):
-    CAPABILITIES = frozenset(
-        {"access", "status", "logs", "start", "stop", "restart"}
-    )
+    CAPABILITIES = product_capabilities("evoscientist")
 
     def supports(self, action):
         return action in self.CAPABILITIES

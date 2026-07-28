@@ -802,6 +802,47 @@ class ManagerControlApiTests(unittest.TestCase):
             {"error": "service is not allowed"},
         )
 
+    def test_control_rejects_execution_action_not_supported_by_product(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"],
+            "admin",
+            db_file=self.db_file,
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="unknown-product",
+            instance_name="Unsupported",
+            runtime_identifier="unknown_alice",
+            db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "request-unsupported-product",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.restart",
+            "params": {},
+        }
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_execution_job())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response.get_json(),
+            {"error": "instance product does not support restart"},
+        )
+        self.assertEqual(
+            self.control.metadata_store.list_execution_jobs(
+                limit=10,
+                db_file=self.db_file,
+            ),
+            [],
+        )
+
     def test_executor_updates_job_and_admin_reads_current_state(self):
         self.control.metadata_store.set_user_role(
             self.user["id"],

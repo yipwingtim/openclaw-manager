@@ -12,6 +12,10 @@ MANAGER_WEB_DIR = ROOT_DIR / "services" / "manager-web"
 sys.path.insert(0, str(MANAGER_WEB_DIR))
 
 from instance_adapters import OpenClawDockerAdapter
+from product_capabilities import (
+    execution_action_capability,
+    product_supports,
+)
 
 
 class AdapterInstanceModelTests(unittest.TestCase):
@@ -83,6 +87,16 @@ class AdapterInstanceModelTests(unittest.TestCase):
 
             with self.assertRaises(TypeError):
                 adapter.get_runtime_target("alice")
+
+    def test_product_capabilities_fail_closed(self):
+        self.assertTrue(product_supports("openclaw", "restart"))
+        self.assertFalse(product_supports("evoscientist", "file_upload"))
+        self.assertFalse(product_supports("unknown", "restart"))
+        self.assertEqual(
+            execution_action_capability("instance.wechat_bind"),
+            "device_pairing",
+        )
+        self.assertIsNone(execution_action_capability("shell.run"))
 
 
 if __name__ == "__main__":

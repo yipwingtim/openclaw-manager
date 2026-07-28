@@ -1925,7 +1925,7 @@ def _save_uploaded_file_atomic(uploaded, filename, resolved_upload_dir):
             uploaded.save(out_fp)
             out_fp.flush()
             os.fchmod(fd, 0o644)
-        except OSError:
+        except Exception:
             if out_fp is None:
                 try:
                     os.close(fd)

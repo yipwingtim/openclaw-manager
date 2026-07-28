@@ -484,6 +484,30 @@ class UploadFileSymlinkEscapeTests(_SymlinkEscapeTestBase):
         self.assertTrue(race_path.is_symlink(),
                         "测试注入后 race.md 应仍是符号链接，未被实际写入覆盖")
 
+    @unittest.skipUnless(
+        ATOMIC_OPEN_AVAILABLE,
+        "原子上传需要 O_NOFOLLOW、O_DIRECTORY 与 dir_fd 支持（仅 POSIX）",
+    )
+    def test_upload_non_oserror_failure_unlinks_file(self):
+        """uploaded.save() 抛非 OSError 异常（如 RuntimeError）时，新建的空文件必须被清理。"""
+        roots_a = self._make_user_dirs("alice")
+
+        class _BoomUploadedFile(FakeUploadedFile):
+            """模拟 Werkzeug 客户端断连等场景下 save() 抛 RuntimeError。"""
+            def save(self, destination):
+                raise RuntimeError("injected write failure")
+
+        fake_file = _BoomUploadedFile("boom.md", b"never written")
+
+        calls = self._run_upload("alice", fake_file)
+
+        self.assertEqual(len(calls), 1, "异常应被清理路径捕获，不应逃逸到顶层")
+        self.assertIn("Failed to save upload", calls[0]["error"],
+                      "非 OSError 写入失败应返回 Failed to save upload 错误")
+        leftover = roots_a["uploads"] / "boom.md"
+        self.assertFalse(leftover.exists(),
+                         "写入失败后新建的空文件必须被 unlink，避免卡死同名上传")
+
 
 class OpenDownloadFileAtomicTests(_SymlinkEscapeTestBase):
 

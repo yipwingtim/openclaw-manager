@@ -17,6 +17,7 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.stop": "stop",
     "instance.restart": "restart",
     "instance.set_basic_auth": "basic_auth",
+    "instance.update_version": "update_version",
     "instance.wechat_bind": "device_pairing",
 }
 

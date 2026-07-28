@@ -144,5 +144,30 @@ def basic_auth(instance_public_id):
     return redirect(url_for("instances", result=f"Basic Auth {state} task queued"))
 
 
+@app.post("/admin/instances/<instance_public_id>/version")
+def update_version(instance_public_id):
+    current = web_common.actor()
+    version = request.form.get("version", "").strip()
+    restore_model_provider = request.form.get("restore_model_provider") == "true"
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        control_client.create_execution_job(
+            {
+                "request_id": str(uuid.uuid4()),
+                "actor_user_public_id": current["public_id"],
+                "instance_public_id": instance_public_id,
+                "action": "instance.update_version",
+                "params": {
+                    "version": version,
+                    "restore_model_provider": restore_model_provider,
+                },
+            }
+        )
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    return redirect(url_for("instances", result=f"Version update queued: {version}"))
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

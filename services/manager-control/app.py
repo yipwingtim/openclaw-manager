@@ -30,6 +30,7 @@ TOKEN_ENV = {
 }
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 JOB_STATUSES = {
     "queued",
     "running",
@@ -44,6 +45,7 @@ JOB_ACTION_PARAMS = {
     "instance.stop": set(),
     "instance.restart": {"reason"},
     "instance.set_basic_auth": {"enabled"},
+    "instance.update_version": {"version", "restore_model_provider"},
     "instance.wechat_bind": set(),
 }
 
@@ -395,10 +397,11 @@ def admin_instances():
                     "instance_name": instance["instance_name"],
                     "status": instance["status"],
                     "access_url": instance.get("access_url"),
+                    "version": instance.get("openclaw_version"),
                     "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
                     "capabilities": sorted(
                         capability
-                        for capability in ("basic_auth",)
+                        for capability in ("basic_auth", "update_version")
                         if product_supports(instance["product"], capability)
                     ),
                 }
@@ -666,6 +669,15 @@ def create_execution_job():
         params.get("enabled"), bool
     ):
         return jsonify({"error": "enabled must be a boolean"}), 400
+    if action == "instance.update_version" and (
+        not isinstance(params.get("version"), str)
+        or not VERSION_RE.fullmatch(params["version"])
+    ):
+        return jsonify({"error": "invalid version"}), 400
+    if action == "instance.update_version" and not isinstance(
+        params.get("restore_model_provider"), bool
+    ):
+        return jsonify({"error": "restore_model_provider must be a boolean"}), 400
     if not isinstance(instance_public_id, str) or not instance_public_id:
         return jsonify({"error": "instance_public_id is required"}), 400
     actor = metadata_store.get_user_by_public_id(
@@ -875,11 +887,23 @@ def update_execution_job(request_id):
                     enabled,
                     conn=conn,
                 )
+            if status == "succeeded" and job["action"] == "instance.update_version":
+                metadata_store.set_instance_version(
+                    job["instance_public_id"],
+                    json.loads(job["params_json"])["version"],
+                    conn=conn,
+                )
             if (
                 status in {"succeeded", "failed"}
-                and job["action"] == "instance.set_basic_auth"
+                and job["action"]
+                in {"instance.set_basic_auth", "instance.update_version"}
             ):
-                enabled = json.loads(job["params_json"])["enabled"]
+                params = json.loads(job["params_json"])
+                message = (
+                    f"Basic Auth {'enabled' if params['enabled'] else 'disabled'}"
+                    if job["action"] == "instance.set_basic_auth"
+                    else f"version={params['version']}"
+                )
                 metadata_store.record_operation(
                     request_id=request_id,
                     actor_user_id=job["actor_user_id"],
@@ -887,7 +911,7 @@ def update_execution_job(request_id):
                     source_service="manager-executor",
                     action=job["action"],
                     status="success" if status == "succeeded" else "failed",
-                    message=f"Basic Auth {'enabled' if enabled else 'disabled'}",
+                    message=message,
                     conn=conn,
                 )
     except ValueError as exc:

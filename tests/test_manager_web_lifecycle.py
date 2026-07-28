@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import subprocess
 import sys
 import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -659,6 +660,12 @@ class BatchCreatePreflightTests(unittest.TestCase):
 
     def test_adapter_update_version_runs_update_script(self):
         with TemporaryDirectory() as public_dir:
+            user_dir = Path(public_dir) / "users" / "alice"
+            user_dir.mkdir(parents=True)
+            (user_dir / "docker-compose.yml").write_text(
+                "services:\n  openclaw:\n    image: ghcr.io/openclaw/openclaw:old\n",
+                encoding="utf-8",
+            )
             adapter = self.app_module.OpenClawDockerAdapter(
                 manager_dir=Path(public_dir),
                 public_dir=Path(public_dir),
@@ -667,7 +674,10 @@ class BatchCreatePreflightTests(unittest.TestCase):
                 nginx_container_name="nginx",
             )
 
-            with patch.object(adapter, "run_command", return_value=(0, "updated")) as run_command:
+            process = Mock()
+            process.communicate.return_value = ("updated\n", None)
+            process.returncode = 0
+            with patch.object(subprocess, "Popen", return_value=process) as popen:
                 code, output = adapter.update_version(
                     {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
                     "2026.5.26",
@@ -677,10 +687,15 @@ class BatchCreatePreflightTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "updated")
-            command = run_command.call_args.args[0]
+            command = popen.call_args.args[0]
             self.assertTrue(str(command[0]).endswith("scripts/update_instance_version.sh"))
+            self.assertEqual(
+                popen.call_args.kwargs["env"]["OPENCLAW_SKIP_METADATA_WRITE"],
+                "1",
+            )
             self.assertEqual(command[1:], ["alice", "2026.5.26", "--restore-model-provider"])
-            self.assertEqual(run_command.call_args.kwargs["timeout"], 123)
+            self.assertEqual(process.communicate.call_args.kwargs["timeout"], 123)
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
 
     def test_version_update_job_reports_missing_instance(self):
         with patch.object(self.app_module, "get_instance_record", return_value={}):

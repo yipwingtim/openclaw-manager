@@ -972,6 +972,64 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(invalid_status, 400)
         self.assertEqual(invalid.get_json(), {"error": "enabled must be a boolean"})
 
+    def test_version_job_validates_params_and_updates_metadata_on_success(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "version-1",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.update_version",
+            "params": {"version": "2026.7.28", "restore_model_provider": False},
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            created, created_status = response_parts(self.control.create_execution_job())
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ):
+            self.control.claim_execution_job()
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(
+            self.control.request,
+            "get_json",
+            return_value={"status": "succeeded", "output": "updated"},
+        ):
+            updated, updated_status = response_parts(
+                self.control.update_execution_job("version-1")
+            )
+
+        self.assertEqual(created_status, 200)
+        self.assertEqual(updated_status, 200)
+        stored = self.control.metadata_store.get_instance_by_public_id(
+            instance["public_id"], db_file=self.db_file
+        )
+        self.assertEqual(stored["openclaw_version"], "2026.7.28")
+        operation = self.control.metadata_store.list_operation_events(
+            1, db_file=self.db_file
+        )[0]
+        self.assertEqual(operation["action"], "instance.update_version")
+        self.assertEqual(operation["message"], "version=2026.7.28")
+
+        payload["request_id"] = "version-invalid"
+        payload["params"] = {"version": "bad/version", "restore_model_provider": False}
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            invalid, invalid_status = response_parts(self.control.create_execution_job())
+        self.assertEqual(invalid_status, 400)
+        self.assertEqual(invalid.get_json(), {"error": "invalid version"})
+
     def test_executor_updates_job_and_admin_reads_current_state(self):
         self.control.metadata_store.set_user_role(
             self.user["id"],

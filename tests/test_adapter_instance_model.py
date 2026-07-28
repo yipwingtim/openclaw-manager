@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import subprocess
 import sys
 import unittest
@@ -140,6 +141,38 @@ class AdapterInstanceModelTests(unittest.TestCase):
 
             self.assertEqual(conf.read_text(encoding="utf-8"), "original")
 
+    def test_update_version_restores_compose_after_timeout(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            user_dir = root / "public" / "users" / "alice"
+            user_dir.mkdir(parents=True)
+            compose = user_dir / "docker-compose.yml"
+            compose.write_text("old", encoding="utf-8")
+            script = root / "scripts" / "update_instance_version.sh"
+            child_pid_file = root / "child.pid"
+            script.parent.mkdir()
+            script.write_text(
+                "#!/usr/bin/env bash\n"
+                f"trap 'printf old > {compose}' EXIT\n"
+                f"printf new > {compose}\n"
+                "sleep 60 &\n"
+                f"echo $! > {child_pid_file}\n"
+                "wait\n",
+                encoding="utf-8",
+            )
+            script.chmod(0o755)
+
+            with self.assertRaises(subprocess.TimeoutExpired):
+                adapter.update_version(
+                    {"legacy_user_id": "alice"}, "2026.7.28", timeout=0.2
+                )
+
+            self.assertEqual(compose.read_text(encoding="utf-8"), "old")
+            child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid, 0)
+
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
@@ -158,6 +191,10 @@ class AdapterInstanceModelTests(unittest.TestCase):
         self.assertEqual(
             execution_action_capability("instance.set_basic_auth"),
             "basic_auth",
+        )
+        self.assertEqual(
+            execution_action_capability("instance.update_version"),
+            "update_version",
         )
         self.assertIsNone(execution_action_capability("shell.run"))
 

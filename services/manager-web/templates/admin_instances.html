@@ -10,7 +10,7 @@
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
   <div class="surface table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>Basic Auth</th><th>操作</th></tr></thead>
+      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>Basic Auth</th><th>操作</th><th>Skill</th></tr></thead>
       <tbody>
       {% for instance in instances %}
         <tr>
@@ -39,6 +39,19 @@
               <button class="btn btn-sm btn-oc-outline" type="submit">升级</button>
             </form>
           {% endif %}</td>
+          <td>
+            {% if "skill_install" in instance.capabilities and skill_presets %}
+              <form method="post" action="/admin/instances/{{ instance.public_id }}/skill" class="d-flex gap-2 align-items-center" onsubmit="return confirm('确认安装 Skill？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <select class="form-select form-select-sm" name="skill_id" required>
+                  {% for skill in skill_presets %}<option value="{{ skill }}">{{ skill }}</option>{% endfor %}
+                </select>
+                <button class="btn btn-sm btn-oc-outline" type="submit">安装</button>
+              </form>
+            {% elif "skill_install" in instance.capabilities %}
+              <span class="muted-small">未配置 Skill 白名单</span>
+            {% else %}<span class="muted-small">不支持</span>{% endif %}
+          </td>
         </tr>
       {% endfor %}
       </tbody>

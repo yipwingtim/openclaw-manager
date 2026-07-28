@@ -1,6 +1,7 @@
-import uuid
 import os
+import re
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, redirect, render_template, request, url_for
@@ -14,6 +15,16 @@ app.config["SECRET_KEY"] = web_common.SESSION_SECRET or None
 app.before_request(web_common.require_internal_token)
 app.before_request(web_common.require_csrf)
 app.context_processor(web_common.context)
+SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
+
+
+def configured_skill_presets():
+    values = []
+    for item in re.split(r"[,\n]", os.environ.get("MANAGER_SKILL_PRESETS", "")):
+        item = item.strip()
+        if item and SKILL_ID_RE.fullmatch(item) and item not in values:
+            values.append(item)
+    return values
 
 
 @app.get("/health")
@@ -82,6 +93,7 @@ def instances():
         return render_template("error.html", message="Forbidden"), 403
     return render_template(
         "admin_instances.html", instances=control_client.list_admin_instances(),
+        skill_presets=configured_skill_presets(),
         result=request.args.get("result", ""), error=request.args.get("error", ""),
     )
 
@@ -167,6 +179,27 @@ def update_version(instance_public_id):
     except control_client.ControlError as exc:
         return redirect(url_for("instances", error=str(exc)))
     return redirect(url_for("instances", result=f"Version update queued: {version}"))
+
+
+@app.post("/admin/instances/<instance_public_id>/skill")
+def install_skill(instance_public_id):
+    current = web_common.actor()
+    skill_id = request.form.get("skill_id", "").strip()
+    if not current or current["role"] != "admin" or not skill_id:
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        control_client.create_execution_job(
+            {
+                "request_id": str(uuid.uuid4()),
+                "actor_user_public_id": current["public_id"],
+                "instance_public_id": instance_public_id,
+                "action": "instance.install_skill",
+                "params": {"skill_id": skill_id},
+            }
+        )
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    return redirect(url_for("instances", result=f"Skill install queued: {skill_id}"))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
+import hashlib
 import os
 import signal
 import shutil
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
 
@@ -335,6 +337,91 @@ class OpenClawDockerAdapter:
         finally:
             if previous_sigterm is not None:
                 signal.signal(signal.SIGTERM, previous_sigterm)
+
+    def install_skill(self, instance, skill_id, request_id, timeout=180):
+        runtime_target = self.get_runtime_target(instance)
+        user_dir = self.user_dir(self.get_legacy_user_id(instance))
+        skills_dir = user_dir / "skills"
+        backup_parent = user_dir / "backups" / "skill-installs"
+        backup_parent.mkdir(parents=True, exist_ok=True)
+        backup_dir = backup_parent / hashlib.sha256(request_id.encode()).hexdigest()
+        if backup_dir.exists():
+            self._restore_skills(skills_dir, backup_dir)
+        else:
+            staging = Path(tempfile.mkdtemp(prefix="snapshot-", dir=backup_parent))
+            if skills_dir.exists():
+                shutil.copytree(skills_dir, staging / "skills")
+            else:
+                (staging / "skills-missing").touch()
+            staging.rename(backup_dir)
+        process = None
+        previous_sigterm = None
+        if threading.current_thread() is threading.main_thread():
+            def interrupt_install(signum, frame):
+                raise SystemExit(128 + signum)
+
+            previous_sigterm = signal.signal(signal.SIGTERM, interrupt_install)
+        try:
+            process = subprocess.Popen(
+                [
+                    "docker", "exec", runtime_target, "timeout", f"{timeout}s",
+                    "openclaw", "skills", "install", skill_id,
+                ],
+                cwd=str(self.manager_dir),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            output, _ = process.communicate(timeout=timeout + 10)
+            code = process.returncode
+        except BaseException:
+            if process is not None and process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+            kill_code, kill_output = self.run_command(
+                ["docker", "exec", runtime_target, "pkill", "-9", "-f", "openclaw skills install"],
+                timeout=10,
+            )
+            if kill_code not in {0, 1}:
+                raise RuntimeError(
+                    f"Could not stop container skill installer; snapshot retained: {backup_dir}\n{kill_output}"
+                )
+            self._restore_skills(skills_dir, backup_dir)
+            raise
+        finally:
+            if previous_sigterm is not None:
+                signal.signal(signal.SIGTERM, previous_sigterm)
+        if code == 0:
+            return code, output.strip()
+        rollback_output = self._restore_skills(skills_dir, backup_dir)
+        return code, f"{output.strip()}\n{rollback_output}".strip()
+
+    def _restore_skills(self, skills_dir, backup_dir):
+        staging = Path(tempfile.mkdtemp(prefix="restore-", dir=skills_dir.parent))
+        backup = backup_dir / "skills"
+        if backup.exists():
+            shutil.copytree(backup, staging / "skills")
+        restored = staging / "skills"
+        failed_dir = backup_dir / "failed-install-data"
+        if failed_dir.exists():
+            shutil.rmtree(failed_dir)
+        if skills_dir.exists():
+            skills_dir.rename(failed_dir)
+        try:
+            if restored.exists():
+                restored.rename(skills_dir)
+        except BaseException:
+            if failed_dir.exists() and not skills_dir.exists():
+                failed_dir.rename(skills_dir)
+            raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return f"Skill data restored; failed install data: {failed_dir}"
 
     def batch_set_model_provider(self, input_csv, output_csv, timeout):
         return self.run_command(

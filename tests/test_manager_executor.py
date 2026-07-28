@@ -205,6 +205,31 @@ class ManagerExecutorTests(unittest.TestCase):
         )
         self.assertEqual(control.update.call_args.args, ("version-1", "succeeded"))
 
+    def test_run_once_installs_skill_without_retry(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {
+                "request_id": "skill-1",
+                "action": "instance.install_skill",
+                "params": {"skill_id": "weather@1.0"},
+            },
+            "instance": {
+                "product": "openclaw",
+                "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.status.return_value = "Up"
+        adapter.install_skill.return_value = (0, "installed")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.install_skill.assert_called_once_with(
+            control.claim.return_value["instance"], "weather@1.0", request_id="skill-1"
+        )
+        self.assertEqual(control.update.call_args.args, ("skill-1", "succeeded"))
+
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()
         control.claim.return_value = {

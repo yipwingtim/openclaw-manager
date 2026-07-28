@@ -86,6 +86,20 @@ def instances():
     )
 
 
+@app.get("/admin/metadata")
+def metadata():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        summary = control_client.get_admin_metadata()
+        error = ""
+    except control_client.ControlError as exc:
+        summary = {"counts": {}, "instances": [], "operations": []}
+        error = str(exc)
+    return render_template("admin_metadata.html", error=error, **summary)
+
+
 @app.post("/admin/instances/<instance_public_id>/lifecycle")
 def lifecycle(instance_public_id):
     current = web_common.actor()

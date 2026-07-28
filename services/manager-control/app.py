@@ -66,6 +66,21 @@ def portal_instance(instance):
     }
 
 
+def admin_metadata_instance(instance):
+    return {
+        "public_id": instance["public_id"],
+        "legacy_user_id": instance.get("legacy_user_id"),
+        "product": instance["product"],
+        "instance_name": instance["instance_name"],
+        "status": instance["status"],
+        "port": instance.get("port"),
+        "version": instance.get("openclaw_version"),
+        "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
+        "created_at": instance["created_at"],
+        "updated_at": instance["updated_at"],
+    }
+
+
 def configured_tokens():
     return {
         service: token
@@ -382,6 +397,26 @@ def admin_instances():
                 }
                 for instance in instances
             ]
+        }
+    )
+
+
+@app.get("/internal/v1/admin/metadata")
+@require_services("manager-admin-web")
+def admin_metadata():
+    with metadata_store.connect(DB_FILE) as conn:
+        all_counts = metadata_store.table_counts(conn=conn)
+        counts = {
+            key: all_counts[key]
+            for key in ("instances", "ports", "instance_credentials", "operation_records")
+        }
+        instances = metadata_store.list_instances(conn=conn)[:20]
+        operations = metadata_store.list_operation_events(20, conn=conn)
+    return jsonify(
+        {
+            "counts": counts,
+            "instances": [admin_metadata_instance(item) for item in instances],
+            "operations": operations,
         }
     )
 

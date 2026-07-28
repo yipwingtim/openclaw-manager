@@ -3,32 +3,14 @@
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
-      <div class="page-kicker">元数据存储</div>
-      <h1 class="page-title">SQLite 元数据管理</h1>
-      <div class="page-subtitle">查看持久化实例元数据、端口记录、凭据引用和近期操作记录。</div>
+      <div class="page-kicker">管理员控制台</div>
+      <h1 class="page-title">元数据与操作记录</h1>
+      <div class="page-subtitle">查看实例摘要和近期平台操作记录。</div>
     </div>
-    <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
+    <a class="btn btn-oc-outline" href="/admin/instances">实例管理</a>
   </div>
 
-  {% if error %}
-    <div class="alert soft-danger">{{ error }}</div>
-  {% endif %}
-
-  <div class="surface p-3 p-lg-4 mb-3">
-    <div class="section-title mb-2">数据库文件</div>
-    <div class="muted-small">{{ db_file }}</div>
-  </div>
-
-  {% if not error and (counts.instances | default(0)) == 0 and (counts.operation_records | default(0)) == 0 %}
-    <div class="alert soft-warning mb-3">
-      <div class="section-title">元数据数据库为空</div>
-      <div class="muted-small mb-2">
-        现有实例仍记录在 users.csv 和运行时文件中。将本页面作为数据源前，请先从 users.csv 初始化 SQLite。
-      </div>
-      <pre class="codebox mb-0">cd /data/docker/openclaw-manager
-./scripts/import_users_csv_to_metadata_db.sh</pre>
-    </div>
-  {% endif %}
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
 
   <div class="row g-3 mb-3">
     <div class="col-md-3">
@@ -67,7 +49,7 @@
         <table class="table table-hover mb-0 align-middle">
           <thead>
             <tr>
-              <th>用户</th>
+              <th>实例</th>
               <th>状态</th>
               <th>端口</th>
               <th>版本</th>
@@ -78,10 +60,10 @@
           <tbody>
             {% for instance in instances %}
               <tr>
-                <td class="fw-semibold">{{ instance.user_id }}</td>
+                <td class="fw-semibold">{{ instance.legacy_user_id or instance.instance_name }}</td>
                 <td><span class="badge-status badge-neutral">{{ instance.status }}</span></td>
                 <td>{{ instance.port or "-" }}</td>
-                <td>{{ instance.openclaw_version or "-" }}</td>
+                <td>{{ instance.version or "-" }}</td>
                 <td>{{ "已启用" if instance.basic_auth_enabled else "已禁用" }}</td>
                 <td>{{ instance.updated_at }}</td>
               </tr>
@@ -107,7 +89,7 @@
               <th>时间</th>
               <th>操作人</th>
               <th>动作</th>
-              <th>用户</th>
+              <th>实例</th>
               <th>状态</th>
               <th>消息</th>
             </tr>
@@ -116,9 +98,9 @@
             {% for operation in operations %}
               <tr>
                 <td>{{ operation.created_at }}</td>
-                <td>{{ operation.actor or "-" }}</td>
+                <td>{{ operation.actor_user_public_id or operation.actor or "-" }}</td>
                 <td>{{ operation.action }}</td>
-                <td>{{ operation.user_id or "-" }}</td>
+                <td>{{ operation.instance_public_id or operation.user_id or "-" }}</td>
                 <td><span class="badge-status badge-neutral">{{ operation.status }}</span></td>
                 <td>{{ operation.message or "-" }}</td>
               </tr>

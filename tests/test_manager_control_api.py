@@ -254,6 +254,59 @@ class ManagerControlApiTests(unittest.TestCase):
             instance["public_id"],
         )
 
+    def test_admin_reads_metadata_summary_without_sensitive_fields(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            conn.execute(
+                """
+                UPDATE instances
+                SET legacy_user_id = 'alice', port = 41001,
+                    openclaw_version = '2026.7.1', basic_auth_enabled = 1
+                WHERE id = ?
+                """,
+                (instance["id"],),
+            )
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            self.control.metadata_store.record_operation(
+                action="instance.start",
+                status="success",
+                actor_user_id=self.user["id"],
+                instance_id=instance["id"],
+                source_service="manager-admin-web",
+                message="started",
+                conn=conn,
+            )
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ):
+            response, status = response_parts(self.control.admin_metadata())
+
+        payload = response.get_json()
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["counts"]["instances"], 1)
+        self.assertEqual(payload["counts"]["operation_records"], 1)
+        self.assertEqual(
+            set(payload["counts"]),
+            {"instances", "ports", "instance_credentials", "operation_records"},
+        )
+        self.assertEqual(payload["instances"][0]["public_id"], instance["public_id"])
+        self.assertEqual(payload["instances"][0]["legacy_user_id"], "alice")
+        self.assertEqual(payload["instances"][0]["version"], "2026.7.1")
+        self.assertNotIn("runtime_identifier", payload["instances"][0])
+        self.assertNotIn("data_path", payload["instances"][0])
+        self.assertEqual(
+            payload["operations"][0]["instance_public_id"], instance["public_id"]
+        )
+
     def test_health_does_not_create_a_missing_database(self):
         missing = Path(self.temp_dir.name) / "missing.db"
         self.control.DB_FILE = missing

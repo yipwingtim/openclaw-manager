@@ -389,7 +389,7 @@ training02,,false
 `https://<PUBLIC_HOST>:30015/admin/users` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
 用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
 
-批量安装 Skill 功能只允许选择 `MANAGER_SKILL_PRESETS` 中配置的白名单 Skill。页面会默认填入当前筛选结果中的运行中实例，管理员可在提交前编辑目标实例列表。该功能不会开放任意 shell 命令，实际执行的是固定模板 `docker exec openclaw_<user_id> openclaw skills install <skill_id>`。
+批量安装 Skill 功能只允许选择 `MANAGER_SKILL_PRESETS` 中配置的白名单 Skill。页面会默认填入当前筛选结果中的运行中实例，管理员可在提交前编辑目标实例列表。结构化安装动作会拒绝 OpenClaw 内置 Skill，以及 ClawHub 搜索中候选数量不等于一的 slug；实际执行的是固定模板 `docker exec openclaw_<user_id> openclaw skills install <skill_id>`。OpenClaw 2026.6.6 尚不接受搜索结果中的 `owner/slug` reference，因此当前校验只能拒绝提交时已存在的重名候选，不能固定安装来源；在上游 CLI 支持唯一 reference 前，不应将高风险通用 slug 加入白名单。
 
 文件能力当前由 `manager-web` 直接处理：
 

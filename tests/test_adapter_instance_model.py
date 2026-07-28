@@ -179,7 +179,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
             root = Path(temp_dir)
             adapter = self.make_adapter(root)
             (root / "public" / "users" / "alice" / "skills").mkdir(parents=True)
-            with patch("subprocess.Popen") as process:
+            with patch.object(adapter, "_validate_skill_install", return_value=(0, "verified")), patch("subprocess.Popen") as process:
                 process.return_value.communicate.return_value = ("installed\n", None)
                 process.return_value.returncode = 0
                 process.return_value.poll.return_value = 0
@@ -219,7 +219,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
                 mock.returncode = process.returncode
                 return mock
 
-            with patch("subprocess.Popen", side_effect=popen):
+            with patch.object(adapter, "_validate_skill_install", return_value=(0, "verified")), patch("subprocess.Popen", side_effect=popen):
                 code, output = adapter.install_skill(
                     {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
                     "weather@1.0",
@@ -244,11 +244,11 @@ class AdapterInstanceModelTests(unittest.TestCase):
             process.communicate.return_value = ("installed", None)
             process.returncode = 0
             process.poll.return_value = 0
-            with patch("subprocess.Popen", return_value=process):
+            with patch.object(adapter, "_validate_skill_install", return_value=(0, "verified")), patch("subprocess.Popen", return_value=process):
                 adapter.install_skill(instance, "weather@1.0", request_id="skill-retry")
 
             (skills / "existing.txt").write_text("partial", encoding="utf-8")
-            with patch("subprocess.Popen", return_value=process):
+            with patch.object(adapter, "_validate_skill_install", return_value=(0, "verified")), patch("subprocess.Popen", return_value=process):
                 adapter.install_skill(instance, "weather@1.0", request_id="skill-retry")
 
             snapshot_key = hashlib.sha256(b"skill-retry").hexdigest()
@@ -266,7 +266,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
             process.communicate.return_value = ("installed", None)
             process.returncode = 0
             process.poll.return_value = 0
-            with patch("subprocess.Popen", return_value=process):
+            with patch.object(adapter, "_validate_skill_install", return_value=(0, "verified")), patch("subprocess.Popen", return_value=process):
                 adapter.install_skill(
                     {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
                     "weather@1.0",
@@ -275,6 +275,72 @@ class AdapterInstanceModelTests(unittest.TestCase):
             snapshot_root = skills.parent / "backups" / "skill-installs"
             self.assertTrue((snapshot_root / hashlib.sha256(b"..").hexdigest()).is_dir())
             self.assertFalse((skills.parent / "backups" / "skills").exists())
+
+    def test_install_skill_rejects_bundled_skill(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            info = '{"source":"openclaw-bundled","bundled":true,"missing":{"bins":["gh"]}}'
+            with patch.object(adapter, "run_command", return_value=(0, info)):
+                code, output = adapter._validate_skill_install("openclaw_alice", "github")
+
+            self.assertEqual(code, 1)
+            self.assertIn("already bundled", output)
+            self.assertIn("gh", output)
+
+    def test_install_skill_rejects_duplicate_clawhub_slug(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            search = (
+                '{"results":['
+                '{"slug":"github","install":{"reference":"steipete/github"}},'
+                '{"slug":"github","install":{"reference":"eohmig/github"}}]}'
+            )
+            with patch.object(
+                adapter,
+                "run_command",
+                side_effect=[(1, "Skill not found"), (0, search)],
+            ):
+                code, output = adapter._validate_skill_install("openclaw_alice", "github")
+
+            self.assertEqual(code, 1)
+            self.assertIn("ambiguous", output)
+            self.assertIn("steipete/github", output)
+            self.assertIn("eohmig/github", output)
+
+    def test_install_skill_rejects_duplicate_results_with_same_reference(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            search = (
+                '{"results":['
+                '{"slug":"github","install":{"reference":"steipete/github"}},'
+                '{"slug":"github","install":{"reference":"steipete/github"}}]}'
+            )
+            with patch.object(
+                adapter,
+                "run_command",
+                side_effect=[(1, "Skill not found"), (0, search)],
+            ):
+                code, output = adapter._validate_skill_install("openclaw_alice", "github")
+
+            self.assertEqual(code, 1)
+            self.assertIn("ambiguous", output)
+
+    def test_install_skill_accepts_unique_clawhub_slug(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            search = (
+                '{"results":['
+                '{"slug":"weather","install":{"reference":"trusted/weather"}},'
+                '{"slug":"weather-tools","install":{"reference":"other/weather-tools"}}]}'
+            )
+            with patch.object(
+                adapter,
+                "run_command",
+                side_effect=[(1, "Skill not found"), (0, search)],
+            ):
+                result = adapter._validate_skill_install("openclaw_alice", "weather")
+
+            self.assertEqual(result, (0, "Verified unique Skill source: trusted/weather"))
 
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:

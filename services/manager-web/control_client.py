@@ -146,6 +146,17 @@ def create_execution_job(payload):
     return request_json("POST", "/internal/v1/execution-jobs", payload=payload)["job"]
 
 
+def create_device_batch(payload):
+    return request_json(
+        "POST", "/internal/v1/admin/device-batches", payload=payload
+    )
+
+
+def get_device_batch(request_id):
+    batch_id = urllib.parse.quote(request_id, safe="")
+    return request_json("GET", f"/internal/v1/admin/device-batches/{batch_id}")
+
+
 def create_wechat_bind(actor_public_id, instance_public_id):
     return request_json(
         "POST", "/internal/v1/execution-jobs",

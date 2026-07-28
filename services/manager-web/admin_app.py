@@ -1,10 +1,12 @@
+import csv
+import io
 import os
 import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, Response, redirect, render_template, request, url_for
 
 import control_client
 import web_common
@@ -12,10 +14,12 @@ import web_common
 
 app = Flask(__name__, template_folder="templates")
 app.config["SECRET_KEY"] = web_common.SESSION_SECRET or None
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 app.before_request(web_common.require_internal_token)
 app.before_request(web_common.require_csrf)
 app.context_processor(web_common.context)
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
+MAX_DEVICE_BATCH_ROWS = 100
 
 
 def configured_skill_presets():
@@ -110,6 +114,115 @@ def metadata():
         summary = {"counts": {}, "instances": [], "operations": []}
         error = str(exc)
     return render_template("admin_metadata.html", error=error, **summary)
+
+
+@app.get("/admin/device-approvals")
+def device_approvals():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    return render_template("admin_device_approvals.html", result=None, error="")
+
+
+@app.post("/admin/device-approvals")
+def run_device_approvals():
+    current = web_common.actor()
+    action = request.form.get("action", "")
+    upload = request.files.get("input_csv")
+    if not current or current["role"] != "admin" or action not in {"preview", "approve"}:
+        return render_template("error.html", message="Forbidden"), 403
+    if upload is None:
+        return render_template(
+            "admin_device_approvals.html", result=None, error="请选择 CSV 文件。"
+        ), 400
+    try:
+        rows = list(csv.DictReader(io.StringIO(upload.read().decode("utf-8-sig"))))
+    except (UnicodeDecodeError, csv.Error):
+        return render_template(
+            "admin_device_approvals.html", result=None, error="CSV 文件格式无效。"
+        ), 400
+    if not rows or len(rows) > MAX_DEVICE_BATCH_ROWS:
+        return render_template(
+            "admin_device_approvals.html", result=None,
+            error=f"CSV 必须包含 1-{MAX_DEVICE_BATCH_ROWS} 行数据。",
+        ), 400
+    for line_number, row in enumerate(rows, 2):
+        if (row.get("request_id") or "").strip():
+            return render_template(
+                "admin_device_approvals.html", result=None,
+                error=f"第 {line_number} 行包含 request_id；新版批量审批仅支持审批最新请求。",
+            ), 400
+
+    instances = control_client.list_admin_instances()
+    by_public_id = {item["public_id"]: item for item in instances}
+    by_legacy_id = {
+        item["legacy_user_id"]: item for item in instances if item.get("legacy_user_id")
+    }
+    instance_ids = []
+    seen = set()
+    for line_number, row in enumerate(rows, 2):
+        public_id = (row.get("instance_public_id") or "").strip()
+        legacy_id = (row.get("user_id") or "").strip()
+        instance = by_public_id.get(public_id) if public_id else by_legacy_id.get(legacy_id)
+        if instance is None:
+            return render_template(
+                "admin_device_approvals.html", result=None,
+                error=f"第 {line_number} 行实例不存在或标识无效。",
+            ), 400
+        if instance["public_id"] not in seen:
+            seen.add(instance["public_id"])
+            instance_ids.append(instance["public_id"])
+
+    try:
+        result = control_client.create_device_batch(
+            {
+                "request_id": "device-batch-" + uuid.uuid4().hex,
+                "actor_user_public_id": current["public_id"],
+                "action": action,
+                "instance_public_ids": instance_ids,
+            }
+        )
+    except control_client.ControlError as exc:
+        return render_template(
+            "admin_device_approvals.html", result=None, error=str(exc)
+        ), exc.status
+    return redirect(url_for("device_batch", request_id=result["parent"]["request_id"]))
+
+
+@app.get("/admin/device-approvals/<request_id>")
+def device_batch(request_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        result = control_client.get_device_batch(request_id)
+    except control_client.ControlError as exc:
+        return render_template(
+            "admin_device_approvals.html", result=None, error=str(exc)
+        ), exc.status
+    return render_template("admin_device_approvals.html", result=result, error="")
+
+
+@app.get("/admin/device-approvals/<request_id>.csv")
+def download_device_batch(request_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        result = control_client.get_device_batch(request_id)
+    except control_client.ControlError as exc:
+        return render_template("error.html", message=str(exc)), exc.status
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["instance_public_id", "request_id", "status", "message"])
+    for job in result["children"]:
+        writer.writerow(
+            [job["instance_public_id"], job["request_id"], job["status"], job["summary"]]
+        )
+    return Response(
+        output.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{request_id}.csv"'},
+    )
 
 
 @app.post("/admin/instances/<instance_public_id>/lifecycle")

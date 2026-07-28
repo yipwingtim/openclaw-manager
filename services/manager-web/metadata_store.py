@@ -935,6 +935,7 @@ def list_execution_jobs(
     actor_user_public_id=None,
     instance_public_id=None,
     action=None,
+    parent_request_id=None,
     newest_first=False,
     db_file=None,
     conn=None,
@@ -961,6 +962,9 @@ def list_execution_jobs(
         if action:
             conditions.append("job.action = ?")
             params.append(action)
+        if parent_request_id:
+            conditions.append("job.parent_request_id = ?")
+            params.append(parent_request_id)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.append(limit)
         rows = active_conn.execute(

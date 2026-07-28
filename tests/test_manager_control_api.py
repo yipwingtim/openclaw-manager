@@ -1119,6 +1119,94 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(operation["action"], "instance.refresh_devices")
         self.assertEqual(operation["message"], "device cache refreshed")
 
+    def test_admin_device_batch_creates_idempotent_parent_and_children(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instances = [
+            self.control.metadata_store.create_instance(
+                owner_public_id=self.user["public_id"], product="openclaw",
+                instance_name=name, runtime_identifier=runtime, db_file=self.db_file,
+            )
+            for name, runtime in (("One", "openclaw_one"), ("Two", "openclaw_two"))
+        ]
+        payload = {
+            "request_id": "device-batch-1",
+            "actor_user_public_id": self.user["public_id"],
+            "action": "preview",
+            "instance_public_ids": [item["public_id"] for item in instances],
+        }
+        headers = {"Authorization": "Bearer admin-token"}
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            created, created_status = response_parts(self.control.create_device_batch())
+            repeated, repeated_status = response_parts(self.control.create_device_batch())
+
+        created_json = created.get_json()
+        self.assertEqual(created_status, 200)
+        self.assertEqual(repeated_status, 200)
+        self.assertEqual(repeated.get_json(), created_json)
+        self.assertEqual(created_json["parent"]["action"], "batch.device_preview")
+        self.assertEqual(created_json["parent"]["status"], "succeeded")
+        self.assertEqual(len(created_json["children"]), 2)
+        self.assertTrue(all(
+            job["action"] == "instance.refresh_devices"
+            and job["parent_request_id"] == "device-batch-1"
+            and job["summary"] == "queued"
+            for job in created_json["children"]
+        ))
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ):
+            fetched, fetched_status = response_parts(
+                self.control.get_device_batch("device-batch-1")
+            )
+        self.assertEqual(fetched_status, 200)
+        self.assertEqual(fetched.get_json(), created_json)
+
+        approve_payload = {
+            **payload,
+            "request_id": "device-batch-approve",
+            "action": "approve",
+        }
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=approve_payload
+        ):
+            approved, approved_status = response_parts(
+                self.control.create_device_batch()
+            )
+        self.assertEqual(approved_status, 200)
+        self.assertTrue(all(
+            job["action"] == "instance.approve_latest_device"
+            for job in approved.get_json()["children"]
+        ))
+
+    def test_admin_device_batch_rejects_invalid_target_atomically(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="One", runtime_identifier="openclaw_one", db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "device-batch-invalid",
+            "actor_user_public_id": self.user["public_id"],
+            "action": "approve",
+            "instance_public_ids": [instance["public_id"], "missing-instance"],
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_device_batch())
+
+        self.assertEqual(status, 409)
+        self.assertIn("instance not found", response.get_json()["error"])
+        self.assertIsNone(self.control.metadata_store.get_execution_job(
+            "device-batch-invalid", db_file=self.db_file
+        ))
+
     def test_retention_jobs_validate_state_and_block_other_instance_jobs(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

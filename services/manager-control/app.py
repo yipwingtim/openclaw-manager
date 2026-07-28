@@ -143,6 +143,28 @@ def execution_job_payload(
     }
 
 
+def device_batch_child_payload(job):
+    value = execution_job_payload(job)
+    output = job.get("output") or ""
+    if job["status"] in {"queued", "running"}:
+        summary = job["status"]
+    elif job["status"] != "succeeded":
+        summary = job.get("error_summary") or "failed"
+    elif "No pending device request found" in output:
+        summary = "No pending request"
+    elif job["action"] == "instance.refresh_devices" and re.search(
+        r"^Pending(?:\s*\([1-9][0-9]*\)|\s*$)", output, re.MULTILINE
+    ):
+        summary = "Pending request found"
+    elif job["action"] == "instance.approve_latest_device":
+        summary = "Approved successfully"
+    else:
+        summary = "No pending request"
+    value["summary"] = summary
+    value["output"] = None
+    return value
+
+
 def authenticated_user_payload(user):
     return {
         "id": user["id"],
@@ -439,6 +461,148 @@ def admin_metadata():
             "counts": counts,
             "instances": [admin_metadata_instance(item) for item in instances],
             "operations": operations,
+        }
+    )
+
+
+@app.post("/internal/v1/admin/device-batches")
+@require_services("manager-admin-web")
+def create_device_batch():
+    payload = request.get_json(silent=True) or {}
+    allowed = {"request_id", "actor_user_public_id", "action", "instance_public_ids"}
+    if set(payload) - allowed:
+        return jsonify({"error": "unsupported batch fields"}), 400
+    request_id = payload.get("request_id")
+    actor_public_id = payload.get("actor_user_public_id")
+    batch_action = payload.get("action")
+    instance_public_ids = payload.get("instance_public_ids")
+    if (
+        not isinstance(request_id, str)
+        or not REQUEST_ID_RE.fullmatch(request_id)
+        or len(request_id) > 120
+    ):
+        return jsonify({"error": "invalid request_id"}), 400
+    if batch_action not in {"preview", "approve"}:
+        return jsonify({"error": "invalid batch action"}), 400
+    if (
+        not isinstance(instance_public_ids, list)
+        or not 1 <= len(instance_public_ids) <= 100
+        or any(not isinstance(value, str) or not value for value in instance_public_ids)
+        or len(set(instance_public_ids)) != len(instance_public_ids)
+    ):
+        return jsonify({"error": "instance_public_ids must contain 1-100 unique IDs"}), 400
+    actor = metadata_store.get_user_by_public_id(actor_public_id, db_file=DB_FILE)
+    if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+        return jsonify({"error": "active admin actor is required"}), 403
+
+    child_action = (
+        "instance.refresh_devices"
+        if batch_action == "preview"
+        else "instance.approve_latest_device"
+    )
+    parent_action = f"batch.device_{batch_action}"
+    params = {"instance_public_ids": instance_public_ids}
+    try:
+        with metadata_store.connect(DB_FILE) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = metadata_store.get_execution_job(request_id, conn=conn)
+            if existing is not None:
+                parent = metadata_store.create_execution_job(
+                    request_id=request_id, actor_user_id=actor["id"],
+                    action=parent_action, params=params, conn=conn,
+                )
+                children = metadata_store.list_execution_jobs(
+                    parent_request_id=request_id, limit=100, conn=conn
+                )
+            else:
+                instances = []
+                for instance_public_id in instance_public_ids:
+                    instance = metadata_store.get_instance_by_public_id(
+                        instance_public_id, conn=conn
+                    )
+                    if instance is None:
+                        raise ValueError(f"instance not found: {instance_public_id}")
+                    if instance["status"] == "deleted" or not product_supports(
+                        instance["product"], "device_pairing"
+                    ):
+                        raise ValueError(
+                            f"device pairing is not available: {instance_public_id}"
+                        )
+                    active_jobs = metadata_store.list_execution_jobs(
+                        statuses=("queued", "running"), limit=1,
+                        instance_public_id=instance_public_id,
+                        action=child_action, conn=conn,
+                    )
+                    if active_jobs:
+                        raise ValueError(
+                            f"device task is already active: {instance_public_id}"
+                        )
+                    for retention_action in ("instance.delete", "instance.restore"):
+                        if metadata_store.list_execution_jobs(
+                            statuses=("queued", "running"), limit=1,
+                            instance_public_id=instance_public_id,
+                            action=retention_action, conn=conn,
+                        ):
+                            raise ValueError(
+                                f"retention task is already active: {instance_public_id}"
+                            )
+                    instances.append(instance)
+                parent = metadata_store.create_execution_job(
+                    request_id=request_id, actor_user_id=actor["id"],
+                    action=parent_action, params=params, conn=conn,
+                )
+                metadata_store.update_execution_job(
+                    request_id, "running", current_step="creating child jobs", conn=conn
+                )
+                children = []
+                for index, instance in enumerate(instances, 1):
+                    children.append(
+                        metadata_store.create_execution_job(
+                            request_id=f"{request_id}:{index}",
+                            parent_request_id=request_id,
+                            actor_user_id=actor["id"],
+                            instance_public_id=instance["public_id"],
+                            action=child_action, params={}, conn=conn,
+                        )
+                    )
+                parent = metadata_store.update_execution_job(
+                    request_id, "succeeded", output=f"queued {len(children)} child jobs",
+                    conn=conn,
+                )
+                metadata_store.record_operation(
+                    request_id=request_id, actor_user_id=actor["id"],
+                    source_service="manager-control", action=parent_action,
+                    status="success", message=f"queued {len(children)} child jobs",
+                    conn=conn,
+                )
+                children = metadata_store.list_execution_jobs(
+                    parent_request_id=request_id, limit=100, conn=conn
+                )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "could not create device batch"}), 409
+    return jsonify(
+        {
+            "parent": execution_job_payload(parent, actor_public_id),
+            "children": [device_batch_child_payload(job) for job in children],
+        }
+    )
+
+
+@app.get("/internal/v1/admin/device-batches/<request_id>")
+@require_services("manager-admin-web")
+def get_device_batch(request_id):
+    parent = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if parent is None or not parent["action"].startswith("batch.device_"):
+        return jsonify({"error": "device batch not found"}), 404
+    children = metadata_store.list_execution_jobs(
+        parent_request_id=request_id, limit=100, db_file=DB_FILE
+    )
+    return jsonify(
+        {
+            "parent": execution_job_payload(parent),
+            "children": [device_batch_child_payload(job) for job in children],
         }
     )
 

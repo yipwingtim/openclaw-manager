@@ -5,9 +5,9 @@
     <div>
       <div class="page-kicker">批量控制</div>
       <h1 class="page-title">设备审批</h1>
-      <div class="page-subtitle">预览待审批设备，并通过受控 CSV 批量审批访问请求。</div>
+      <div class="page-subtitle">上传实例清单，通过结构化任务刷新设备列表或批量审批最新请求。</div>
     </div>
-    <a class="btn btn-oc-outline" href="/admin/users">用户实例管理</a>
+    <a class="btn btn-oc-outline" href="/admin/instances">实例管理</a>
   </div>
 
   {% if error %}
@@ -15,25 +15,28 @@
   {% endif %}
 
   <div class="surface p-3 p-lg-4 mb-3">
-    <form method="post" action="/admin/device-approvals">
+    <form method="post" action="/admin/device-approvals" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label class="form-label" for="input_csv">输入 CSV</label>
-      <input class="form-control mb-3" id="input_csv" name="input_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_input.csv" required>
-
-      <label class="form-label" for="output_csv">输出 CSV</label>
-      <input class="form-control mb-3" id="output_csv" name="output_csv" value="/data/docker/openclaw-public/batches/test_batch/approve_results.csv" required>
+      <input class="form-control mb-3" type="file" id="input_csv" name="input_csv" accept=".csv,text/csv" required>
 
       <div class="d-flex gap-2 flex-wrap">
         <button class="btn btn-oc-outline" type="submit" name="action" value="preview">预览待审批请求</button>
-        <button class="btn btn-oc" type="submit" name="action" value="approve">执行批量审批</button>
+        <button class="btn btn-oc" type="submit" name="action" value="approve" onclick="return confirm('确认批量审批每个实例的最新设备请求？');">执行批量审批</button>
       </div>
     </form>
-    <div class="muted-small mt-3">路径必须位于 /data/docker/openclaw-public/batches 目录下。</div>
+    <div class="muted-small mt-3">CSV 必须包含 instance_public_id 列；迁移期也兼容 user_id。最多 100 行，重复实例只提交一次；不接受 request_id，批量审批只处理每个实例的最新请求。</div>
   </div>
 
   {% if result %}
     <div class="surface p-3 p-lg-4">
-      <div class="section-title mb-3">批量处理结果</div>
-      <pre class="codebox mb-0">{{ result }}</pre>
+      <div class="section-title mb-3">批量任务已提交</div>
+      <div>父任务：<code>{{ result.parent.request_id }}</code></div>
+      <div class="muted-small mb-2">子任务数：{{ result.children | length }}</div>
+      <a class="btn btn-sm btn-oc-outline mb-2" href="/admin/device-approvals/{{ result.parent.request_id }}">刷新结果</a>
+      <a class="btn btn-sm btn-oc-outline mb-2" href="/admin/device-approvals/{{ result.parent.request_id }}.csv">下载结果 CSV</a>
+      <pre class="codebox mb-0">{% for job in result.children %}{{ job.instance_public_id }},{{ job.request_id }},{{ job.status }},{{ job.summary }}
+{% endfor %}</pre>
     </div>
   {% endif %}
 {% endblock %}

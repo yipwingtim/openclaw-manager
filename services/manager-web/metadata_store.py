@@ -1118,6 +1118,18 @@ def set_instance_basic_auth(instance_public_id, enabled, *, db_file=None, conn=N
             raise ValueError("instance not found")
 
 
+def set_instance_version(instance_public_id, version, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        result = active_conn.execute(
+            "UPDATE instances SET openclaw_version = ?, updated_at = ? WHERE public_id = ?",
+            (version, utc_now(), instance_public_id),
+        )
+        if result.rowcount != 1:
+            raise ValueError("instance not found")
+
+
 def upsert_credentials(
     *,
     user_id,

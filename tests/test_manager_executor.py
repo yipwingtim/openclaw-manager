@@ -174,6 +174,37 @@ class ManagerExecutorTests(unittest.TestCase):
         self.assertEqual(control.update.call_args.args, ("basic-auth-1", "succeeded"))
         self.assertEqual(control.update.call_args.kwargs["output"], "disabled")
 
+    def test_run_once_updates_version_without_retry(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {
+                "request_id": "version-1",
+                "action": "instance.update_version",
+                "params": {
+                    "version": "2026.7.28",
+                    "restore_model_provider": True,
+                },
+            },
+            "instance": {
+                "product": "openclaw",
+                "legacy_user_id": "alice",
+                "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.update_version.return_value = (0, "updated")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.status.assert_not_called()
+        adapter.update_version.assert_called_once_with(
+            control.claim.return_value["instance"],
+            "2026.7.28",
+            restore_model_provider=True,
+        )
+        self.assertEqual(control.update.call_args.args, ("version-1", "succeeded"))
+
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()
         control.claim.return_value = {

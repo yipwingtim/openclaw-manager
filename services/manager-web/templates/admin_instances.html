@@ -30,7 +30,15 @@
           </td>
           <td><form method="post" action="/admin/instances/{{ instance.public_id }}/lifecycle" class="d-flex gap-2">
             {% for action in ["start", "stop", "restart"] %}<button class="btn btn-sm btn-oc-outline" name="action" value="{{ action }}">{{ action }}</button>{% endfor %}
-          </form></td>
+          </form>
+          {% if "update_version" in instance.capabilities %}
+            <form method="post" action="/admin/instances/{{ instance.public_id }}/version" class="d-flex gap-2 mt-2 align-items-center" onsubmit="return confirm('确认升级实例版本？');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input class="form-control form-control-sm" style="width: 120px;" name="version" value="{{ instance.version or '' }}" placeholder="目标版本" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}">
+              <label class="muted-small"><input type="checkbox" name="restore_model_provider" value="true"> 恢复模型</label>
+              <button class="btn btn-sm btn-oc-outline" type="submit">升级</button>
+            </form>
+          {% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

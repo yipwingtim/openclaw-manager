@@ -58,11 +58,15 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="$USER_DIR/backups/version-upgrades/$TIMESTAMP"
 BACKUP_FILE="$BACKUP_DIR/docker-compose.yml"
 PERSISTENT_BACKUP_DIR="$BACKUP_DIR/persistent-data"
+FAILED_PERSISTENT_DIR="$BACKUP_DIR/failed-upgrade-data"
 PRE_CHECK_FILE="$BACKUP_DIR/pre-check.txt"
 POST_CHECK_FILE="$BACKUP_DIR/post-check.txt"
 POST_RESTORE_CHECK_FILE="$BACKUP_DIR/post-restore-check.txt"
 CHECK_SCRIPT="$SCRIPT_DIR/check_instance_upgrade.sh"
 SET_MODEL_PROVIDER_SCRIPT="$SCRIPT_DIR/set_model_provider.sh"
+MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
+MODEL_PROXY_TOKEN_FILE="$MODEL_PROXY_TOKEN_DIR/${USER_ID}.token"
+MODEL_PROXY_MODELS_FILE="$MODEL_PROXY_TOKEN_DIR/${USER_ID}.models"
 
 if [ ! -d "$USER_DIR" ]; then
   echo "[ERROR] User directory not found: $USER_DIR" >&2
@@ -78,6 +82,9 @@ CURRENT_IMAGE="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*(ghcr\.io\/openclaw\/
 TARGET_IMAGE="ghcr.io/openclaw/openclaw:$TARGET_VERSION"
 
 sync_metadata_version() {
+  if [ "${OPENCLAW_SKIP_METADATA_WRITE:-0}" = "1" ]; then
+    return 0
+  fi
   if ! python3 "$SCRIPT_DIR/metadata_cli.py" update-version \
     --user-id "$USER_ID" \
     --openclaw-version "$TARGET_VERSION"; then
@@ -108,6 +115,71 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 cp "$COMPOSE_FILE" "$BACKUP_FILE"
+ROLLBACK_REQUIRED=0
+
+backup_optional_file() {
+  local source_file="$1"
+  local backup_name="$2"
+  if [ -f "$source_file" ]; then
+    cp "$source_file" "$BACKUP_DIR/$backup_name"
+    touch "$BACKUP_DIR/$backup_name.existed"
+  fi
+}
+
+restore_optional_file() {
+  local target_file="$1"
+  local backup_name="$2"
+  if [ -f "$BACKUP_DIR/$backup_name.existed" ]; then
+    mkdir -p "$(dirname "$target_file")"
+    cp "$BACKUP_DIR/$backup_name" "$target_file"
+  else
+    rm -f "$target_file"
+  fi
+}
+
+restore_persistent_data() {
+  local relative_path
+  for relative_path in config skills extensions; do
+    if [ -e "$USER_DIR/$relative_path" ]; then
+      mkdir -p "$FAILED_PERSISTENT_DIR"
+      if ! mv "$USER_DIR/$relative_path" "$FAILED_PERSISTENT_DIR/"; then
+        echo "[ERROR] Could not preserve failed upgrade data: $relative_path" >&2
+        return 1
+      fi
+    fi
+    if [ -e "$PERSISTENT_BACKUP_DIR/$relative_path" ]; then
+      if ! cp -a "$PERSISTENT_BACKUP_DIR/$relative_path" "$USER_DIR/"; then
+        echo "[ERROR] Could not restore persistent data: $relative_path" >&2
+        return 1
+      fi
+    fi
+  done
+}
+
+backup_optional_file "$MODEL_PROXY_TOKEN_FILE" model-proxy.token
+backup_optional_file "$MODEL_PROXY_MODELS_FILE" model-proxy.models
+
+rollback_upgrade() {
+  local exit_code=$?
+  trap - EXIT
+  if [ "$ROLLBACK_REQUIRED" = "1" ]; then
+    echo "[WARN] Restoring previous Compose and model configuration..." >&2
+    cp "$BACKUP_FILE" "$COMPOSE_FILE"
+    if restore_persistent_data; then
+      restore_optional_file "$MODEL_PROXY_TOKEN_FILE" model-proxy.token
+      restore_optional_file "$MODEL_PROXY_MODELS_FILE" model-proxy.models
+      if ! (cd "$USER_DIR" && docker compose up -d); then
+        echo "[ERROR] Automatic version rollback failed. Review: $BACKUP_FILE" >&2
+      fi
+    else
+      echo "[ERROR] Persistent data rollback failed. Review: $BACKUP_DIR" >&2
+      echo "[ERROR] Old container was not started with incomplete persistent data." >&2
+    fi
+  fi
+  exit "$exit_code"
+}
+
+trap rollback_upgrade EXIT
 
 for relative_path in config skills extensions; do
   if [ -e "$USER_DIR/$relative_path" ]; then
@@ -186,6 +258,7 @@ echo "[INFO] Target image:  $TARGET_IMAGE"
 echo "[INFO] Backup: $BACKUP_FILE"
 echo "[INFO] Persistent backup: $PERSISTENT_BACKUP_DIR"
 
+ROLLBACK_REQUIRED=1
 python3 - "$COMPOSE_FILE" "$TARGET_IMAGE" <<'PY'
 import re
 import sys
@@ -284,6 +357,8 @@ for _ in $(seq 1 30); do
       print_rollback
       exit 1
     fi
+
+    ROLLBACK_REQUIRED=0
 
     echo ""
     echo "=============================="

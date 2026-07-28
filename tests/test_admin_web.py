@@ -112,6 +112,27 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(response, "error-url")
         url_for.assert_called_once_with("instances", error="control unavailable")
 
+    def test_admin_version_queues_structured_action(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {
+            "version": "2026.7.28",
+            "restore_model_provider": "true",
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "create_execution_job"
+        ) as create_job:
+            response = self.admin.update_version("instance-1")
+
+        payload = create_job.call_args.args[0]
+        self.assertEqual(payload["instance_public_id"], "instance-1")
+        self.assertEqual(payload["action"], "instance.update_version")
+        self.assertEqual(
+            payload["params"],
+            {"version": "2026.7.28", "restore_model_provider": True},
+        )
+        self.assertNotIn("legacy_user_id", payload)
+        self.assertEqual(response, "instances")
+
 
 if __name__ == "__main__":
     unittest.main()

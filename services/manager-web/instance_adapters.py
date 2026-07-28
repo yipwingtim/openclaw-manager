@@ -1,6 +1,8 @@
 import os
+import signal
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 from product_capabilities import product_capabilities
@@ -287,14 +289,52 @@ class OpenClawDockerAdapter:
         )
 
     def update_version(self, instance, version, restore_model_provider=False, timeout=600):
+        user_id = self.get_legacy_user_id(instance)
+        user_dir = self.user_dir(user_id)
+        compose_file = user_dir / "docker-compose.yml"
+        if not compose_file.is_file():
+            return 1, f"Compose file not found: {compose_file}"
         command = [
             str(self.manager_dir / "scripts" / "update_instance_version.sh"),
-            self.get_legacy_user_id(instance),
+            user_id,
             version,
         ]
         if restore_model_provider:
             command.append("--restore-model-provider")
-        return self.run_command(command, timeout=timeout)
+        process = None
+        previous_sigterm = None
+        if threading.current_thread() is threading.main_thread():
+            def interrupt_update(signum, frame):
+                raise SystemExit(128 + signum)
+
+            previous_sigterm = signal.signal(
+                signal.SIGTERM,
+                interrupt_update,
+            )
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.manager_dir),
+                env={**os.environ, "OPENCLAW_SKIP_METADATA_WRITE": "1"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            output, _ = process.communicate(timeout=timeout)
+            return process.returncode, output.strip()
+        except BaseException:
+            if process is not None and process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.communicate(timeout=180)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+            raise
+        finally:
+            if previous_sigterm is not None:
+                signal.signal(signal.SIGTERM, previous_sigterm)
 
     def batch_set_model_provider(self, input_csv, output_csv, timeout):
         return self.run_command(

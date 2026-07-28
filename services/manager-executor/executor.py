@@ -236,6 +236,25 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     output=output,
                 )
             return True
+        if action == "update_version":
+            params = job["params"]
+            control.update(request_id, "running", current_step="updating version")
+            code, output = adapter.update_version(
+                instance,
+                params["version"],
+                restore_model_provider=params["restore_model_provider"],
+            )
+            output = output[-MAX_OUTPUT_LENGTH:]
+            if code == 0:
+                control.update(request_id, "succeeded", output=output)
+            else:
+                control.update(
+                    request_id,
+                    "failed",
+                    error_summary="version update failed",
+                    output=output,
+                )
+            return True
         if action not in {"start", "stop", "restart"}:
             raise ValueError(f"unsupported execution action: {job['action']}")
         status = adapter.status(instance)

@@ -375,6 +375,28 @@ class AdapterInstanceModelTests(unittest.TestCase):
             )
             self.assertTrue(approve.kwargs["start_new_session"])
 
+    def test_retention_actions_run_in_separate_process_groups(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            instance = {
+                "legacy_user_id": "alice",
+                "runtime_identifier": "openclaw_alice",
+            }
+            process = Mock()
+            process.communicate.return_value = ("ok", None)
+            process.returncode = 0
+            process.poll.return_value = 0
+            with patch("subprocess.Popen", return_value=process) as popen:
+                adapter.delete(instance)
+                deleted = popen.call_args
+                adapter.restore(instance)
+                restored = popen.call_args
+
+            self.assertTrue(deleted.kwargs["start_new_session"])
+            self.assertEqual(deleted.args[0][-1], "alice")
+            self.assertTrue(restored.kwargs["start_new_session"])
+            self.assertEqual(restored.args[0][-1], "alice")
+
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))

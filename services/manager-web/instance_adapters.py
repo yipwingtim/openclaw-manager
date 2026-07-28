@@ -280,13 +280,13 @@ class OpenClawDockerAdapter:
         )
 
     def delete(self, instance):
-        return self.run_command(
+        return self._run_interruptible_command(
             [str(self.manager_dir / "scripts" / "delete_user.sh"), self.get_legacy_user_id(instance)],
             timeout=180,
         )
 
     def restore(self, instance):
-        return self.run_command(
+        return self._run_interruptible_command(
             [str(self.manager_dir / "scripts" / "restore_user.sh"), self.get_legacy_user_id(instance)],
             timeout=240,
         )
@@ -433,6 +433,16 @@ class OpenClawDockerAdapter:
         )
 
     def _run_device_command(self, command, instance, timeout, env=None):
+        return self._run_interruptible_command(
+            command,
+            timeout,
+            env={
+                **(env or {}),
+                "OPENCLAW_RUNTIME_TARGET": self.get_runtime_target(instance),
+            },
+        )
+
+    def _run_interruptible_command(self, command, timeout, env=None):
         process = None
         previous_sigterm = None
         if threading.current_thread() is threading.main_thread():
@@ -447,7 +457,6 @@ class OpenClawDockerAdapter:
                 env={
                     **os.environ,
                     **(env or {}),
-                    "OPENCLAW_RUNTIME_TARGET": self.get_runtime_target(instance),
                 },
                 text=True,
                 stdout=subprocess.PIPE,

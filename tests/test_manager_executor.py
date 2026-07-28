@@ -281,6 +281,42 @@ class ManagerExecutorTests(unittest.TestCase):
             control.claim.return_value["instance"], request_id="device-approval-1"
         )
 
+    def test_run_once_deletes_instance_without_retry(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {"request_id": "delete-1", "action": "instance.delete", "params": {}},
+            "instance": {
+                "product": "openclaw", "status": "active",
+                "legacy_user_id": "alice", "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.delete.return_value = (1, "ambiguous failure")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.delete.assert_called_once_with(control.claim.return_value["instance"])
+        self.assertEqual(control.update.call_args.args, ("delete-1", "failed"))
+
+    def test_run_once_restores_only_restorable_deleted_instance(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {"request_id": "restore-1", "action": "instance.restore", "params": {}},
+            "instance": {
+                "product": "openclaw", "status": "deleted", "restore_state": "restorable",
+                "legacy_user_id": "alice", "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.restore.return_value = (0, "restored")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.restore.assert_called_once_with(control.claim.return_value["instance"])
+        self.assertEqual(control.update.call_args.args, ("restore-1", "succeeded"))
+
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()
         control.claim.return_value = {

@@ -137,6 +137,8 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             raise ValueError(
                 f"instance product does not support {capability or job['action']}"
             )
+        if instance.get("status") == "deleted" and action != "restore":
+            raise ValueError("deleted instance only supports restore")
         if action == "wechat_bind":
             instance = control.get_runtime_instance(
                 job["instance_public_id"], job["actor_user_public_id"]
@@ -303,6 +305,27 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     request_id,
                     "failed",
                     error_summary=f"{action.replace('_', ' ')} failed",
+                    output=output,
+                )
+            return True
+        if action in {"delete", "restore"}:
+            control.update(request_id, "running", current_step=f"{action} instance")
+            if action == "delete" and instance.get("status") == "deleted":
+                raise ValueError("instance is already deleted")
+            if action == "restore" and (
+                instance.get("status") != "deleted"
+                or instance.get("restore_state") != "restorable"
+            ):
+                raise ValueError("instance is not restorable")
+            code, output = getattr(adapter, action)(instance)
+            output = output[-MAX_OUTPUT_LENGTH:]
+            if code == 0:
+                control.update(request_id, "succeeded", output=output)
+            else:
+                control.update(
+                    request_id,
+                    "failed",
+                    error_summary=f"instance {action} failed",
                     output=output,
                 )
             return True

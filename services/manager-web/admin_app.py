@@ -130,6 +130,27 @@ def lifecycle(instance_public_id):
     return redirect(url_for("instances", result=f"{action} task queued"))
 
 
+@app.post("/admin/instances/<instance_public_id>/retention")
+def retention(instance_public_id):
+    current = web_common.actor()
+    action = request.form.get("action", "")
+    if not current or current["role"] != "admin" or action not in {"delete", "restore"}:
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        control_client.create_execution_job(
+            {
+                "request_id": str(uuid.uuid4()),
+                "actor_user_public_id": current["public_id"],
+                "instance_public_id": instance_public_id,
+                "action": f"instance.{action}",
+                "params": {},
+            }
+        )
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    return redirect(url_for("instances", result=f"{action} task queued"))
+
+
 @app.post("/admin/instances/<instance_public_id>/basic-auth")
 def basic_auth(instance_public_id):
     current = web_common.actor()

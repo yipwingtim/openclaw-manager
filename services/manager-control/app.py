@@ -50,6 +50,8 @@ JOB_ACTION_PARAMS = {
     "instance.install_skill": {"skill_id"},
     "instance.refresh_devices": set(),
     "instance.approve_latest_device": set(),
+    "instance.delete": set(),
+    "instance.restore": set(),
     "instance.wechat_bind": set(),
 }
 
@@ -163,6 +165,8 @@ def executor_instance_payload(instance):
         "product": instance["product"],
         "runtime_identifier": instance["runtime_identifier"],
         "data_path": instance.get("data_path"),
+        "status": instance["status"],
+        "restore_state": instance.get("restore_state"),
         "access_role": instance.get("access_role"),
     }
 
@@ -400,13 +404,15 @@ def admin_instances():
                     "product": instance["product"],
                     "instance_name": instance["instance_name"],
                     "status": instance["status"],
+                    "restore_state": instance.get("restore_state"),
                     "access_url": instance.get("access_url"),
                     "version": instance.get("openclaw_version"),
                     "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
                     "capabilities": sorted(
                         capability
                         for capability in (
-                            "basic_auth", "update_version", "skill_install", "device_pairing"
+                            "basic_auth", "update_version", "skill_install", "device_pairing",
+                            "delete", "restore",
                         )
                         if product_supports(instance["product"], capability)
                     ),
@@ -730,34 +736,9 @@ def create_execution_job():
         return jsonify(
             {"error": f"instance product does not support {capability or action}"}
         ), 400
-    try:
-        if action in {"instance.wechat_bind", "instance.approve_latest_device"}:
-            with metadata_store.connect(DB_FILE) as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                active_jobs = metadata_store.list_execution_jobs(
-                    limit=1,
-                    statuses=("queued", "running"),
-                    instance_public_id=instance_public_id,
-                    action=action,
-                    conn=conn,
-                )
-                if active_jobs:
-                    message = (
-                        "wechat bind is already running"
-                        if action == "instance.wechat_bind"
-                        else "approve_latest_device is already running"
-                    )
-                    return jsonify({"error": message}), 409
-                job = metadata_store.create_execution_job(
-                    request_id=request_id,
-                    parent_request_id=parent_request_id,
-                    actor_user_id=actor["id"],
-                    instance_public_id=instance_public_id,
-                    action=action,
-                    params=params,
-                    conn=conn,
-                )
-        else:
+    existing_job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if existing_job is not None:
+        try:
             job = metadata_store.create_execution_job(
                 request_id=request_id,
                 parent_request_id=parent_request_id,
@@ -766,6 +747,70 @@ def create_execution_job():
                 action=action,
                 params=params,
                 db_file=DB_FILE,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 409
+        return jsonify(
+            {"job": execution_job_payload(job, actor_user_public_id, instance_public_id)}
+        )
+    if action == "instance.delete" and instance["status"] == "deleted":
+        return jsonify({"error": "instance is already deleted"}), 409
+    if instance["status"] == "deleted" and action != "instance.restore":
+        return jsonify({"error": "deleted instance only supports restore"}), 409
+    if action == "instance.restore" and (
+        instance["status"] != "deleted"
+        or instance.get("restore_state") != "restorable"
+    ):
+        return jsonify({"error": "instance is not restorable"}), 409
+    try:
+        with metadata_store.connect(DB_FILE) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            exclusive_actions = {"instance.delete", "instance.restore"}
+            active_jobs = metadata_store.list_execution_jobs(
+                limit=1,
+                statuses=("queued", "running"),
+                instance_public_id=instance_public_id,
+                action=None if action in exclusive_actions else action,
+                conn=conn,
+            )
+            active_retention_jobs = []
+            if action not in exclusive_actions:
+                for retention_action in exclusive_actions:
+                    active_retention_jobs.extend(
+                        metadata_store.list_execution_jobs(
+                            limit=1,
+                            statuses=("queued", "running"),
+                            instance_public_id=instance_public_id,
+                            action=retention_action,
+                            conn=conn,
+                        )
+                    )
+            if active_retention_jobs or (
+                active_jobs
+                and action in {
+                    "instance.wechat_bind",
+                    "instance.approve_latest_device",
+                    *exclusive_actions,
+                }
+            ):
+                message = (
+                    "wechat bind is already running"
+                    if action == "instance.wechat_bind" and not active_retention_jobs
+                    else (
+                        "approve_latest_device is already running"
+                        if action == "instance.approve_latest_device" and not active_retention_jobs
+                        else f"{action.removeprefix('instance.')} cannot run while another instance task is active"
+                    )
+                )
+                return jsonify({"error": message}), 409
+            job = metadata_store.create_execution_job(
+                request_id=request_id,
+                parent_request_id=parent_request_id,
+                actor_user_id=actor["id"],
+                instance_public_id=instance_public_id,
+                action=action,
+                params=params,
+                conn=conn,
             )
     except ValueError as exc:
         status = 409 if "request_id already used" in str(exc) else 400
@@ -922,6 +967,8 @@ def update_execution_job(request_id):
                     "instance.install_skill",
                     "instance.refresh_devices",
                     "instance.approve_latest_device",
+                    "instance.delete",
+                    "instance.restore",
                 }
             ):
                 params = json.loads(job["params_json"])
@@ -931,6 +978,8 @@ def update_execution_job(request_id):
                     message = f"version={params['version']}"
                 elif job["action"] == "instance.install_skill":
                     message = f"skill={params['skill_id']}"
+                elif job["action"] in {"instance.delete", "instance.restore"}:
+                    message = f"instance {job['action'].removeprefix('instance.')}d"
                 else:
                     message = "device cache refreshed" if job["action"] == "instance.refresh_devices" else "latest device request approved"
                 operation_status = "success" if status == "succeeded" else "failed"

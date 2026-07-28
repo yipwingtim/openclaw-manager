@@ -816,6 +816,32 @@ def claim_next_execution_job(*, stale_seconds=900, db_file=None):
         stale_before = (
             datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
         ).replace(microsecond=0).isoformat()
+        now = utc_now()
+        conn.execute(
+            """
+            UPDATE execution_jobs
+            SET status = 'failed', error_summary = 'execution interrupted; manual confirmation required',
+                updated_at = ?, finished_at = ?
+            WHERE status = 'running' AND heartbeat_at < ?
+              AND action IN ('instance.delete', 'instance.restore')
+            """,
+            (now, now, stale_before),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operation_records (
+                request_id, actor_user_id, source_service, action, instance_id,
+                status, message, created_at, finished_at
+            )
+            SELECT request_id, actor_user_id, 'manager-executor', action, instance_id,
+                   'failed', 'execution interrupted; manual confirmation required', ?, ?
+            FROM execution_jobs
+            WHERE status = 'failed'
+              AND error_summary = 'execution interrupted; manual confirmation required'
+              AND action IN ('instance.delete', 'instance.restore')
+            """,
+            (now, now),
+        )
         conn.execute(
             """
             UPDATE execution_jobs

@@ -1270,6 +1270,8 @@ def list_operation_events(limit=100, *, db_file=None, conn=None):
         rows = active_conn.execute(
             """
             SELECT o.request_id,
+                   o.actor,
+                   o.user_id,
                    actor.public_id AS actor_user_public_id,
                    instance.public_id AS instance_public_id,
                    o.source_service,

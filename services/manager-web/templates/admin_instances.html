@@ -2,7 +2,10 @@
 {% block title %}实例管理{% endblock %}
 {% block content %}
   <div class="page-kicker">管理员控制台</div>
-  <h1 class="page-title">实例管理</h1>
+  <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+    <h1 class="page-title">实例管理</h1>
+    <a class="btn btn-oc-outline" href="/admin/metadata">元数据与操作记录</a>
+  </div>
   {% if result %}<div class="alert soft-success">{{ result }}</div>{% endif %}
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
   <div class="surface table-responsive">

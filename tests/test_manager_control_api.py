@@ -1119,6 +1119,84 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(operation["action"], "instance.refresh_devices")
         self.assertEqual(operation["message"], "device cache refreshed")
 
+    def test_retention_jobs_validate_state_and_block_other_instance_jobs(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "delete-1",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.delete",
+            "params": {},
+        }
+        headers = {"Authorization": "Bearer admin-token"}
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            created, delete_status = response_parts(self.control.create_execution_job())
+            repeated, repeated_status = response_parts(self.control.create_execution_job())
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json",
+            return_value={**payload, "request_id": "start-1", "action": "instance.start"},
+        ):
+            blocked, blocked_status = response_parts(self.control.create_execution_job())
+
+        self.assertEqual(delete_status, 200)
+        self.assertEqual(repeated_status, 200)
+        self.assertEqual(repeated.get_json()["job"], created.get_json()["job"])
+        self.assertEqual(blocked_status, 409)
+        self.assertIn("another instance task", blocked.get_json()["error"])
+
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            conn.execute(
+                "UPDATE instances SET status = 'deleted', restore_state = 'incomplete' WHERE public_id = ?",
+                (instance["public_id"],),
+            )
+        payload.update(request_id="restore-1", action="instance.restore")
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            invalid, invalid_status = response_parts(self.control.create_execution_job())
+        self.assertEqual(invalid_status, 409)
+        self.assertEqual(invalid.get_json(), {"error": "instance is not restorable"})
+
+    def test_retention_job_records_request_linked_audit(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="delete-success", actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"], action="instance.delete",
+            params={}, db_file=self.db_file,
+        )
+        self.control.metadata_store.update_execution_job(
+            "delete-success", "running", db_file=self.db_file
+        )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(
+            self.control.request, "get_json",
+            return_value={"status": "succeeded", "output": "deleted"},
+        ):
+            _, status = response_parts(self.control.update_execution_job("delete-success"))
+
+        operation = self.control.metadata_store.list_operation_events(
+            1, db_file=self.db_file
+        )[0]
+        self.assertEqual(status, 200)
+        self.assertEqual(operation["request_id"], "delete-success")
+        self.assertEqual(operation["action"], "instance.delete")
+        self.assertEqual(operation["message"], "instance deleted")
+
     def test_latest_device_approval_rejects_an_active_job(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file
@@ -1311,6 +1389,10 @@ class ManagerControlApiTests(unittest.TestCase):
                 "legacy_user_id": None,
                 "product": "openclaw",
                 "runtime_identifier": "openclaw_alice",
+                "data_path": None,
+                "status": "active",
+                "restore_state": "not_applicable",
+                "access_role": None,
             },
         )
         self.assertEqual(empty_status, 204)
@@ -1393,13 +1475,61 @@ class ManagerControlApiTests(unittest.TestCase):
         self.control.metadata_store.update_execution_job(
             "request-1", "running", db_file=self.db_file
         )
+        stale = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(
+            microsecond=0
+        ).isoformat()
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            conn.execute(
+                "UPDATE execution_jobs SET heartbeat_at = ? WHERE request_id = ?",
+                (stale, "request-1"),
+            )
 
         job, _ = self.control.metadata_store.claim_next_execution_job(
-            stale_seconds=0, db_file=self.db_file
+            stale_seconds=1, db_file=self.db_file
         )
 
         self.assertEqual(job["request_id"], "request-1")
         self.assertEqual(job["status"], "running")
+
+    def test_executor_does_not_reclaim_interrupted_retention_job(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="delete-1", actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"], action="instance.delete",
+            params={}, db_file=self.db_file,
+        )
+        self.control.metadata_store.update_execution_job(
+            "delete-1", "running", db_file=self.db_file
+        )
+        stale = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(
+            microsecond=0
+        ).isoformat()
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            conn.execute(
+                "UPDATE execution_jobs SET heartbeat_at = ? WHERE request_id = ?",
+                (stale, "delete-1"),
+            )
+
+        job, runtime_instance = self.control.metadata_store.claim_next_execution_job(
+            stale_seconds=1, db_file=self.db_file
+        )
+
+        stored = self.control.metadata_store.get_execution_job(
+            "delete-1", db_file=self.db_file
+        )
+        self.assertIsNone(job)
+        self.assertIsNone(runtime_instance)
+        self.assertEqual(stored["status"], "failed")
+        self.assertIn("manual confirmation", stored["error_summary"])
+        operation = self.control.metadata_store.list_operation_events(
+            1, db_file=self.db_file
+        )[0]
+        self.assertEqual(operation["request_id"], "delete-1")
+        self.assertEqual(operation["status"], "failed")
 
 
 if __name__ == "__main__":

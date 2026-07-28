@@ -21,6 +21,8 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.install_skill": "skill_install",
     "instance.refresh_devices": "device_pairing",
     "instance.approve_latest_device": "device_pairing",
+    "instance.delete": "delete",
+    "instance.restore": "restore",
     "instance.wechat_bind": "device_pairing",
 }
 

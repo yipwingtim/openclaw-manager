@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 
 from instance_adapters import EvoScientistDockerAdapter, OpenClawDockerAdapter
+from product_capabilities import execution_action_capability
 
 
 BASE_URL = os.environ.get(
@@ -130,6 +131,12 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
     request_id = job["request_id"]
     action = job["action"].removeprefix("instance.")
     try:
+        adapter = adapter_factory(instance["product"])
+        capability = execution_action_capability(job["action"])
+        if capability is None or not adapter.supports(capability):
+            raise ValueError(
+                f"instance product does not support {capability or job['action']}"
+            )
         if action == "wechat_bind":
             instance = control.get_runtime_instance(
                 job["instance_public_id"], job["actor_user_public_id"]
@@ -139,7 +146,6 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                 or instance.get("access_role") not in {"owner", "manager"}
             ):
                 raise ValueError("device pairing is not supported")
-            adapter = adapter_factory(instance["product"])
             if not adapter.status(instance).startswith("Up"):
                 raise ValueError("instance is not running")
             runtime_target = adapter.get_runtime_target(instance)
@@ -218,7 +224,6 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     )
         if action not in {"start", "stop", "restart"}:
             raise ValueError(f"unsupported execution action: {job['action']}")
-        adapter = adapter_factory(instance["product"])
         status = adapter.status(instance)
         if action == "start" and status.startswith("Up"):
             control.update(request_id, "succeeded", output="instance already running")

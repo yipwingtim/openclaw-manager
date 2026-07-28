@@ -9,6 +9,7 @@ COPY user_app.py .
 COPY admin_app.py .
 COPY web_common.py .
 COPY auth_providers.py .
+COPY product_capabilities.py .
 COPY control_client.py .
 COPY executor_client.py .
 COPY templates ./templates

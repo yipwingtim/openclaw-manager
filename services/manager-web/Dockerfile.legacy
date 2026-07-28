@@ -19,6 +19,7 @@ COPY auth_providers.py .
 COPY control_client.py .
 COPY instance_adapters.py .
 COPY metadata_store.py .
+COPY product_capabilities.py .
 COPY templates ./templates
 
 ENV FLASK_HOST=0.0.0.0

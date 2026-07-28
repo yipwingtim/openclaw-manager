@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from executor import ControlClient, get_adapter, resolve_instance_file
+from product_capabilities import product_supports
 
 
 app = Flask(__name__)
@@ -75,15 +76,25 @@ def file_payload(path, root_key, root):
     }
 
 
+def require_product_capability(instance, capability):
+    if product_supports(instance.get("product"), capability):
+        return None
+    label = capability.replace("_", " ")
+    return jsonify({"error": f"instance product does not support {label}"}), 400
+
+
 @app.get("/internal/v1/instances/<instance_public_id>/snapshot")
 def snapshot(instance_public_id):
     instance, error = runtime_instance(instance_public_id)
     if error:
         return error
+    unsupported = require_product_capability(instance, "status")
+    if unsupported:
+        return unsupported
     adapter = get_adapter(instance["product"])
     can_manage = instance.get("access_role") in {"owner", "manager", "admin"}
     files = []
-    if can_manage:
+    if can_manage and adapter.supports("file_download"):
         for root_key in ("workspace", "workspaces", "uploads"):
             root = resolve_instance_file(instance, root_key, ".")
             if root and root.is_dir():
@@ -93,11 +104,17 @@ def snapshot(instance_public_id):
                     if path.is_file() and path.suffix.lower() in DOWNLOAD_EXTENSIONS
                 )
     data_path = instance.get("data_path")
-    devices = Path(data_path) / "devices.txt" if data_path else None
+    devices = (
+        Path(data_path) / "devices.txt"
+        if data_path and adapter.supports("device_pairing")
+        else None
+    )
     return jsonify(
         {
             "status": adapter.status(instance),
-            "logs": adapter.logs(instance) if can_manage else "",
+            "logs": adapter.logs(instance)
+            if can_manage and adapter.supports("logs")
+            else "",
             "files": files,
             "devices": devices.read_text(encoding="utf-8", errors="ignore")
             if can_manage and devices and devices.is_file()
@@ -118,8 +135,11 @@ def device_action(instance_public_id, action):
         return error
     if instance.get("access_role") not in {"owner", "manager", "admin"}:
         return jsonify({"error": "device action is not allowed"}), 403
-    if action not in {"approve-latest", "refresh"} or instance["product"] != "openclaw":
+    if action not in {"approve-latest", "refresh"}:
         return jsonify({"error": "unsupported device action"}), 400
+    unsupported = require_product_capability(instance, "device_pairing")
+    if unsupported:
+        return unsupported
     user_id = instance.get("legacy_user_id")
     if not user_id:
         return jsonify({"error": "legacy user ID is required"}), 409
@@ -140,6 +160,9 @@ def upload_file(instance_public_id):
         return error
     if instance.get("access_role") not in {"owner", "manager", "admin"}:
         return jsonify({"error": "file upload is not allowed"}), 403
+    unsupported = require_product_capability(instance, "file_upload")
+    if unsupported:
+        return unsupported
     upload = request.files.get("file")
     filename = secure_filename(upload.filename) if upload else ""
     if not filename or Path(filename).suffix.lower() not in DOWNLOAD_EXTENSIONS:
@@ -160,6 +183,9 @@ def download_file(instance_public_id, root_key, relative_path):
         return error
     if instance.get("access_role") not in {"owner", "manager", "admin"}:
         return jsonify({"error": "file download is not allowed"}), 403
+    unsupported = require_product_capability(instance, "file_download")
+    if unsupported:
+        return unsupported
     target = resolve_instance_file(instance, root_key, relative_path)
     if target is None or not target.is_file() or target.suffix.lower() not in DOWNLOAD_EXTENSIONS:
         return jsonify({"error": "file not found"}), 404
@@ -173,6 +199,9 @@ def delete_file(instance_public_id, root_key, relative_path):
         return error
     if instance.get("access_role") not in {"owner", "manager", "admin"}:
         return jsonify({"error": "file deletion is not allowed"}), 403
+    unsupported = require_product_capability(instance, "file_delete")
+    if unsupported:
+        return unsupported
     target = resolve_instance_file(instance, root_key, relative_path)
     if (
         target is None or not target.is_file() or "/" in relative_path

@@ -1080,6 +1080,109 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(operation["action"], "instance.install_skill")
         self.assertEqual(operation["message"], "skill=weather@1.0")
 
+    def test_device_job_records_audit_on_success(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "devices-success",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.refresh_devices",
+            "params": {},
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            self.control.create_execution_job()
+        self.control.metadata_store.update_execution_job(
+            "devices-success", "running", db_file=self.db_file
+        )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(
+            self.control.request,
+            "get_json",
+            return_value={"status": "succeeded", "output": "refreshed"},
+        ):
+            response, status = response_parts(
+                self.control.update_execution_job("devices-success")
+            )
+        self.assertEqual(status, 200)
+        operation = self.control.metadata_store.list_operation_events(
+            1, db_file=self.db_file
+        )[0]
+        self.assertEqual(operation["action"], "instance.refresh_devices")
+        self.assertEqual(operation["message"], "device cache refreshed")
+
+    def test_latest_device_approval_rejects_an_active_job(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "devices-approve-1",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.approve_latest_device",
+            "params": {},
+        }
+        headers = {"Authorization": "Bearer admin-token"}
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            _, first_status = response_parts(self.control.create_execution_job())
+        payload["request_id"] = "devices-approve-2"
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            second, second_status = response_parts(self.control.create_execution_job())
+
+        self.assertEqual(first_status, 200)
+        self.assertEqual(second_status, 409)
+        self.assertEqual(
+            second.get_json(),
+            {"error": "approve_latest_device is already running"},
+        )
+
+    def test_latest_device_approval_without_pending_request_is_audit_skipped(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="devices-none", actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"],
+            action="instance.approve_latest_device", params={}, db_file=self.db_file,
+        )
+        self.control.metadata_store.update_execution_job(
+            "devices-none", "running", db_file=self.db_file
+        )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(
+            self.control.request, "get_json",
+            return_value={"status": "succeeded", "output": "No pending device request found."},
+        ):
+            _, status = response_parts(self.control.update_execution_job("devices-none"))
+
+        operation = self.control.metadata_store.list_operation_events(
+            1, db_file=self.db_file
+        )[0]
+        self.assertEqual(status, 200)
+        self.assertEqual(operation["status"], "skipped")
+        self.assertEqual(operation["message"], "No pending device request found.")
+
     def test_executor_updates_job_and_admin_reads_current_state(self):
         self.control.metadata_store.set_user_role(
             self.user["id"],

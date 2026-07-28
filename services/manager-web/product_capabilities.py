@@ -19,6 +19,8 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.set_basic_auth": "basic_auth",
     "instance.update_version": "update_version",
     "instance.install_skill": "skill_install",
+    "instance.refresh_devices": "device_pairing",
+    "instance.approve_latest_device": "device_pairing",
     "instance.wechat_bind": "device_pairing",
 }
 

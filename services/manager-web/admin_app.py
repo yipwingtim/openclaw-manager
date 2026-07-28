@@ -202,5 +202,35 @@ def install_skill(instance_public_id):
     return redirect(url_for("instances", result=f"Skill install queued: {skill_id}"))
 
 
+@app.post("/admin/instances/<instance_public_id>/devices")
+def devices(instance_public_id):
+    current = web_common.actor()
+    action = request.form.get("action", "")
+    if (
+        not current
+        or current["role"] != "admin"
+        or action not in {"refresh", "approve_latest"}
+    ):
+        return render_template("error.html", message="Forbidden"), 403
+    execution_action = (
+        "instance.refresh_devices"
+        if action == "refresh"
+        else "instance.approve_latest_device"
+    )
+    try:
+        control_client.create_execution_job(
+            {
+                "request_id": str(uuid.uuid4()),
+                "actor_user_public_id": current["public_id"],
+                "instance_public_id": instance_public_id,
+                "action": execution_action,
+                "params": {},
+            }
+        )
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    return redirect(url_for("instances", result=f"Device {action} task queued"))
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

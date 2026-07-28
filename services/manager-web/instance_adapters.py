@@ -407,6 +407,68 @@ class OpenClawDockerAdapter:
         rollback_output = self._restore_skills(skills_dir, backup_dir)
         return code, f"{output.strip()}\n{rollback_output}".strip()
 
+    def refresh_devices(self, instance, timeout=60):
+        return self._run_device_command(
+            [
+                str(self.manager_dir / "scripts" / "approve_device.sh"),
+                self.get_legacy_user_id(instance),
+                "--list-only",
+            ],
+            instance,
+            timeout,
+        )
+
+    def approve_latest_device(self, instance, request_id, timeout=120):
+        return self._run_device_command(
+            [
+                str(self.manager_dir / "scripts" / "approve_device.sh"),
+                self.get_legacy_user_id(instance),
+                "--latest",
+            ],
+            instance,
+            timeout,
+            env={
+                "OPENCLAW_EXECUTION_REQUEST_ID": request_id,
+            },
+        )
+
+    def _run_device_command(self, command, instance, timeout, env=None):
+        process = None
+        previous_sigterm = None
+        if threading.current_thread() is threading.main_thread():
+            def interrupt_device_action(signum, frame):
+                raise SystemExit(128 + signum)
+
+            previous_sigterm = signal.signal(signal.SIGTERM, interrupt_device_action)
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.manager_dir),
+                env={
+                    **os.environ,
+                    **(env or {}),
+                    "OPENCLAW_RUNTIME_TARGET": self.get_runtime_target(instance),
+                },
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            output, _ = process.communicate(timeout=timeout)
+            return process.returncode, output.strip()
+        except BaseException:
+            if process is not None and process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+            raise
+        finally:
+            if previous_sigterm is not None:
+                signal.signal(signal.SIGTERM, previous_sigterm)
+
     def _validate_skill_install(self, runtime_target, skill_id):
         info_code, info_output = self.run_command(
             [

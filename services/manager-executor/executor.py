@@ -255,6 +255,30 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     output=output,
                 )
             return True
+        if action == "install_skill":
+            control.update(request_id, "running", current_step="installing skill")
+            if not adapter.status(instance).startswith("Up"):
+                control.update(
+                    request_id,
+                    "failed",
+                    error_summary="instance is not running",
+                    output="Skill installation requires a running instance.",
+                )
+                return True
+            code, output = adapter.install_skill(
+                instance, job["params"]["skill_id"], request_id=request_id
+            )
+            output = output[-MAX_OUTPUT_LENGTH:]
+            if code == 0:
+                control.update(request_id, "succeeded", output=output)
+            else:
+                control.update(
+                    request_id,
+                    "failed",
+                    error_summary="skill installation failed",
+                    output=output,
+                )
+            return True
         if action not in {"start", "stop", "restart"}:
             raise ValueError(f"unsupported execution action: {job['action']}")
         status = adapter.status(instance)

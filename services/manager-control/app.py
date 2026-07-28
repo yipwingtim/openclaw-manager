@@ -31,6 +31,7 @@ TOKEN_ENV = {
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 JOB_STATUSES = {
     "queued",
     "running",
@@ -46,6 +47,7 @@ JOB_ACTION_PARAMS = {
     "instance.restart": {"reason"},
     "instance.set_basic_auth": {"enabled"},
     "instance.update_version": {"version", "restore_model_provider"},
+    "instance.install_skill": {"skill_id"},
     "instance.wechat_bind": set(),
 }
 
@@ -401,7 +403,7 @@ def admin_instances():
                     "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
                     "capabilities": sorted(
                         capability
-                        for capability in ("basic_auth", "update_version")
+                        for capability in ("basic_auth", "update_version", "skill_install")
                         if product_supports(instance["product"], capability)
                     ),
                 }
@@ -678,6 +680,15 @@ def create_execution_job():
         params.get("restore_model_provider"), bool
     ):
         return jsonify({"error": "restore_model_provider must be a boolean"}), 400
+    if action == "instance.install_skill":
+        skill_id = params.get("skill_id")
+        presets = {
+            value.strip()
+            for value in re.split(r"[,\n]", os.environ.get("MANAGER_SKILL_PRESETS", ""))
+            if value.strip() and SKILL_ID_RE.fullmatch(value.strip())
+        }
+        if not isinstance(skill_id, str) or skill_id not in presets:
+            return jsonify({"error": "invalid or unconfigured skill preset"}), 400
     if not isinstance(instance_public_id, str) or not instance_public_id:
         return jsonify({"error": "instance_public_id is required"}), 400
     actor = metadata_store.get_user_by_public_id(
@@ -896,14 +907,19 @@ def update_execution_job(request_id):
             if (
                 status in {"succeeded", "failed"}
                 and job["action"]
-                in {"instance.set_basic_auth", "instance.update_version"}
+                in {
+                    "instance.set_basic_auth",
+                    "instance.update_version",
+                    "instance.install_skill",
+                }
             ):
                 params = json.loads(job["params_json"])
-                message = (
-                    f"Basic Auth {'enabled' if params['enabled'] else 'disabled'}"
-                    if job["action"] == "instance.set_basic_auth"
-                    else f"version={params['version']}"
-                )
+                if job["action"] == "instance.set_basic_auth":
+                    message = f"Basic Auth {'enabled' if params['enabled'] else 'disabled'}"
+                elif job["action"] == "instance.update_version":
+                    message = f"version={params['version']}"
+                else:
+                    message = f"skill={params['skill_id']}"
                 metadata_store.record_operation(
                     request_id=request_id,
                     actor_user_id=job["actor_user_id"],

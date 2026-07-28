@@ -1030,6 +1030,56 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(invalid_status, 400)
         self.assertEqual(invalid.get_json(), {"error": "invalid version"})
 
+    def test_skill_job_rejects_unconfigured_preset(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "skill-invalid", "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"], "action": "instance.install_skill",
+            "params": {"skill_id": "untrusted"},
+        }
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer admin-token"}), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ), patch.dict(os.environ, {"MANAGER_SKILL_PRESETS": "weather@1.0"}):
+            invalid, invalid_status = response_parts(self.control.create_execution_job())
+        self.assertEqual(invalid_status, 400)
+        self.assertEqual(invalid.get_json(), {"error": "invalid or unconfigured skill preset"})
+
+    def test_skill_job_records_audit_on_success(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "skill-success", "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"], "action": "instance.install_skill",
+            "params": {"skill_id": "weather@1.0"},
+        }
+        headers = {"Authorization": "Bearer admin-token"}
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ), patch.dict(os.environ, {"MANAGER_SKILL_PRESETS": "weather@1.0"}):
+            self.control.create_execution_job()
+        self.control.metadata_store.update_execution_job(
+            "skill-success", "running", db_file=self.db_file
+        )
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer executor-token"}), patch.object(
+            self.control.request, "get_json", return_value={"status": "succeeded", "output": "installed"}
+        ):
+            response, status = response_parts(self.control.update_execution_job("skill-success"))
+        self.assertEqual(status, 200)
+        operation = self.control.metadata_store.list_operation_events(1, db_file=self.db_file)[0]
+        self.assertEqual(operation["action"], "instance.install_skill")
+        self.assertEqual(operation["message"], "skill=weather@1.0")
+
     def test_executor_updates_job_and_admin_reads_current_state(self):
         self.control.metadata_store.set_user_role(
             self.user["id"],

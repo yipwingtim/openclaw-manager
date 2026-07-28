@@ -1,11 +1,12 @@
 import importlib.util
+import hashlib
 import os
 import subprocess
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -172,6 +173,108 @@ class AdapterInstanceModelTests(unittest.TestCase):
             child_pid = int(child_pid_file.read_text(encoding="utf-8"))
             with self.assertRaises(ProcessLookupError):
                 os.kill(child_pid, 0)
+
+    def test_install_skill_uses_resolved_runtime_target(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            (root / "public" / "users" / "alice" / "skills").mkdir(parents=True)
+            with patch("subprocess.Popen") as process:
+                process.return_value.communicate.return_value = ("installed\n", None)
+                process.return_value.returncode = 0
+                process.return_value.poll.return_value = 0
+                result = adapter.install_skill(
+                    {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
+                    "weather@1.0",
+                    request_id="skill-1",
+                )
+            command = process.call_args.args[0]
+            self.assertEqual(result, (0, "installed"))
+            self.assertEqual(
+                command,
+                [
+                    "docker", "exec", "openclaw_alice", "timeout", "180s",
+                    "openclaw", "skills", "install", "weather@1.0",
+                ],
+            )
+            self.assertTrue(process.call_args.kwargs["start_new_session"])
+            self.assertEqual(
+                process.return_value.communicate.call_args.kwargs["timeout"], 190
+            )
+
+    def test_install_skill_restores_skill_data_on_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            skills = root / "public" / "users" / "alice" / "skills"
+            skills.mkdir(parents=True)
+            (skills / "existing.txt").write_text("old", encoding="utf-8")
+
+            process = subprocess.CompletedProcess([], 1, "failed", "")
+            def popen(*args, **kwargs):
+                (skills / "existing.txt").write_text("changed", encoding="utf-8")
+                (skills / "new.txt").write_text("partial", encoding="utf-8")
+                mock = Mock()
+                mock.communicate.return_value = ("failed", None)
+                mock.returncode = process.returncode
+                return mock
+
+            with patch("subprocess.Popen", side_effect=popen):
+                code, output = adapter.install_skill(
+                    {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
+                    "weather@1.0",
+                    request_id="skill-failed",
+                )
+
+            self.assertEqual(code, 1)
+            self.assertEqual((skills / "existing.txt").read_text(), "old")
+            self.assertFalse((skills / "new.txt").exists())
+            self.assertIn("Skill data restored", output)
+
+    def test_install_skill_reuses_original_snapshot_after_interruption(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            skills = root / "public" / "users" / "alice" / "skills"
+            skills.mkdir(parents=True)
+            (skills / "existing.txt").write_text("old", encoding="utf-8")
+            instance = {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"}
+
+            process = Mock()
+            process.communicate.return_value = ("installed", None)
+            process.returncode = 0
+            process.poll.return_value = 0
+            with patch("subprocess.Popen", return_value=process):
+                adapter.install_skill(instance, "weather@1.0", request_id="skill-retry")
+
+            (skills / "existing.txt").write_text("partial", encoding="utf-8")
+            with patch("subprocess.Popen", return_value=process):
+                adapter.install_skill(instance, "weather@1.0", request_id="skill-retry")
+
+            snapshot_key = hashlib.sha256(b"skill-retry").hexdigest()
+            failed = root / "public" / "users" / "alice" / "backups" / "skill-installs" / snapshot_key / "failed-install-data"
+            self.assertEqual((failed / "existing.txt").read_text(), "partial")
+            self.assertEqual((skills / "existing.txt").read_text(), "old")
+
+    def test_install_skill_hashes_request_id_for_snapshot_path(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            skills = root / "public" / "users" / "alice" / "skills"
+            skills.mkdir(parents=True)
+            process = Mock()
+            process.communicate.return_value = ("installed", None)
+            process.returncode = 0
+            process.poll.return_value = 0
+            with patch("subprocess.Popen", return_value=process):
+                adapter.install_skill(
+                    {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
+                    "weather@1.0",
+                    request_id="..",
+                )
+            snapshot_root = skills.parent / "backups" / "skill-installs"
+            self.assertTrue((snapshot_root / hashlib.sha256(b"..").hexdigest()).is_dir())
+            self.assertFalse((skills.parent / "backups" / "skills").exists())
 
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:

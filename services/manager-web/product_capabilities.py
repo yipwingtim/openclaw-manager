@@ -3,7 +3,7 @@ PRODUCT_CAPABILITIES = {
         {
             "status", "logs", "start", "stop", "restart", "create",
             "batch_create", "delete", "restore", "update_version",
-            "batch_set_model_provider", "basic_auth", "dashboard", "access",
+            "batch_set_model_provider", "basic_auth", "skill_install", "dashboard", "access",
             "device_pairing", "file_upload", "file_download", "file_delete",
         }
     ),
@@ -18,6 +18,7 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.restart": "restart",
     "instance.set_basic_auth": "basic_auth",
     "instance.update_version": "update_version",
+    "instance.install_skill": "skill_install",
     "instance.wechat_bind": "device_pairing",
 }
 

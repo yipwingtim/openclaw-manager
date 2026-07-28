@@ -81,6 +81,65 @@ class AdapterInstanceModelTests(unittest.TestCase):
             run.assert_called_once_with(["docker", "start", "openclaw.project-1"], timeout=90)
             enable_nginx.assert_not_called()
 
+    def test_set_basic_auth_restores_nginx_config_when_reload_fails(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            conf = root / "nginx" / "conf" / "alice.conf"
+            conf.parent.mkdir(parents=True)
+            conf.write_text("original", encoding="utf-8")
+
+            def update_config(*args, **kwargs):
+                conf.write_text("changed", encoding="utf-8")
+                return 0, "updated"
+
+            with patch.object(
+                adapter, "run_command", side_effect=update_config
+            ) as run, patch.object(
+                adapter,
+                "reload_nginx",
+                side_effect=[(1, "nginx test failed"), (0, "restored")],
+            ) as reload_nginx:
+                code, output = adapter.set_basic_auth(
+                    {"legacy_user_id": "alice"}, False
+                )
+
+            self.assertEqual(code, 1)
+            self.assertEqual(conf.read_text(encoding="utf-8"), "original")
+            self.assertIn("Restored Nginx config", output)
+            self.assertEqual(reload_nginx.call_count, 2)
+            self.assertEqual(
+                run.call_args.kwargs["env"]["OPENCLAW_SKIP_METADATA_WRITE"], "1"
+            )
+            self.assertEqual(
+                run.call_args.kwargs["env"]["OPENCLAW_SKIP_HTPASSWD_PERMISSIONS"],
+                "1",
+            )
+
+    def test_set_basic_auth_restores_nginx_config_when_reload_raises(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            conf = root / "nginx" / "conf" / "alice.conf"
+            conf.parent.mkdir(parents=True)
+            conf.write_text("original", encoding="utf-8")
+
+            def update_config(*args, **kwargs):
+                conf.write_text("changed", encoding="utf-8")
+                return 0, "updated"
+
+            with patch.object(
+                adapter, "run_command", side_effect=update_config
+            ), patch.object(
+                adapter,
+                "reload_nginx",
+                side_effect=[subprocess.TimeoutExpired("nginx", 30), (0, "restored")],
+            ):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    adapter.set_basic_auth({"legacy_user_id": "alice"}, True)
+
+            self.assertEqual(conf.read_text(encoding="utf-8"), "original")
+
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
@@ -95,6 +154,10 @@ class AdapterInstanceModelTests(unittest.TestCase):
         self.assertEqual(
             execution_action_capability("instance.wechat_bind"),
             "device_pairing",
+        )
+        self.assertEqual(
+            execution_action_capability("instance.set_basic_auth"),
+            "basic_auth",
         )
         self.assertIsNone(execution_action_capability("shell.run"))
 

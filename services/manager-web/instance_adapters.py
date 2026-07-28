@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -39,10 +40,11 @@ class OpenClawDockerAdapter:
     def user_dir(self, user_id):
         return self.public_dir / "users" / user_id
 
-    def run_command(self, command, timeout=30, cwd=None):
+    def run_command(self, command, timeout=30, cwd=None, env=None):
         result = subprocess.run(
             command,
             cwd=str(cwd or self.manager_dir),
+            env=env,
             text=True,
             capture_output=True,
             timeout=timeout,
@@ -204,6 +206,51 @@ class OpenClawDockerAdapter:
 
     def restart(self, instance):
         return self.run_command(["docker", "restart", self.get_runtime_target(instance)], timeout=90)
+
+    def set_basic_auth(self, instance, enabled):
+        user_id = self.get_legacy_user_id(instance)
+        nginx_conf = self.nginx_active_user_conf(user_id)
+        if not nginx_conf.is_file():
+            return 1, f"Nginx config not found: {nginx_conf}"
+        backup = nginx_conf.read_bytes()
+        try:
+            code, output = self.run_command(
+                [
+                    str(self.manager_dir / "scripts" / "set_basic_auth.sh"),
+                    "true" if enabled else "false",
+                    user_id,
+                ],
+                timeout=30,
+                env={
+                    **os.environ,
+                    "OPENCLAW_SKIP_METADATA_WRITE": "1",
+                    "OPENCLAW_SKIP_HTPASSWD_PERMISSIONS": "1",
+                },
+            )
+        except Exception:
+            nginx_conf.write_bytes(backup)
+            raise
+        if code != 0:
+            nginx_conf.write_bytes(backup)
+            return code, output
+        try:
+            reload_code, reload_output = self.reload_nginx()
+        except Exception:
+            nginx_conf.write_bytes(backup)
+            try:
+                self.reload_nginx()
+            except Exception:
+                pass
+            raise
+        combined = "\n".join(part for part in (output, reload_output) if part)
+        if reload_code == 0:
+            return 0, combined
+        nginx_conf.write_bytes(backup)
+        rollback_code, rollback_output = self.reload_nginx()
+        rollback_note = "\nRestored Nginx config."
+        if rollback_code != 0:
+            rollback_note += f"\nRollback reload failed:\n{rollback_output}"
+        return reload_code, f"{combined}{rollback_note}"
 
     def create(self, user_id, basic_auth_enabled, basic_auth_password="", skip_nginx_reload=True, timeout=420):
         command = [

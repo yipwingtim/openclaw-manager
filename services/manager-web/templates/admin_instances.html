@@ -10,12 +10,24 @@
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
   <div class="surface table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>操作</th></tr></thead>
+      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>Basic Auth</th><th>操作</th></tr></thead>
       <tbody>
       {% for instance in instances %}
         <tr>
           <td>{{ instance.instance_name }} <span class="muted-small">{{ instance.legacy_user_id or instance.public_id }}</span></td>
           <td>{{ instance.product }}</td><td>{{ instance.status }}</td>
+          <td>
+            {% if "basic_auth" in instance.capabilities %}
+              <form method="post" action="/admin/instances/{{ instance.public_id }}/basic-auth" class="d-flex gap-2 align-items-center">
+                <span>{{ "已启用" if instance.basic_auth_enabled else "已禁用" }}</span>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="enabled" value="{{ 'false' if instance.basic_auth_enabled else 'true' }}">
+                <button class="btn btn-sm btn-oc-outline" type="submit">{{ "禁用" if instance.basic_auth_enabled else "启用" }}</button>
+              </form>
+            {% else %}
+              <span class="muted-small">不支持</span>
+            {% endif %}
+          </td>
           <td><form method="post" action="/admin/instances/{{ instance.public_id }}/lifecycle" class="d-flex gap-2">
             {% for action in ["start", "stop", "restart"] %}<button class="btn btn-sm btn-oc-outline" name="action" value="{{ action }}">{{ action }}</button>{% endfor %}
           </form></td>

@@ -222,6 +222,20 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                         ],
                         capture_output=True, timeout=10, check=False,
                     )
+        if action == "set_basic_auth":
+            control.update(request_id, "running", current_step="updating Basic Auth")
+            code, output = adapter.set_basic_auth(instance, job["params"]["enabled"])
+            output = output[-MAX_OUTPUT_LENGTH:]
+            if code == 0:
+                control.update(request_id, "succeeded", output=output)
+            else:
+                control.update(
+                    request_id,
+                    "failed",
+                    error_summary="Basic Auth update failed",
+                    output=output,
+                )
+            return True
         if action not in {"start", "stop", "restart"}:
             raise ValueError(f"unsupported execution action: {job['action']}")
         status = adapter.status(instance)

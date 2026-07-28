@@ -41,6 +41,7 @@ def load_admin_app():
 
     control_client.ControlError = ControlError
     control_client.get_admin_metadata = lambda: {}
+    control_client.create_execution_job = lambda payload: payload
     web_common = types.ModuleType("web_common")
     web_common.SESSION_SECRET = "test"
     web_common.require_internal_token = lambda: None
@@ -82,6 +83,34 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(context["counts"], {})
         self.assertEqual(context["instances"], [])
         self.assertEqual(context["operations"], [])
+
+    def test_admin_basic_auth_queues_structured_boolean_action(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {"enabled": "false"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "create_execution_job"
+        ) as create_job:
+            response = self.admin.basic_auth("instance-1")
+
+        payload = create_job.call_args.args[0]
+        self.assertEqual(payload["instance_public_id"], "instance-1")
+        self.assertEqual(payload["action"], "instance.set_basic_auth")
+        self.assertEqual(payload["params"], {"enabled": False})
+        self.assertNotIn("legacy_user_id", payload)
+        self.assertEqual(response, "instances")
+
+    def test_admin_basic_auth_redirects_control_error(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {"enabled": "true"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client,
+            "create_execution_job",
+            side_effect=self.admin.control_client.ControlError("control unavailable"),
+        ), patch.object(self.admin, "url_for", return_value="error-url") as url_for:
+            response = self.admin.basic_auth("instance-1")
+
+        self.assertEqual(response, "error-url")
+        url_for.assert_called_once_with("instances", error="control unavailable")
 
 
 if __name__ == "__main__":

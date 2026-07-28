@@ -43,7 +43,13 @@ class WebServiceSplitTests(unittest.TestCase):
         executor_api_block = compose.split("  manager-executor-api:\n", 1)[1].split(
             "  manager-user-web:\n", 1
         )[0]
+        executor_block = compose.split("  manager-executor:\n", 1)[1].split(
+            "  manager-executor-api:\n", 1
+        )[0]
+        self.assertIn("NGINX_AUTH_DIR", executor_block)
+        self.assertIn("NGINX_AUTH_DIR:-/data/docker/nginx/auth}:ro", executor_block)
         self.assertIn("healthcheck:", executor_api_block)
+        self.assertNotIn("NGINX_AUTH_DIR", executor_api_block)
         self.assertNotIn("NGINX_USERS_CONF_DIR", executor_api_block)
 
     def test_split_web_entrypoints_do_not_access_metadata_or_runtime(self):

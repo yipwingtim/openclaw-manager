@@ -1207,6 +1207,78 @@ class ManagerControlApiTests(unittest.TestCase):
             "device-batch-invalid", db_file=self.db_file
         ))
 
+    def test_admin_action_batch_creates_lifecycle_and_skill_children(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instances = [
+            self.control.metadata_store.create_instance(
+                owner_public_id=self.user["public_id"], product="openclaw",
+                instance_name=name, runtime_identifier=runtime, db_file=self.db_file,
+            )
+            for name, runtime in (("One", "openclaw_one"), ("Two", "openclaw_two"))
+        ]
+        instance_ids = [item["public_id"] for item in instances]
+        headers = {"Authorization": "Bearer admin-token"}
+        lifecycle = {
+            "request_id": "action-batch-start", "actor_user_public_id": self.user["public_id"],
+            "action": "start", "instance_public_ids": instance_ids,
+        }
+        skill = {
+            **lifecycle, "request_id": "action-batch-skill", "action": "install_skill",
+            "skill_id": "weather@1.0",
+        }
+        with patch.dict(self.control.os.environ, {"MANAGER_SKILL_PRESETS": "weather@1.0"}), \
+             patch.object(self.control.request, "headers", headers), \
+             patch.object(self.control.request, "get_json", side_effect=[lifecycle, lifecycle, skill]):
+            started, started_status = response_parts(self.control.create_action_batch())
+            repeated, repeated_status = response_parts(self.control.create_action_batch())
+            installed, installed_status = response_parts(self.control.create_action_batch())
+
+        self.assertEqual(started_status, 200)
+        self.assertEqual(repeated_status, 200)
+        self.assertEqual(repeated.get_json(), started.get_json())
+        self.assertEqual(installed_status, 200)
+        self.assertTrue(all(
+            child["action"] == "instance.start" and child["params"] == {}
+            for child in started.get_json()["children"]
+        ))
+        self.assertTrue(all(
+            child["action"] == "instance.install_skill"
+            and child["params"] == {"skill_id": "weather@1.0"}
+            for child in installed.get_json()["children"]
+        ))
+        with patch.object(self.control.request, "headers", headers):
+            fetched, fetched_status = response_parts(
+                self.control.get_action_batch("action-batch-start")
+            )
+        self.assertEqual(fetched_status, 200)
+        self.assertEqual(fetched.get_json(), started.get_json())
+
+    def test_admin_action_batch_rejects_invalid_target_atomically(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="One", runtime_identifier="openclaw_one", db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "action-batch-invalid",
+            "actor_user_public_id": self.user["public_id"], "action": "stop",
+            "instance_public_ids": [instance["public_id"], "missing-instance"],
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_action_batch())
+
+        self.assertEqual(status, 409)
+        self.assertIn("instance not found", response.get_json()["error"])
+        self.assertIsNone(self.control.metadata_store.get_execution_job(
+            "action-batch-invalid", db_file=self.db_file
+        ))
+
     def test_retention_jobs_validate_state_and_block_other_instance_jobs(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

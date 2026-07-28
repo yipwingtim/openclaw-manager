@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import signal
 import shutil
@@ -340,6 +341,11 @@ class OpenClawDockerAdapter:
 
     def install_skill(self, instance, skill_id, request_id, timeout=180):
         runtime_target = self.get_runtime_target(instance)
+        validation_code, validation_output = self._validate_skill_install(
+            runtime_target, skill_id
+        )
+        if validation_code != 0:
+            return validation_code, validation_output
         user_dir = self.user_dir(self.get_legacy_user_id(instance))
         skills_dir = user_dir / "skills"
         backup_parent = user_dir / "backups" / "skill-installs"
@@ -400,6 +406,59 @@ class OpenClawDockerAdapter:
             return code, output.strip()
         rollback_output = self._restore_skills(skills_dir, backup_dir)
         return code, f"{output.strip()}\n{rollback_output}".strip()
+
+    def _validate_skill_install(self, runtime_target, skill_id):
+        info_code, info_output = self.run_command(
+            [
+                "docker", "exec", runtime_target, "openclaw", "skills",
+                "info", skill_id, "--json",
+            ],
+            timeout=30,
+        )
+        if info_code == 0:
+            try:
+                info = json.loads(info_output)
+            except json.JSONDecodeError:
+                return 1, "Skill info returned invalid JSON; installation refused."
+            if info.get("source") == "openclaw-bundled" or info.get("bundled") is True:
+                missing = info.get("missing") or {}
+                requirements = ", ".join(
+                    str(value)
+                    for values in missing.values()
+                    if isinstance(values, list)
+                    for value in values
+                )
+                suffix = f" Missing requirements: {requirements}." if requirements else ""
+                return 1, f"Skill is already bundled; installation refused.{suffix}"
+
+        search_code, search_output = self.run_command(
+            [
+                "docker", "exec", runtime_target, "openclaw", "skills",
+                "search", skill_id, "--json", "--limit", "100",
+            ],
+            timeout=30,
+        )
+        if search_code != 0:
+            return 1, f"Could not verify Skill uniqueness:\n{search_output}"
+        try:
+            results = json.loads(search_output).get("results", [])
+        except (AttributeError, json.JSONDecodeError):
+            return 1, "Skill search returned invalid JSON; installation refused."
+        candidates = [
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("slug") == skill_id
+        ]
+        references = [
+            result.get("install", {}).get("reference")
+            for result in candidates
+            if isinstance(result.get("install"), dict)
+            and result["install"].get("reference")
+        ]
+        if len(candidates) != 1 or len(references) != 1:
+            detail = ", ".join(sorted(references)) or "no exact candidate"
+            return 1, f"Skill slug is ambiguous or unavailable ({detail}); installation refused."
+        return 0, f"Verified unique Skill source: {references[0]}"
 
     def _restore_skills(self, skills_dir, backup_dir):
         staging = Path(tempfile.mkdtemp(prefix="restore-", dir=skills_dir.parent))

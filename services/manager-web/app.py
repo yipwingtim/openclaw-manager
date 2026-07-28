@@ -1934,7 +1934,7 @@ def _save_uploaded_file_atomic(uploaded, filename, resolved_upload_dir):
             else:
                 try:
                     out_fp.close()
-                except OSError:
+                except Exception:
                     pass
             fd = None
             try:

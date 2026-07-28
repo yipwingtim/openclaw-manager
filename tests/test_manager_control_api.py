@@ -896,6 +896,82 @@ class ManagerControlApiTests(unittest.TestCase):
             [],
         )
 
+    def test_basic_auth_job_requires_boolean_and_updates_metadata_on_success(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "basic-auth-1",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.set_basic_auth",
+            "params": {"enabled": False},
+        }
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            created, created_status = response_parts(
+                self.control.create_execution_job()
+            )
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer executor-token"},
+        ):
+            claimed, claimed_status = response_parts(
+                self.control.claim_execution_job()
+            )
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer executor-token"},
+        ), patch.object(
+            self.control.request,
+            "get_json",
+            return_value={"status": "succeeded", "output": "disabled"},
+        ):
+            updated, updated_status = response_parts(
+                self.control.update_execution_job("basic-auth-1")
+            )
+
+        self.assertEqual(created_status, 200)
+        self.assertEqual(created.get_json()["job"]["params"], {"enabled": False})
+        self.assertEqual(claimed_status, 200)
+        self.assertEqual(updated_status, 200)
+        stored = self.control.metadata_store.get_instance_by_public_id(
+            instance["public_id"], db_file=self.db_file
+        )
+        self.assertFalse(stored["basic_auth_enabled"])
+        operation = self.control.metadata_store.list_operation_events(
+            1, db_file=self.db_file
+        )[0]
+        self.assertEqual(operation["request_id"], "basic-auth-1")
+        self.assertEqual(operation["action"], "instance.set_basic_auth")
+        self.assertEqual(operation["status"], "success")
+        self.assertEqual(operation["message"], "Basic Auth disabled")
+
+        payload["request_id"] = "basic-auth-invalid"
+        payload["params"] = {"enabled": "false"}
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            invalid, invalid_status = response_parts(
+                self.control.create_execution_job()
+            )
+        self.assertEqual(invalid_status, 400)
+        self.assertEqual(invalid.get_json(), {"error": "enabled must be a boolean"})
+
     def test_executor_updates_job_and_admin_reads_current_state(self):
         self.control.metadata_store.set_user_role(
             self.user["id"],

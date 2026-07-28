@@ -43,6 +43,7 @@ JOB_ACTION_PARAMS = {
     "instance.start": set(),
     "instance.stop": set(),
     "instance.restart": {"reason"},
+    "instance.set_basic_auth": {"enabled"},
     "instance.wechat_bind": set(),
 }
 
@@ -394,6 +395,12 @@ def admin_instances():
                     "instance_name": instance["instance_name"],
                     "status": instance["status"],
                     "access_url": instance.get("access_url"),
+                    "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
+                    "capabilities": sorted(
+                        capability
+                        for capability in ("basic_auth",)
+                        if product_supports(instance["product"], capability)
+                    ),
                 }
                 for instance in instances
             ]
@@ -655,6 +662,10 @@ def create_execution_job():
         not isinstance(params["reason"], str) or len(params["reason"]) > 500
     ):
         return jsonify({"error": "reason must be a string of at most 500 characters"}), 400
+    if action == "instance.set_basic_auth" and not isinstance(
+        params.get("enabled"), bool
+    ):
+        return jsonify({"error": "enabled must be a boolean"}), 400
     if not isinstance(instance_public_id, str) or not instance_public_id:
         return jsonify({"error": "instance_public_id is required"}), 400
     actor = metadata_store.get_user_by_public_id(
@@ -845,14 +856,40 @@ def update_execution_job(request_id):
         if value is not None and not isinstance(value, str):
             return jsonify({"error": f"{field} must be a string"}), 400
     try:
-        metadata_store.update_execution_job(
-            request_id,
-            status,
-            current_step=payload.get("current_step"),
-            error_summary=payload.get("error_summary"),
-            output=payload.get("output"),
-            db_file=DB_FILE,
-        )
+        with metadata_store.connect(DB_FILE) as conn:
+            job = metadata_store.get_execution_job(request_id, conn=conn)
+            if job is None:
+                raise ValueError("execution job not found")
+            metadata_store.update_execution_job(
+                request_id,
+                status,
+                current_step=payload.get("current_step"),
+                error_summary=payload.get("error_summary"),
+                output=payload.get("output"),
+                conn=conn,
+            )
+            if status == "succeeded" and job["action"] == "instance.set_basic_auth":
+                enabled = json.loads(job["params_json"])["enabled"]
+                metadata_store.set_instance_basic_auth(
+                    job["instance_public_id"],
+                    enabled,
+                    conn=conn,
+                )
+            if (
+                status in {"succeeded", "failed"}
+                and job["action"] == "instance.set_basic_auth"
+            ):
+                enabled = json.loads(job["params_json"])["enabled"]
+                metadata_store.record_operation(
+                    request_id=request_id,
+                    actor_user_id=job["actor_user_id"],
+                    instance_id=job["instance_id"],
+                    source_service="manager-executor",
+                    action=job["action"],
+                    status="success" if status == "succeeded" else "failed",
+                    message=f"Basic Auth {'enabled' if enabled else 'disabled'}",
+                    conn=conn,
+                )
     except ValueError as exc:
         status_code = 404 if "not found" in str(exc) else 409
         return jsonify({"error": str(exc)}), status_code

@@ -55,7 +55,9 @@ for user_id in "$@"; do
       echo "  htpasswd '$user_htpasswd_file' '$user_id'" >&2
       exit 1
     fi
-    ensure_nginx_htpasswd_permissions "$user_htpasswd_file"
+    if [ "${OPENCLAW_SKIP_HTPASSWD_PERMISSIONS:-0}" != "1" ]; then
+      ensure_nginx_htpasswd_permissions "$user_htpasswd_file"
+    fi
   fi
 
   python3 - "$nginx_conf" "$BASIC_AUTH_ENABLED" "$user_htpasswd_file_in_container" <<'PY'

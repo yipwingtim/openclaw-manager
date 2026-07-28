@@ -118,5 +118,31 @@ def lifecycle(instance_public_id):
     return redirect(url_for("instances", result=f"{action} task queued"))
 
 
+@app.post("/admin/instances/<instance_public_id>/basic-auth")
+def basic_auth(instance_public_id):
+    current = web_common.actor()
+    enabled = request.form.get("enabled", "")
+    if (
+        not current
+        or current["role"] != "admin"
+        or enabled not in {"true", "false"}
+    ):
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        control_client.create_execution_job(
+            {
+                "request_id": str(uuid.uuid4()),
+                "actor_user_public_id": current["public_id"],
+                "instance_public_id": instance_public_id,
+                "action": "instance.set_basic_auth",
+                "params": {"enabled": enabled == "true"},
+            }
+        )
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    state = "enable" if enabled == "true" else "disable"
+    return redirect(url_for("instances", result=f"Basic Auth {state} task queued"))
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

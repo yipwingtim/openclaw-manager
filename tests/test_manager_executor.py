@@ -147,6 +147,33 @@ class ManagerExecutorTests(unittest.TestCase):
             "instance product does not support restart",
         )
 
+    def test_run_once_sets_basic_auth_without_retry(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {
+                "request_id": "basic-auth-1",
+                "action": "instance.set_basic_auth",
+                "params": {"enabled": False},
+            },
+            "instance": {
+                "product": "openclaw",
+                "legacy_user_id": "alice",
+                "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.set_basic_auth.return_value = (0, "disabled")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.status.assert_not_called()
+        adapter.set_basic_auth.assert_called_once_with(
+            control.claim.return_value["instance"], False
+        )
+        self.assertEqual(control.update.call_args.args, ("basic-auth-1", "succeeded"))
+        self.assertEqual(control.update.call_args.kwargs["output"], "disabled")
+
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()
         control.claim.return_value = {

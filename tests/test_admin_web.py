@@ -132,6 +132,18 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn("显示 {{ pagination.start }}-{{ pagination.end }}", template)
         self.assertIn("<th>访问认证</th><th>操作</th>", template)
 
+    def test_admin_metadata_is_in_the_admin_sidebar(self):
+        template = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(
+            encoding="utf-8"
+        )
+        admin_nav = template.split('{% if show_admin_instance_nav %}', 1)[1].split(
+            '{% if show_global_admin_nav %}', 1
+        )[0]
+        self.assertIn('href="/admin/metadata"', admin_nav)
+        self.assertNotIn('元数据与操作记录', (
+            ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"
+        ).read_text(encoding="utf-8"))
+
     def test_admin_create_instance_lists_only_active_users(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         users = [

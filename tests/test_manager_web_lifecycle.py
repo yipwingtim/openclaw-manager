@@ -234,6 +234,25 @@ class LifecycleActionTests(unittest.TestCase):
             ],
         )
 
+    def test_list_all_users_includes_deleted_instances(self):
+        with TemporaryDirectory() as public_dir:
+            self.app_module.PUBLIC_DIR = Path(public_dir)
+            (self.app_module.PUBLIC_DIR / "users" / "alice").mkdir(parents=True)
+            deleted = {"user_id": "bob", "status": "DELETED"}
+            adapter = types.SimpleNamespace(CAPABILITIES={"start"})
+
+            with patch.object(self.app_module, "detect_port", return_value=41001), \
+                 patch.object(self.app_module, "get_instance_product", return_value="openclaw"), \
+                 patch.object(self.app_module, "get_instance_adapter", return_value=adapter), \
+                 patch.object(self.app_module, "get_container_status", return_value="Up 1 minute"), \
+                 patch.object(self.app_module, "detect_openclaw_version", return_value="1.2.3"), \
+                 patch.object(self.app_module, "build_access_url", return_value="https://example:41001"), \
+                 patch.object(self.app_module, "is_basic_auth_enabled", return_value=True), \
+                 patch.object(self.app_module, "list_deleted_users", return_value=[deleted]):
+                users = self.app_module.list_active_users("all")
+
+        self.assertEqual([user["user_id"] for user in users], ["alice", "bob"])
+
     def test_lifecycle_start_uses_instance_adapter(self):
         with TemporaryDirectory() as public_dir:
             self.app_module.PUBLIC_DIR = Path(public_dir)

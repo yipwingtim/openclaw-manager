@@ -25,6 +25,8 @@ MAX_INSTANCE_BATCH_ROWS = 100
 LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+INSTANCE_PAGE_SIZE_OPTIONS = (10, 20, 50, 100)
+DEFAULT_INSTANCE_PAGE_SIZE = 20
 
 
 def configured_skill_presets():
@@ -34,6 +36,67 @@ def configured_skill_presets():
         if item and SKILL_ID_RE.fullmatch(item) and item not in values:
             values.append(item)
     return values
+
+
+def instance_list_context(instances):
+    status_filter = request.args.get("status", "active").strip().lower()
+    if status_filter not in {"active", "deleted", "all"}:
+        status_filter = "active"
+    query = request.args.get("q", "").strip()
+    filtered = [
+        instance for instance in instances
+        if (status_filter == "all")
+        or (status_filter == "deleted" and instance["status"] == "deleted")
+        or (status_filter == "active" and instance["status"] != "deleted")
+    ]
+    if query:
+        needle = query.lower()
+        filtered = [
+            instance for instance in filtered
+            if needle in " ".join(str(instance.get(key) or "") for key in (
+                "instance_name", "legacy_user_id", "public_id", "product",
+            )).lower()
+        ]
+    filtered.sort(key=lambda item: (item.get("instance_name") or "").lower())
+    try:
+        per_page = int(request.args.get("per_page", DEFAULT_INSTANCE_PAGE_SIZE))
+    except (TypeError, ValueError):
+        per_page = DEFAULT_INSTANCE_PAGE_SIZE
+    if per_page not in INSTANCE_PAGE_SIZE_OPTIONS:
+        per_page = DEFAULT_INSTANCE_PAGE_SIZE
+    total = len(filtered)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    page = min(max(page, 1), total_pages)
+    start = (page - 1) * per_page
+    return {
+        "instances": filtered[start:start + per_page],
+        "status_filter": status_filter,
+        "query": query,
+        "page_size_options": INSTANCE_PAGE_SIZE_OPTIONS,
+        "pagination": {
+            "page": page, "per_page": per_page, "total": total,
+            "total_pages": total_pages, "start": start + 1 if total else 0,
+            "end": min(start + per_page, total), "has_prev": page > 1,
+            "has_next": page < total_pages, "prev_page": max(1, page - 1),
+            "next_page": min(total_pages, page + 1),
+        },
+    }
+
+
+def render_instances(*, instances=None, batch_result=None, result="", error="", status=200):
+    context = instance_list_context(
+        control_client.list_admin_instances() if instances is None else instances
+    )
+    response = render_template(
+        "admin_instances.html", **context,
+        skill_presets=configured_skill_presets(), batch_result=batch_result,
+        result=result, error=error,
+    )
+    return response if status == 200 else (response, status)
 
 
 @app.get("/health")
@@ -100,10 +163,7 @@ def instances():
     current = web_common.actor()
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
-    return render_template(
-        "admin_instances.html", instances=control_client.list_admin_instances(),
-        skill_presets=configured_skill_presets(),
-        batch_result=None,
+    return render_instances(
         result=request.args.get("result", ""), error=request.args.get("error", ""),
     )
 
@@ -392,9 +452,9 @@ def run_action_batch():
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
     if action not in {"start", "stop", "restart", "install_skill"}:
-        return render_template("admin_instances.html", instances=[], skill_presets=configured_skill_presets(), batch_result=None, result="", error="无效的批量操作。"), 400
+        return render_instances(instances=[], error="无效的批量操作。", status=400)
     if not instance_public_ids or len(instance_public_ids) > 100 or len(set(instance_public_ids)) != len(instance_public_ids):
-        return render_template("admin_instances.html", instances=control_client.list_admin_instances(), skill_presets=configured_skill_presets(), batch_result=None, result="", error="请选择 1-100 个不同实例。"), 400
+        return render_instances(error="请选择 1-100 个不同实例。", status=400)
     payload = {
         "request_id": "action-batch-" + uuid.uuid4().hex,
         "actor_user_public_id": current["public_id"],
@@ -403,7 +463,7 @@ def run_action_batch():
     }
     if action == "install_skill":
         if skill_id not in configured_skill_presets():
-            return render_template("admin_instances.html", instances=control_client.list_admin_instances(), skill_presets=configured_skill_presets(), batch_result=None, result="", error="请选择已配置的 Skill。"), 400
+            return render_instances(error="请选择已配置的 Skill。", status=400)
         payload["skill_id"] = skill_id
     try:
         result = control_client.create_action_batch(payload)
@@ -421,11 +481,7 @@ def action_batch(request_id):
         result = control_client.get_action_batch(request_id)
     except control_client.ControlError as exc:
         return redirect(url_for("instances", error=str(exc)))
-    return render_template(
-        "admin_instances.html", instances=control_client.list_admin_instances(),
-        skill_presets=configured_skill_presets(), batch_result=result,
-        result="", error="",
-    )
+    return render_instances(batch_result=result)
 
 
 @app.get("/admin/metadata")

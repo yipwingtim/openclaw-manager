@@ -10,16 +10,15 @@ legacy `/instance-admin/` redirect. Runtime status, logs, devices, and files go
 through `manager-executor-api`, which resolves the instance from the actor and
 instance UUID before using an Adapter or data path.
 
-`manager-admin-web` remains the target for the completed admin migration. Until
-all existing admin operations have structured executor actions, `/admin/*` is
-routed to the Compose-managed legacy `manager-web` compatibility service. This
-service retains its existing privileged mounts, is not published on a host
-port, and must not serve the user portal.
+`manager-admin-web` serves `/admin/*` after the migrated operations pass parity
+verification. The Compose-managed legacy `manager-web` compatibility service
+remains available during the rollback window. It retains its existing
+privileged mounts, is not published on a host port, and must not serve the user
+portal.
 
-`manager-admin-web` cannot call Docker or write metadata directly. Its current
-portal supports instance listing and start, stop, and restart. Legacy batch
-creation, version, Basic Auth, Skill, and batch-device screens remain on the
-compatibility service until each operation is migrated.
+`manager-admin-web` cannot call Docker or write metadata directly. Its portal
+uses structured Control and Executor operations for instance creation,
+lifecycle, version, Basic Auth, Skill, device, retention, and batch actions.
 
 ## Remaining migration order
 
@@ -37,8 +36,8 @@ The remaining split is implemented in this order:
    supply container names, host paths, or shell commands.
 4. Move instance creation only after its record, runtime, endpoint, audit, and
    rollback sequence has an explicit contract.
-5. Route `/admin/*` to `manager-admin-web`, remove privileged mounts from Web
-   services, and retire the compatibility container after acceptance and a
+5. Route `/admin/*` to `manager-admin-web`, keep the compatibility container
+   during acceptance, then remove its privileged mounts and retire it after a
    tested rollback window.
 
 The legacy compatibility service is therefore transitional, not the target
@@ -56,15 +55,14 @@ before deployment.
    `manager-executor-api`, `manager-user-web`, and `manager-admin-web`.
 2. Verify the user, admin, and legacy compatibility Web containers are reachable
    from Nginx on `manager-net`. Only the legacy compatibility service retains
-   Docker, database, and Nginx mounts.
+   Docker, database, and Nginx mounts during the rollback window.
 3. Run `scripts/update_manager_auth.sh`. It backs up the manager and instance
    configuration, validates with `nginx -t`, reloads Nginx, and restores the
    backup if validation or reload fails.
 4. Verify `/me`, `/instances/{uuid}`, `/admin/users`, local login, instance
    `/admin/`, and one idempotent lifecycle task.
-5. Remove the compatibility service only after all admin operations have moved
-   to structured control and executor APIs and `/admin/*` is routed back to
-   `manager-admin-web`.
+5. Remove the compatibility service only after `/admin/*` has passed production
+   acceptance and rollback verification on `manager-admin-web`.
 
 ## Rollback
 

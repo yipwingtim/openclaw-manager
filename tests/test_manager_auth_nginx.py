@@ -206,6 +206,7 @@ class ManagerAuthNginxTests(unittest.TestCase):
             config = (conf_dir / "manager-web.conf").read_text(encoding="utf-8")
             self.assertIn("location = /emergency/login", config)
             self.assertIn('auth_basic "OpenClaw Manager Emergency";', config)
+            self.assertIn("proxy_pass http://manager_admin_web_backend;", config)
             self.assertIn('X-OpenClaw-Internal-Token "test-token";', config)
             root_location = config.split("    location / {", 1)[1]
             self.assertNotIn("auth_basic_user_file", root_location)

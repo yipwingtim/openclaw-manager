@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 COMPOSE_FILE = ROOT_DIR / "services" / "docker-compose.yml"
+BOOTSTRAP_SCRIPT = ROOT_DIR / "scripts" / "bootstrap_runtime.sh"
 
 
 class WebServiceSplitTests(unittest.TestCase):
@@ -68,10 +69,16 @@ class WebServiceSplitTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("server openclaw-manager-user-web:8080 resolve;", template)
-        self.assertIn("server openclaw-manager-web:8080 resolve;", template)
+        self.assertIn("server openclaw-manager-admin-web:8080 resolve;", template)
         self.assertIn("location ^~ /admin", template)
-        self.assertIn("proxy_pass http://manager_legacy_admin_backend;", template)
+        self.assertIn("proxy_pass http://manager_admin_web_backend;", template)
         self.assertIn("proxy_pass http://manager_user_web_backend;", template)
+
+    def test_bootstrap_routes_emergency_login_to_admin_web(self):
+        bootstrap = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("proxy_pass http://manager_admin_web_backend;", bootstrap)
+        self.assertNotIn("manager_legacy_admin_backend", bootstrap)
 
     def test_user_web_keeps_legacy_instance_admin_entry(self):
         source = (

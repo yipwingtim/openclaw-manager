@@ -257,7 +257,10 @@ class OpenClawDockerAdapter:
             rollback_note += f"\nRollback reload failed:\n{rollback_output}"
         return reload_code, f"{combined}{rollback_note}"
 
-    def create(self, instance, basic_auth_enabled, basic_auth_password="", skip_nginx_reload=True, timeout=420):
+    def create(
+        self, instance, basic_auth_enabled, basic_auth_password="",
+        skip_nginx_reload=True, skip_metadata_write=False, timeout=420,
+    ):
         user_id = self.get_legacy_user_id(instance)
         command = [
             str(self.manager_dir / "scripts" / "create_user.sh"),
@@ -267,9 +270,14 @@ class OpenClawDockerAdapter:
         ]
         if skip_nginx_reload:
             command.append("--skip-nginx-reload")
-        if basic_auth_password:
-            command.extend(["--password", basic_auth_password])
-        return self.run_command(command, timeout=timeout)
+        env = {**os.environ, "OPENCLAW_BASIC_AUTH_PASSWORD": basic_auth_password}
+        if skip_metadata_write:
+            env["OPENCLAW_SKIP_METADATA_WRITE"] = "1"
+        return self.run_command(
+            command,
+            timeout=timeout,
+            env=env,
+        )
 
     def batch_create(self, input_csv, output_csv, timeout, skip_nginx_refresh=False):
         command = [str(self.manager_dir / "scripts" / "batch_create_users.sh"), str(input_csv), str(output_csv)]

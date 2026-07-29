@@ -24,7 +24,7 @@ source "$LIB_TENANT_NETWORK"
 
 # ===== 参数 =====
 USER_ID="${1:-}"
-BASIC_AUTH_PASSWORD=""
+BASIC_AUTH_PASSWORD="${OPENCLAW_BASIC_AUTH_PASSWORD:-}"
 BASIC_AUTH_ENABLED="true"
 SKIP_NGINX_RELOAD=0
 SUCCESS=0
@@ -588,15 +588,17 @@ USERS_CSV_ROW_CREATED=1
 
 restore_host_owner
 
-python3 "$SCRIPT_DIR/metadata_cli.py" create-instance \
-  --user-id "$USER_ID" \
-  --port "$PORT" \
-  --openclaw-version "$VERSION" \
-  --basic-auth-enabled "$BASIC_AUTH_ENABLED" \
-  --basic-auth-password-ref "$NGINX_USER_HTPASSWD_REF" \
-  --openclaw-token "$TOKEN" \
-  --message "created from create_user.sh" \
-  || echo "[WARN] Metadata update failed for created user: $USER_ID"
+if [ "${OPENCLAW_SKIP_METADATA_WRITE:-0}" != "1" ]; then
+  python3 "$SCRIPT_DIR/metadata_cli.py" create-instance \
+    --user-id "$USER_ID" \
+    --port "$PORT" \
+    --openclaw-version "$VERSION" \
+    --basic-auth-enabled "$BASIC_AUTH_ENABLED" \
+    --basic-auth-password-ref "$NGINX_USER_HTPASSWD_REF" \
+    --openclaw-token "$TOKEN" \
+    --message "created from create_user.sh" \
+    || echo "[WARN] Metadata update failed for created user: $USER_ID"
+fi
 
 # ===== 输出 =====
 echo ""
@@ -615,7 +617,9 @@ else
 fi
 echo "👉 admin: enabled"
 echo "👉 username: $USER_ID"
-if [ -n "$BASIC_AUTH_PASSWORD" ]; then
+if [ -n "${OPENCLAW_BASIC_AUTH_PASSWORD:-}" ]; then
+  echo "👉 password: supplied securely"
+elif [ -n "$BASIC_AUTH_PASSWORD" ]; then
   echo "👉 password: $BASIC_AUTH_PASSWORD"
 else
   echo "👉 password: 刚才创建 Basic Auth 用户时输入的密码"

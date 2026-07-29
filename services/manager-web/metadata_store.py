@@ -444,8 +444,10 @@ def create_instance(
     product,
     instance_name,
     runtime_identifier,
+    legacy_user_id=None,
     data_path=None,
     status="active",
+    basic_auth_enabled=True,
     db_file=None,
     conn=None,
 ):
@@ -465,13 +467,14 @@ def create_instance(
             active_conn.execute(
                 """
                 INSERT INTO instances (
-                    public_id, owner_user_id, product, instance_name,
+                    public_id, legacy_user_id, owner_user_id, product, instance_name,
                     runtime_identifier, status, container_name, data_path,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    basic_auth_enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     public_id,
+                    legacy_user_id,
                     owner["id"],
                     product,
                     instance_name,
@@ -479,6 +482,7 @@ def create_instance(
                     status,
                     runtime_identifier,
                     data_path,
+                    1 if basic_auth_enabled else 0,
                     now,
                     now,
                 ),
@@ -496,7 +500,19 @@ def create_instance(
         )
 
 
-def finish_instance_provisioning(instance_public_id, status, *, db_file=None, conn=None):
+def finish_instance_provisioning(
+    instance_public_id,
+    status,
+    *,
+    port=None,
+    openclaw_version=None,
+    access_url=None,
+    admin_url=None,
+    basic_auth_password_ref=None,
+    openclaw_token=None,
+    db_file=None,
+    conn=None,
+):
     if status not in {"active", "failed"}:
         raise ValueError("invalid provisioning result")
     owns_conn = conn is None
@@ -511,10 +527,42 @@ def finish_instance_provisioning(instance_public_id, status, *, db_file=None, co
             return get_instance_by_public_id(instance_public_id, conn=active_conn)
         if instance["status"] != "provisioning":
             raise ValueError("invalid instance provisioning transition")
+        now = utc_now()
         active_conn.execute(
-            "UPDATE instances SET status = ?, updated_at = ? WHERE public_id = ?",
-            (status, utc_now(), instance_public_id),
+            """
+            UPDATE instances
+            SET status = ?, port = COALESCE(?, port),
+                openclaw_version = COALESCE(?, openclaw_version),
+                access_url = COALESCE(?, access_url),
+                admin_url = COALESCE(?, admin_url), updated_at = ?
+            WHERE public_id = ?
+            """,
+            (status, port, openclaw_version, access_url, admin_url, now, instance_public_id),
         )
+        if status == "active":
+            instance = get_instance_by_public_id(instance_public_id, conn=active_conn)
+            if port is not None:
+                record_port(port, user_id=instance["legacy_user_id"], status="allocated", conn=active_conn)
+                active_conn.execute(
+                    """
+                    INSERT INTO instance_endpoints (
+                        instance_id, endpoint_type, external_port, access_url,
+                        status, created_at, updated_at
+                    ) VALUES (?, 'legacy_port', ?, ?, 'active', ?, ?)
+                    ON CONFLICT(instance_id, endpoint_type) DO UPDATE SET
+                        external_port = excluded.external_port,
+                        access_url = excluded.access_url,
+                        status = 'active', updated_at = excluded.updated_at
+                    """,
+                    (instance["id"], port, access_url, now, now),
+                )
+            upsert_credentials(
+                user_id=instance["legacy_user_id"],
+                basic_auth_username=instance["legacy_user_id"],
+                basic_auth_password_ref=basic_auth_password_ref,
+                openclaw_token=openclaw_token,
+                conn=active_conn,
+            )
         return get_instance_by_public_id(instance_public_id, conn=active_conn)
 
 
@@ -849,7 +897,7 @@ def claim_next_execution_job(*, stale_seconds=900, db_file=None):
             SET status = 'failed', error_summary = 'execution interrupted; manual confirmation required',
                 updated_at = ?, finished_at = ?
             WHERE status = 'running' AND heartbeat_at < ?
-              AND action IN ('instance.delete', 'instance.restore')
+              AND action IN ('instance.create', 'instance.delete', 'instance.restore')
             """,
             (now, now, stale_before),
         )
@@ -864,9 +912,20 @@ def claim_next_execution_job(*, stale_seconds=900, db_file=None):
             FROM execution_jobs
             WHERE status = 'failed'
               AND error_summary = 'execution interrupted; manual confirmation required'
-              AND action IN ('instance.delete', 'instance.restore')
+              AND action IN ('instance.create', 'instance.delete', 'instance.restore')
             """,
             (now, now),
+        )
+        conn.execute(
+            """
+            UPDATE instances SET status = 'failed', updated_at = ?
+            WHERE status = 'provisioning' AND id IN (
+                SELECT instance_id FROM execution_jobs
+                WHERE action = 'instance.create' AND status = 'failed'
+                  AND error_summary = 'execution interrupted; manual confirmation required'
+            )
+            """,
+            (now,),
         )
         conn.execute(
             """

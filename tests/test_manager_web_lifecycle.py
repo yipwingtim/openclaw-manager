@@ -645,7 +645,14 @@ class BatchCreatePreflightTests(unittest.TestCase):
             self.assertEqual(output, "created")
             command = run_command.call_args.args[0]
             self.assertTrue(str(command[0]).endswith("scripts/create_user.sh"))
-            self.assertEqual(command[1:], ["alice", "--basic-auth-enabled", "true", "--skip-nginx-reload", "--password", "secret"])
+            self.assertEqual(command[1:], ["alice", "--basic-auth-enabled", "true", "--skip-nginx-reload"])
+            self.assertEqual(
+                run_command.call_args.kwargs["env"]["OPENCLAW_BASIC_AUTH_PASSWORD"],
+                "secret",
+            )
+            self.assertNotIn(
+                "OPENCLAW_SKIP_METADATA_WRITE", run_command.call_args.kwargs["env"]
+            )
 
     def test_adapter_batch_create_runs_batch_create_script(self):
         with TemporaryDirectory() as public_dir:

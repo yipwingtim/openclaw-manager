@@ -21,6 +21,7 @@ TIMEOUT = int(os.environ.get("MANAGER_CONTROL_TIMEOUT", "5"))
 POLL_SECONDS = float(os.environ.get("MANAGER_EXECUTOR_POLL_SECONDS", "2"))
 MAX_ATTEMPTS = max(1, int(os.environ.get("MANAGER_EXECUTOR_MAX_ATTEMPTS", "2")))
 MAX_OUTPUT_LENGTH = 32 * 1024
+CREATE_ERROR_OUTPUT_LENGTH = 4 * 1024
 WECHAT_URL_RE = re.compile(r"https://liteapp\.weixin\.qq\.com/q/[^\s\"'<>]+")
 FILE_ROOTS = {"workspace": "workspace", "workspaces": "workspaces", "uploads": "uploads"}
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
@@ -109,6 +110,19 @@ def consume_provisioning_secret(secret_path):
         return path.read_text(encoding="utf-8")
     finally:
         path.unlink(missing_ok=True)
+
+
+def sanitize_creation_error(output, password=""):
+    sanitized = output or ""
+    if password:
+        sanitized = sanitized.replace(password, "[REDACTED]")
+    lines = sanitized.splitlines()
+    for index, line in enumerate(lines):
+        if re.search(r"(?i)\b(password|token)\b", line):
+            lines[index] = "[REDACTED]"
+        if line.strip().lower() == "login token:" and index + 1 < len(lines):
+            lines[index + 1] = "[REDACTED]"
+    return "\n".join(lines)[-CREATE_ERROR_OUTPUT_LENGTH:]
 
 
 def openclaw_creation_result(instance):
@@ -201,7 +215,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
         if action == "create":
             control.update(request_id, "running", current_step="creating instance")
             password = consume_provisioning_secret(job["params"]["secret_path"])
-            code, _ = adapter.create(
+            code, failure_output = adapter.create(
                 instance,
                 "true" if instance.get("basic_auth_enabled") else "false",
                 password,
@@ -210,7 +224,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             )
             created = code == 0
             if created:
-                code, _ = reload_nginx_after_create(adapter)
+                code, failure_output = reload_nginx_after_create(adapter)
             if code == 0:
                 try:
                     result = openclaw_creation_result(instance)
@@ -218,20 +232,23 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                         request_id, "succeeded", output="instance created", result=result
                     )
                     return True
-                except Exception:
+                except Exception as exc:
                     code = 1
+                    failure_output = str(exc)
             rollback_code = rollback_created_instance(adapter, instance)[0] if created else 0
+            rollback_note = (
+                "resources moved to recycle bin"
+                if created and rollback_code == 0
+                else "create script rolled back resources"
+                if not created
+                else "manual cleanup required"
+            )
+            detail = sanitize_creation_error(failure_output, password)
             control.update(
                 request_id,
                 "failed",
                 error_summary="instance creation failed",
-                output=(
-                    "instance creation failed; resources moved to recycle bin"
-                    if created and rollback_code == 0
-                    else "instance creation failed; create script rolled back resources"
-                    if not created
-                    else "instance creation failed; manual cleanup required"
-                ),
+                output=f"instance creation failed; {rollback_note}\n{detail}".rstrip(),
             )
             return True
         if action == "wechat_bind":

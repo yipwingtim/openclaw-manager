@@ -45,6 +45,8 @@ def load_admin_app():
     control_client.list_admin_instances = lambda: []
     control_client.list_admin_users = lambda: []
     control_client.create_admin_instance = lambda payload: payload
+    control_client.create_instance_batch = lambda payload: payload
+    control_client.get_instance_batch = lambda request_id: {}
     control_client.create_device_batch = lambda payload: payload
     control_client.get_device_batch = lambda request_id: {}
     control_client.create_action_batch = lambda payload: payload
@@ -143,6 +145,40 @@ class AdminWebTests(unittest.TestCase):
         )
         self.assertTrue(create_instance.call_args.args[0]["request_id"].startswith("instance-create-"))
         url_for.assert_called_once_with("create_instance_job", request_id="create-1")
+
+    def test_admin_batch_create_resolves_owner_and_submits_rows(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        upload = types.SimpleNamespace(read=lambda: (
+            b"owner_username,legacy_user_id,instance_name,basic_auth_password,basic_auth_enabled\n"
+            b"alice,alice-one,Alice One,secret,true\n"
+        ))
+        self.admin.request.files = {"input_csv": upload}
+        users = [{"public_id": "user-1", "username": "alice", "status": "active"}]
+        result = {"parent": {"request_id": "batch-1"}, "children": []}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_users", return_value=users
+        ), patch.object(
+            self.admin.control_client, "create_instance_batch", return_value=result
+        ) as create_batch, patch.object(
+            self.admin, "url_for", return_value="batch-url"
+        ) as url_for:
+            response = self.admin.create_instance_batch()
+
+        payload = create_batch.call_args.args[0]
+        self.assertEqual(payload["actor_user_public_id"], "admin-1")
+        self.assertTrue(payload["request_id"].startswith("instance-batch-"))
+        self.assertEqual(payload["instances"], [{
+            "owner_user_public_id": "user-1",
+            "legacy_user_id": "alice-one",
+            "instance_name": "Alice One",
+            "product": "openclaw",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "secret",
+        }])
+        self.assertEqual(response, "batch-url")
+        url_for.assert_called_once_with(
+            "create_instance_batch_job", request_id="batch-1"
+        )
 
     def test_admin_basic_auth_queues_structured_boolean_action(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Flask, Response, redirect, render_template, request, url_for
 
 import control_client
+import executor_client
 import web_common
 
 
@@ -39,15 +40,15 @@ def configured_skill_presets():
 
 
 def instance_list_context(instances):
-    status_filter = request.args.get("status", "active").strip().lower()
-    if status_filter not in {"active", "deleted", "all"}:
-        status_filter = "active"
+    status_filter = request.args.get("status", "running").strip().lower()
+    if status_filter not in {"running", "stopped", "deleted", "all"}:
+        status_filter = "running"
     query = request.args.get("q", "").strip()
     filtered = [
         instance for instance in instances
         if (status_filter == "all")
         or (status_filter == "deleted" and instance["status"] == "deleted")
-        or (status_filter == "active" and instance["status"] != "deleted")
+        or (instance["status"] != "deleted" and instance["runtime_status"] == status_filter)
     ]
     if query:
         needle = query.lower()
@@ -88,9 +89,27 @@ def instance_list_context(instances):
 
 
 def render_instances(*, instances=None, batch_result=None, result="", error="", status=200):
-    context = instance_list_context(
-        control_client.list_admin_instances() if instances is None else instances
-    )
+    current = web_common.actor()
+    instances = control_client.list_admin_instances() if instances is None else instances
+    active_ids = [item["public_id"] for item in instances if item["status"] != "deleted"]
+    runtime_statuses = {}
+    if current and active_ids:
+        try:
+            for start in range(0, len(active_ids), 100):
+                runtime_statuses.update({
+                    item["instance_public_id"]: item["status"]
+                    for item in executor_client.admin_instance_statuses(
+                        current["public_id"], active_ids[start:start + 100]
+                    )
+                })
+        except executor_client.ExecutorError as exc:
+            error = error or f"无法读取实例运行状态：{exc}"
+    for instance in instances:
+        instance["runtime_status"] = (
+            "deleted" if instance["status"] == "deleted"
+            else runtime_statuses.get(instance["public_id"], "unknown")
+        )
+    context = instance_list_context(instances)
     response = render_template(
         "admin_instances.html", **context,
         skill_presets=configured_skill_presets(), batch_result=batch_result,

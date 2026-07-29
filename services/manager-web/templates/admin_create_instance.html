@@ -11,7 +11,27 @@
   </div>
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
 
-  {% if job %}
+  {% if batch %}
+    <div class="surface table-responsive">
+      <div class="p-3 border-bottom">
+        <div class="section-title">批量创建任务 {{ batch.parent.request_id }}</div>
+        <div class="muted-small">父任务：{{ batch.parent.status }}；子任务会由 Executor 逐个处理。</div>
+      </div>
+      <table class="table align-middle mb-0">
+        <thead><tr><th>实例 UUID</th><th>状态</th><th>步骤</th><th>结果</th></tr></thead>
+        <tbody>{% for child in batch.children %}<tr>
+          <td>{{ child.instance_public_id }}</td>
+          <td>{{ child.status }}</td>
+          <td>{{ child.current_step or "-" }}</td>
+          <td>{{ child.summary }}</td>
+        </tr>{% endfor %}</tbody>
+      </table>
+      <div class="p-3">
+        <a class="btn btn-oc" href="/admin/create-instance/batch/{{ batch.parent.request_id }}">刷新状态</a>
+        <a class="btn btn-oc-outline" href="/admin/create-instance">继续创建</a>
+      </div>
+    </div>
+  {% elif job %}
     <div class="surface p-3 p-lg-4">
       <div class="section-title mb-3">创建任务</div>
       <dl class="row mb-3">
@@ -57,6 +77,14 @@
         <label class="form-check-label" for="basic_auth_enabled">启用 Basic Auth</label>
       </div>
       <button class="btn btn-oc" type="submit" {% if not users %}disabled{% endif %}>创建实例</button>
+    </form>
+
+    <form class="surface p-3 p-lg-4 mt-3" method="post" action="/admin/create-instance/batch" enctype="multipart/form-data" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="section-title mb-2">批量创建</div>
+      <div class="muted-small mb-3">CSV 表头：owner_username,legacy_user_id,instance_name,basic_auth_password,basic_auth_enabled。最多 100 行。</div>
+      <input class="form-control mb-3" name="input_csv" type="file" accept=".csv,text/csv" required>
+      <button class="btn btn-oc-outline" type="submit">提交批量创建</button>
     </form>
   {% endif %}
 {% endblock %}

@@ -20,6 +20,7 @@ app.before_request(web_common.require_csrf)
 app.context_processor(web_common.context)
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MAX_DEVICE_BATCH_ROWS = 100
+MAX_INSTANCE_BATCH_ROWS = 100
 LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -119,7 +120,7 @@ def create_instance_page():
         users, error = [], str(exc)
     return render_template(
         "admin_create_instance.html", users=users, job=None, instance=None,
-        error=error,
+        batch=None, error=error,
     )
 
 
@@ -177,7 +178,100 @@ def create_instance_job(request_id):
         job, instance, error = None, None, str(exc)
     return render_template(
         "admin_create_instance.html", users=[], job=job, instance=instance,
-        error=error,
+        batch=None, error=error,
+    )
+
+
+@app.post("/admin/create-instance/batch")
+def create_instance_batch():
+    current = web_common.actor()
+    upload = request.files.get("input_csv")
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    if upload is None:
+        return redirect(url_for("create_instance_page", error="请选择 CSV 文件。"))
+    try:
+        rows = list(csv.DictReader(io.StringIO(upload.read().decode("utf-8-sig"))))
+    except (UnicodeDecodeError, csv.Error):
+        return redirect(url_for("create_instance_page", error="CSV 文件格式无效。"))
+    required = {
+        "owner_username", "legacy_user_id", "instance_name",
+        "basic_auth_password", "basic_auth_enabled",
+    }
+    if not rows or len(rows) > MAX_INSTANCE_BATCH_ROWS:
+        return redirect(url_for(
+            "create_instance_page",
+            error=f"CSV 必须包含 1-{MAX_INSTANCE_BATCH_ROWS} 行数据。",
+        ))
+    if set(rows[0]) != required:
+        return redirect(url_for("create_instance_page", error="CSV 表头不符合要求。"))
+    try:
+        users = {
+            user["username"].casefold(): user
+            for user in control_client.list_admin_users()
+            if user["status"] == "active"
+        }
+    except control_client.ControlError as exc:
+        return redirect(url_for("create_instance_page", error=str(exc)))
+    instances = []
+    seen = set()
+    for line_number, row in enumerate(rows, 2):
+        owner = users.get((row.get("owner_username") or "").strip().casefold())
+        legacy_user_id = (row.get("legacy_user_id") or "").strip()
+        instance_name = (row.get("instance_name") or "").strip()
+        password = row.get("basic_auth_password") or ""
+        enabled = (row.get("basic_auth_enabled") or "").strip().lower()
+        if owner is None:
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行 Owner 不存在或未启用。",
+            ))
+        if not LEGACY_USER_ID_RE.fullmatch(legacy_user_id) or legacy_user_id in seen:
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行实例 ID 无效或重复。",
+            ))
+        if not instance_name or len(instance_name) > 128 or not password:
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行名称或密码无效。",
+            ))
+        if enabled not in {"true", "false"}:
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行 Basic Auth 开关无效。",
+            ))
+        seen.add(legacy_user_id)
+        instances.append({
+            "owner_user_public_id": owner["public_id"],
+            "legacy_user_id": legacy_user_id,
+            "instance_name": instance_name,
+            "product": "openclaw",
+            "basic_auth_enabled": enabled == "true",
+            "basic_auth_password": password,
+        })
+    try:
+        result = control_client.create_instance_batch({
+            "request_id": "instance-batch-" + uuid.uuid4().hex,
+            "actor_user_public_id": current["public_id"],
+            "instances": instances,
+        })
+    except control_client.ControlError as exc:
+        return redirect(url_for("create_instance_page", error=str(exc)))
+    return redirect(url_for(
+        "create_instance_batch_job", request_id=result["parent"]["request_id"]
+    ))
+
+
+@app.get("/admin/create-instance/batch/<request_id>")
+def create_instance_batch_job(request_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        batch = control_client.get_instance_batch(request_id)
+        error = ""
+    except control_client.ControlError as exc:
+        batch, error = None, str(exc)
+    return render_template(
+        "admin_create_instance.html", users=[], job=None, instance=None,
+        batch=batch, error=error,
     )
 
 

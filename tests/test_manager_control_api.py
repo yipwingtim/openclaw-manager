@@ -366,6 +366,96 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(repeated.get_json()["job"]["request_id"], "create-1")
         self.assertEqual(len(list(secret_dir.iterdir())), 1)
 
+    def test_admin_batch_creates_provisioning_instances_without_persisting_passwords(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        owner = self.control.metadata_store.create_user("bob", db_file=self.db_file)
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "batch-create-1",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [
+                {
+                    "owner_user_public_id": self.user["public_id"],
+                    "legacy_user_id": "alice-one",
+                    "instance_name": "Alice One",
+                    "product": "openclaw",
+                    "basic_auth_enabled": True,
+                    "basic_auth_password": "alice-secret",
+                },
+                {
+                    "owner_user_public_id": owner["public_id"],
+                    "legacy_user_id": "bob-one",
+                    "instance_name": "Bob One",
+                    "product": "openclaw",
+                    "basic_auth_enabled": False,
+                    "basic_auth_password": "bob-secret",
+                },
+            ],
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+            repeated, repeated_status = response_parts(self.control.create_instance_batch())
+            queried, queried_status = response_parts(
+                self.control.get_instance_batch("batch-create-1")
+            )
+
+        self.assertEqual(status, 202)
+        self.assertEqual(repeated_status, 202)
+        self.assertEqual(queried_status, 200)
+        body = response.get_json()
+        self.assertEqual(body["parent"]["action"], "batch.create")
+        self.assertEqual(len(body["children"]), 2)
+        self.assertTrue(all(child["action"] == "instance.create" for child in body["children"]))
+        self.assertTrue(all(child["params"] == {} for child in body["children"]))
+        self.assertEqual(len(repeated.get_json()["children"]), 2)
+        self.assertTrue(all(
+            child["params"] == {} for child in queried.get_json()["children"]
+        ))
+        self.assertEqual(
+            [item["status"] for item in self.control.metadata_store.list_instances(db_file=self.db_file)],
+            ["provisioning", "provisioning"],
+        )
+        self.assertNotIn(b"alice-secret", self.db_file.read_bytes())
+        self.assertNotIn(b"bob-secret", self.db_file.read_bytes())
+        self.assertEqual(
+            {path.read_text(encoding="utf-8") for path in secret_dir.iterdir()},
+            {"alice-secret", "bob-secret"},
+        )
+
+    def test_admin_batch_rejects_invalid_owner_without_partial_resources(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "batch-create-invalid-owner",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [{
+                "owner_user_public_id": "missing-owner",
+                "legacy_user_id": "alice-one",
+                "instance_name": "Alice One",
+                "product": "openclaw",
+                "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            }],
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 409)
+        self.assertIn("active owner user not found", response.get_json()["error"])
+        self.assertEqual(self.control.metadata_store.list_instances(db_file=self.db_file), [])
+        self.assertIsNone(self.control.metadata_store.get_execution_job(
+            "batch-create-invalid-owner", db_file=self.db_file
+        ))
+        self.assertEqual(list(secret_dir.iterdir()), [])
+
     def test_executor_finishes_created_instance_with_structured_result(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

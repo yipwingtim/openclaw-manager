@@ -146,6 +146,15 @@ def create_admin_instance(payload):
     return request_json("POST", "/internal/v1/admin/instances", payload=payload)
 
 
+def create_instance_batch(payload):
+    return request_json("POST", "/internal/v1/admin/instance-batches", payload=payload)
+
+
+def get_instance_batch(request_id):
+    batch_id = urllib.parse.quote(request_id, safe="")
+    return request_json("GET", f"/internal/v1/admin/instance-batches/{batch_id}")
+
+
 def get_admin_metadata():
     return request_json("GET", "/internal/v1/admin/metadata")
 

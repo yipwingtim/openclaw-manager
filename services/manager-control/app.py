@@ -181,6 +181,17 @@ def action_batch_child_payload(job):
     return value
 
 
+def create_batch_child_payload(job):
+    value = execution_job_payload(job)
+    value["params"] = {}
+    value["summary"] = (
+        job["status"]
+        if job["status"] in {"queued", "running", "succeeded"}
+        else job.get("error_summary") or job["status"]
+    )
+    return value
+
+
 def authenticated_user_payload(user):
     return {
         "id": user["id"],
@@ -563,6 +574,152 @@ def create_admin_instance():
         secret_path.unlink(missing_ok=True)
         raise
     return jsonify({"instance": admin_metadata_instance(instance), "job": execution_job_payload(job)}), 202
+
+
+@app.post("/internal/v1/admin/instance-batches")
+@require_services("manager-admin-web")
+def create_instance_batch():
+    payload = request.get_json(silent=True) or {}
+    if set(payload) - {"request_id", "actor_user_public_id", "instances"}:
+        return jsonify({"error": "unsupported batch fields"}), 400
+    request_id = payload.get("request_id")
+    actor_public_id = payload.get("actor_user_public_id")
+    rows = payload.get("instances")
+    if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+        return jsonify({"error": "invalid request_id"}), 400
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 100:
+        return jsonify({"error": "instances must contain 1-100 rows"}), 400
+
+    allowed = {
+        "owner_user_public_id", "legacy_user_id", "instance_name", "product",
+        "basic_auth_enabled", "basic_auth_password",
+    }
+    legacy_ids = []
+    summaries = []
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict) or set(row) - allowed:
+            return jsonify({"error": f"invalid fields in row {index}"}), 400
+        legacy_user_id = row.get("legacy_user_id")
+        instance_name = row.get("instance_name")
+        if not isinstance(legacy_user_id, str) or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
+            return jsonify({"error": f"invalid legacy_user_id in row {index}"}), 400
+        if not isinstance(instance_name, str) or not instance_name.strip() or len(instance_name) > 128:
+            return jsonify({"error": f"invalid instance_name in row {index}"}), 400
+        if row.get("product") != "openclaw" or not product_supports("openclaw", "create"):
+            return jsonify({"error": f"unsupported product in row {index}"}), 400
+        if not isinstance(row.get("basic_auth_enabled"), bool):
+            return jsonify({"error": f"invalid basic_auth_enabled in row {index}"}), 400
+        if not isinstance(row.get("basic_auth_password"), str) or not row["basic_auth_password"]:
+            return jsonify({"error": f"basic_auth_password is required in row {index}"}), 400
+        if not isinstance(row.get("owner_user_public_id"), str) or not row["owner_user_public_id"]:
+            return jsonify({"error": f"owner_user_public_id is required in row {index}"}), 400
+        legacy_ids.append(legacy_user_id)
+        summaries.append({
+            "owner_user_public_id": row["owner_user_public_id"],
+            "legacy_user_id": legacy_user_id,
+            "instance_name": instance_name.strip(),
+            "product": "openclaw",
+            "basic_auth_enabled": row["basic_auth_enabled"],
+        })
+    if len(set(legacy_ids)) != len(legacy_ids):
+        return jsonify({"error": "legacy_user_id values must be unique"}), 400
+
+    actor = metadata_store.get_user_by_public_id(actor_public_id, db_file=DB_FILE)
+    if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+        return jsonify({"error": "active admin actor is required"}), 403
+    existing = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if existing is not None:
+        try:
+            parent = metadata_store.create_execution_job(
+                request_id=request_id, actor_user_id=actor["id"],
+                action="batch.create", params={"instances": summaries}, db_file=DB_FILE,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 409
+        children = metadata_store.list_execution_jobs(
+            parent_request_id=request_id, limit=100, db_file=DB_FILE
+        )
+        return jsonify({
+            "parent": execution_job_payload(parent),
+            "children": [create_batch_child_payload(job) for job in children],
+        }), 202
+
+    secret_paths = []
+    try:
+        PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        PROVISIONING_SECRET_DIR.chmod(0o700)
+        with metadata_store.connect(DB_FILE) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for owner_public_id in {row["owner_user_public_id"] for row in rows}:
+                owner = metadata_store.get_user_by_public_id(owner_public_id, conn=conn)
+                if owner is None or owner["status"] != "active":
+                    raise ValueError(f"active owner user not found: {owner_public_id}")
+            metadata_store.create_execution_job(
+                request_id=request_id, actor_user_id=actor["id"],
+                action="batch.create", params={"instances": summaries}, conn=conn,
+            )
+            metadata_store.update_execution_job(
+                request_id, "running", current_step="creating instances", conn=conn
+            )
+            for index, row in enumerate(rows, 1):
+                secret_path = PROVISIONING_SECRET_DIR / secrets.token_urlsafe(32)
+                descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as secret_file:
+                    secret_file.write(row["basic_auth_password"])
+                secret_paths.append(secret_path)
+                instance = metadata_store.create_instance(
+                    owner_public_id=row["owner_user_public_id"], product="openclaw",
+                    instance_name=row["instance_name"].strip(),
+                    legacy_user_id=row["legacy_user_id"],
+                    runtime_identifier=f"openclaw_{row['legacy_user_id']}",
+                    data_path=str(PROVISIONING_SECRET_DIR.parent / "users" / row["legacy_user_id"]),
+                    status="provisioning", basic_auth_enabled=row["basic_auth_enabled"],
+                    conn=conn,
+                )
+                metadata_store.create_execution_job(
+                    request_id=f"{request_id}:{index}", parent_request_id=request_id,
+                    actor_user_id=actor["id"], instance_public_id=instance["public_id"],
+                    action="instance.create", params={"secret_path": str(secret_path)},
+                    conn=conn,
+                )
+            parent = metadata_store.update_execution_job(
+                request_id, "succeeded", output=f"queued {len(rows)} child jobs", conn=conn
+            )
+            metadata_store.record_operation(
+                request_id=request_id, actor_user_id=actor["id"],
+                source_service="manager-control", action="batch.create",
+                status="success", message=f"queued {len(rows)} child jobs", conn=conn,
+            )
+            children = metadata_store.list_execution_jobs(
+                parent_request_id=request_id, limit=100, conn=conn
+            )
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        for secret_path in secret_paths:
+            secret_path.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        for secret_path in secret_paths:
+            secret_path.unlink(missing_ok=True)
+        raise
+    return jsonify({
+        "parent": execution_job_payload(parent),
+        "children": [create_batch_child_payload(job) for job in children],
+    }), 202
+
+
+@app.get("/internal/v1/admin/instance-batches/<request_id>")
+@require_services("manager-admin-web")
+def get_instance_batch(request_id):
+    parent = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if parent is None or parent["action"] != "batch.create":
+        return jsonify({"error": "instance batch not found"}), 404
+    children = metadata_store.list_execution_jobs(
+        parent_request_id=request_id, limit=100, db_file=DB_FILE
+    )
+    return jsonify({
+        "parent": execution_job_payload(parent),
+        "children": [create_batch_child_payload(job) for job in children],
+    })
 
 
 @app.get("/internal/v1/admin/metadata")

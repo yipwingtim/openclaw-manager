@@ -20,6 +20,7 @@ app.before_request(web_common.require_csrf)
 app.context_processor(web_common.context)
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MAX_DEVICE_BATCH_ROWS = 100
+LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def configured_skill_presets():
@@ -100,6 +101,83 @@ def instances():
         skill_presets=configured_skill_presets(),
         batch_result=None,
         result=request.args.get("result", ""), error=request.args.get("error", ""),
+    )
+
+
+@app.get("/admin/create-instance")
+def create_instance_page():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        users = [
+            user for user in control_client.list_admin_users()
+            if user["status"] == "active"
+        ]
+        error = request.args.get("error", "")
+    except control_client.ControlError as exc:
+        users, error = [], str(exc)
+    return render_template(
+        "admin_create_instance.html", users=users, job=None, instance=None,
+        error=error,
+    )
+
+
+@app.post("/admin/create-instance")
+def create_instance():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    owner_public_id = request.form.get("owner_user_public_id", "").strip()
+    legacy_user_id = request.form.get("legacy_user_id", "").strip()
+    instance_name = request.form.get("instance_name", "").strip()
+    password = request.form.get("basic_auth_password", "")
+    basic_auth_enabled = request.form.get("basic_auth_enabled") == "true"
+    if not owner_public_id or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
+        return redirect(url_for("create_instance_page", error="请选择 Owner 并填写有效的实例 ID。"))
+    if not instance_name or len(instance_name) > 128 or not password:
+        return redirect(url_for("create_instance_page", error="实例名称和 Basic Auth 密码不能为空。"))
+    request_id = "instance-create-" + uuid.uuid4().hex
+    try:
+        result = control_client.create_admin_instance(
+            {
+                "request_id": request_id,
+                "actor_user_public_id": current["public_id"],
+                "owner_user_public_id": owner_public_id,
+                "legacy_user_id": legacy_user_id,
+                "instance_name": instance_name,
+                "product": "openclaw",
+                "basic_auth_enabled": basic_auth_enabled,
+                "basic_auth_password": password,
+            }
+        )
+    except control_client.ControlError as exc:
+        return redirect(url_for("create_instance_page", error=str(exc)))
+    return redirect(
+        url_for("create_instance_job", request_id=result["job"]["request_id"])
+    )
+
+
+@app.get("/admin/create-instance/<request_id>")
+def create_instance_job(request_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        job = control_client.get_execution_job(request_id, current["public_id"])
+        if job["action"] != "instance.create":
+            return render_template("error.html", message="创建任务不存在"), 404
+        instance = next(
+            (item for item in control_client.list_admin_instances()
+             if item["public_id"] == job["instance_public_id"]),
+            None,
+        )
+        error = ""
+    except control_client.ControlError as exc:
+        job, instance, error = None, None, str(exc)
+    return render_template(
+        "admin_create_instance.html", users=[], job=job, instance=instance,
+        error=error,
     )
 
 

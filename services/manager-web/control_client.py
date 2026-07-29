@@ -138,6 +138,14 @@ def list_admin_instances():
     return request_json("GET", "/internal/v1/admin/instances")["instances"]
 
 
+def list_admin_users():
+    return request_json("GET", "/internal/v1/admin/users")["users"]
+
+
+def create_admin_instance(payload):
+    return request_json("POST", "/internal/v1/admin/instances", payload=payload)
+
+
 def get_admin_metadata():
     return request_json("GET", "/internal/v1/admin/metadata")
 

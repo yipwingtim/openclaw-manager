@@ -462,6 +462,20 @@ def admin_instances():
     )
 
 
+@app.get("/internal/v1/admin/users")
+@require_services("manager-admin-web")
+def admin_users():
+    with metadata_store.connect(DB_FILE) as conn:
+        users = conn.execute(
+            """
+            SELECT public_id, username, display_name, role, status
+            FROM users
+            ORDER BY normalized_username
+            """
+        ).fetchall()
+    return jsonify({"users": [dict(user) for user in users]})
+
+
 @app.post("/internal/v1/admin/instances")
 @require_services("manager-admin-web")
 def create_admin_instance():

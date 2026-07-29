@@ -138,6 +138,41 @@ class ManagerExecutorTests(unittest.TestCase):
         self.assertEqual(rollback.kwargs["env"]["OPENCLAW_SKIP_METADATA_WRITE"], "1")
         self.assertEqual(control.update.call_args.args, ("create-1", "failed"))
         self.assertIn("recycle bin", control.update.call_args.kwargs["output"])
+        self.assertIn("nginx failed", control.update.call_args.kwargs["output"])
+
+    def test_run_once_redacts_secrets_from_creation_failure(self):
+        control = Mock()
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.create.return_value = (
+            1,
+            "allocator failed\npassword: secret-password\n"
+            '"token": "quoted-token-value"\n'
+            "Login Token:\n👉 runtime-token-value",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            secret_dir = Path(directory)
+            secret_path = secret_dir / "secret"
+            secret_path.write_text("secret-password", encoding="utf-8")
+            control.claim.return_value = {
+                "job": {"request_id": "create-1", "action": "instance.create",
+                        "params": {"secret_path": str(secret_path)}},
+                "instance": {
+                    "product": "openclaw", "legacy_user_id": "alice",
+                    "runtime_identifier": "openclaw_alice", "status": "provisioning",
+                    "basic_auth_enabled": True,
+                },
+            }
+            with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir):
+                self.executor.run_once(control, lambda product: adapter)
+
+        output = control.update.call_args.kwargs["output"]
+        self.assertIn("allocator failed", output)
+        self.assertIn("[REDACTED]", output)
+        self.assertNotIn("secret-password", output)
+        self.assertNotIn("quoted-token-value", output)
+        self.assertNotIn("runtime-token-value", output)
+        self.assertLessEqual(len(self.executor.sanitize_creation_error("x" * 5000)), 4096)
 
     def test_run_once_skips_start_when_instance_is_already_up(self):
         control = Mock()

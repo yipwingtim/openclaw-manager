@@ -637,6 +637,26 @@ class BatchCreatePreflightTests(unittest.TestCase):
             self.assertTrue(str(command[0]).endswith("scripts/batch_set_model_provider.sh"))
             self.assertEqual(command[1:], [str(input_csv), str(output_csv)])
 
+    def test_adapter_sets_model_provider_with_instance_record(self):
+        with TemporaryDirectory() as manager_dir, TemporaryDirectory() as public_dir:
+            adapter = self.app_module.OpenClawDockerAdapter(
+                manager_dir=Path(manager_dir), public_dir=Path(public_dir),
+                nginx_users_conf_dir=Path(public_dir) / "nginx",
+                nginx_compose_dir=Path(public_dir) / "compose",
+                nginx_container_name="nginx",
+            )
+            with patch.object(adapter, "run_command", return_value=(0, "updated")) as run:
+                result = adapter.set_model_provider(
+                    {"legacy_user_id": "alice", "runtime_identifier": "openclaw_alice"},
+                    "openai", "openai/gpt-5", "https://models.example/v1", "GPT-5",
+                )
+
+            self.assertEqual(result, (0, "updated"))
+            self.assertEqual(
+                run.call_args.args[0][1:],
+                ["alice", "openai", "openai/gpt-5", "https://models.example/v1", "GPT-5"],
+            )
+
     def test_adapter_create_runs_create_script(self):
         with TemporaryDirectory() as public_dir:
             adapter = self.app_module.OpenClawDockerAdapter(

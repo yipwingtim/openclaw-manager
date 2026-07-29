@@ -3,6 +3,7 @@ import io
 import os
 import re
 import secrets
+import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +23,8 @@ SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MAX_DEVICE_BATCH_ROWS = 100
 MAX_INSTANCE_BATCH_ROWS = 100
 LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 
 
 def configured_skill_presets():
@@ -272,6 +275,111 @@ def create_instance_batch_job(request_id):
     return render_template(
         "admin_create_instance.html", users=[], job=None, instance=None,
         batch=batch, error=error,
+    )
+
+
+@app.get("/admin/model-provider-batches")
+def model_provider_batch_page():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    return render_template(
+        "admin_model_provider_batch.html", batch=None,
+        error=request.args.get("error", ""),
+    )
+
+
+@app.post("/admin/model-provider-batches")
+def create_model_provider_batch():
+    current = web_common.actor()
+    upload = request.files.get("input_csv")
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    if upload is None:
+        return redirect(url_for("model_provider_batch_page", error="请选择 CSV 文件。"))
+    try:
+        rows = list(csv.DictReader(io.StringIO(upload.read().decode("utf-8-sig"))))
+    except (UnicodeDecodeError, csv.Error):
+        return redirect(url_for("model_provider_batch_page", error="CSV 文件格式无效。"))
+    expected = [
+        "user_id", "model_provider_id", "model_id", "model_base_url",
+        "model_api_key", "model_alias",
+    ]
+    if not rows or len(rows) > 100:
+        return redirect(url_for(
+            "model_provider_batch_page", error="CSV 必须包含 1-100 行数据。"
+        ))
+    if list(rows[0]) != expected:
+        return redirect(url_for("model_provider_batch_page", error="CSV 表头不符合要求。"))
+    try:
+        instances = {
+            item["legacy_user_id"]: item
+            for item in control_client.list_admin_instances()
+            if item.get("legacy_user_id") and item["status"] == "active"
+        }
+    except control_client.ControlError as exc:
+        return redirect(url_for("model_provider_batch_page", error=str(exc)))
+    payload_rows = []
+    seen = set()
+    for line_number, row in enumerate(rows, 2):
+        user_id = (row.get("user_id") or "").strip()
+        provider_id = (row.get("model_provider_id") or "").strip()
+        model_id = (row.get("model_id") or "").strip()
+        base_url = (row.get("model_base_url") or "").strip()
+        alias = (row.get("model_alias") or "").strip() or model_id
+        instance = instances.get(user_id)
+        if instance is None or instance["public_id"] in seen:
+            return redirect(url_for(
+                "model_provider_batch_page",
+                error=f"第 {line_number} 行实例不存在、未启用或重复。",
+            ))
+        if not MODEL_PROVIDER_ID_RE.fullmatch(provider_id):
+            return redirect(url_for(
+                "model_provider_batch_page", error=f"第 {line_number} 行供应商 ID 无效。"
+            ))
+        if not MODEL_ID_RE.fullmatch(model_id) or len(alias) > 128:
+            return redirect(url_for(
+                "model_provider_batch_page", error=f"第 {line_number} 行模型配置无效。"
+            ))
+        if base_url:
+            parsed = urllib.parse.urlparse(base_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                return redirect(url_for(
+                    "model_provider_batch_page", error=f"第 {line_number} 行模型地址无效。"
+                ))
+        seen.add(instance["public_id"])
+        payload_rows.append({
+            "instance_public_id": instance["public_id"],
+            "model_provider_id": provider_id,
+            "model_id": model_id,
+            "model_base_url": base_url,
+            "model_alias": alias,
+        })
+    try:
+        result = control_client.create_model_provider_batch({
+            "request_id": "model-provider-batch-" + uuid.uuid4().hex,
+            "actor_user_public_id": current["public_id"],
+            "instances": payload_rows,
+        })
+    except control_client.ControlError as exc:
+        return redirect(url_for("model_provider_batch_page", error=str(exc)))
+    return redirect(url_for(
+        "model_provider_batch_job", request_id=result["parent"]["request_id"]
+    ))
+
+
+@app.get("/admin/model-provider-batches/<request_id>")
+def model_provider_batch_job(request_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        batch = control_client.get_model_provider_batch(request_id)
+        error = ""
+    except control_client.ControlError as exc:
+        batch, error = None, str(exc)
+    return render_template(
+        "admin_model_provider_batch.html", batch=batch, error=error
     )
 
 

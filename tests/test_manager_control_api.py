@@ -1285,6 +1285,43 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(invalid_status, 400)
         self.assertEqual(invalid.get_json(), {"error": "invalid or unconfigured skill preset"})
 
+    def test_model_provider_job_accepts_only_non_sensitive_validated_params(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "model-provider-1",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.set_model_provider",
+            "params": {
+                "model_provider_id": "openai",
+                "model_id": "openai/gpt-5",
+                "model_base_url": "https://models.example/v1",
+                "model_alias": "GPT-5",
+            },
+        }
+        headers = {"Authorization": "Bearer admin-token"}
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            response, status = response_parts(self.control.create_execution_job())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["job"]["params"], payload["params"])
+        payload["params"]["model_api_key"] = "must-not-be-accepted"
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            invalid, invalid_status = response_parts(self.control.create_execution_job())
+        self.assertEqual(invalid_status, 400)
+        self.assertIn("unsupported params", invalid.get_json()["error"])
+
     def test_skill_job_records_audit_on_success(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file
@@ -1353,6 +1390,68 @@ class ManagerControlApiTests(unittest.TestCase):
         )[0]
         self.assertEqual(operation["action"], "instance.refresh_devices")
         self.assertEqual(operation["message"], "device cache refreshed")
+
+    def test_admin_model_provider_batch_is_idempotent_and_non_sensitive(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instances = [
+            self.control.metadata_store.create_instance(
+                owner_public_id=self.user["public_id"], product="openclaw",
+                instance_name=name, runtime_identifier=runtime, db_file=self.db_file,
+            )
+            for name, runtime in (("One", "openclaw_one"), ("Two", "openclaw_two"))
+        ]
+        payload = {
+            "request_id": "model-provider-batch-1",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [
+                {
+                    "instance_public_id": instances[0]["public_id"],
+                    "model_provider_id": "openai",
+                    "model_id": "openai/gpt-5",
+                    "model_base_url": "https://models.example/v1",
+                    "model_alias": "GPT-5",
+                },
+                {
+                    "instance_public_id": instances[1]["public_id"],
+                    "model_provider_id": "anthropic",
+                    "model_id": "anthropic/claude",
+                    "model_base_url": "",
+                    "model_alias": "Claude",
+                },
+            ],
+        }
+        headers = {"Authorization": "Bearer admin-token"}
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            created, created_status = response_parts(
+                self.control.create_model_provider_batch()
+            )
+            repeated, repeated_status = response_parts(
+                self.control.create_model_provider_batch()
+            )
+
+        self.assertEqual(created_status, 200)
+        self.assertEqual(repeated_status, 200)
+        self.assertEqual(created.get_json(), repeated.get_json())
+        body = created.get_json()
+        self.assertEqual(body["parent"]["action"], "batch.set_model_provider")
+        self.assertEqual(len(body["children"]), 2)
+        self.assertTrue(all(
+            child["action"] == "instance.set_model_provider"
+            for child in body["children"]
+        ))
+        self.assertNotIn("api_key", repr(body).lower())
+        with patch.object(
+            self.control.request, "headers", headers
+        ):
+            fetched, fetched_status = response_parts(
+                self.control.get_model_provider_batch("model-provider-batch-1")
+            )
+        self.assertEqual(fetched_status, 200)
+        self.assertEqual(fetched.get_json(), body)
 
     def test_admin_device_batch_creates_idempotent_parent_and_children(self):
         self.control.metadata_store.set_user_role(

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}批量设置模型供应商{% endblock %}
+{% block content %}
+  <div class="page-kicker">管理员控制台</div>
+  <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <h1 class="page-title">批量设置模型供应商</h1>
+      <div class="page-subtitle">通过结构化 Executor 子任务更新运行中的 OpenClaw 实例。</div>
+    </div>
+    <a class="btn btn-oc-outline" href="/admin/instances">实例列表</a>
+  </div>
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+
+  {% if batch %}
+    <div class="surface table-responsive">
+      <div class="p-3 border-bottom">
+        <div class="section-title">任务 {{ batch.parent.request_id }}</div>
+        <div class="muted-small">父任务：{{ batch.parent.status }}</div>
+      </div>
+      <table class="table align-middle mb-0">
+        <thead><tr><th>实例 UUID</th><th>状态</th><th>步骤</th><th>结果</th></tr></thead>
+        <tbody>{% for child in batch.children %}<tr>
+          <td>{{ child.instance_public_id }}</td><td>{{ child.status }}</td>
+          <td>{{ child.current_step or "-" }}</td><td>{{ child.summary }}</td>
+        </tr>{% endfor %}</tbody>
+      </table>
+      <div class="p-3">
+        <a class="btn btn-oc" href="/admin/model-provider-batches/{{ batch.parent.request_id }}">刷新状态</a>
+        <a class="btn btn-oc-outline" href="/admin/model-provider-batches">继续设置</a>
+      </div>
+    </div>
+  {% else %}
+    <form class="surface p-3 p-lg-4" method="post" action="/admin/model-provider-batches" enctype="multipart/form-data" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="muted-small mb-3">
+        CSV 表头：user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias。最多 100 行。<br>
+        model_api_key 仅为兼容旧 CSV 保留，平台不会读取、保存或发送该字段；实例使用独立的 Model Proxy token。
+      </div>
+      <input class="form-control mb-3" name="input_csv" type="file" accept=".csv,text/csv" required>
+      <button class="btn btn-oc" type="submit">提交批量任务</button>
+    </form>
+  {% endif %}
+{% endblock %}

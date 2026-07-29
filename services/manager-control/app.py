@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import sqlite3
+import urllib.parse
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -33,6 +34,8 @@ REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
+MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PROVISIONING_SECRET_DIR = Path(
     os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public")
@@ -53,6 +56,9 @@ JOB_ACTION_PARAMS = {
     "instance.set_basic_auth": {"enabled"},
     "instance.update_version": {"version", "restore_model_provider"},
     "instance.install_skill": {"skill_id"},
+    "instance.set_model_provider": {
+        "model_provider_id", "model_id", "model_base_url", "model_alias",
+    },
     "instance.refresh_devices": set(),
     "instance.approve_latest_device": set(),
     "instance.delete": set(),
@@ -179,6 +185,28 @@ def action_batch_child_payload(job):
     )
     value["output"] = None
     return value
+
+
+def validate_model_provider_params(params):
+    provider_id = params.get("model_provider_id")
+    model_id = params.get("model_id")
+    base_url = params.get("model_base_url")
+    alias = params.get("model_alias")
+    if not isinstance(provider_id, str) or not MODEL_PROVIDER_ID_RE.fullmatch(provider_id):
+        return "invalid model_provider_id"
+    if not isinstance(model_id, str) or not MODEL_ID_RE.fullmatch(model_id):
+        return "invalid model_id"
+    if not isinstance(base_url, str) or len(base_url) > 2048:
+        return "invalid model_base_url"
+    if base_url:
+        parsed_url = urllib.parse.urlparse(base_url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            return "invalid model_base_url"
+    if not isinstance(alias, str) or not alias or len(alias) > 128 or any(
+        ord(character) < 32 for character in alias
+    ):
+        return "invalid model_alias"
+    return None
 
 
 def create_batch_child_payload(job):
@@ -1008,7 +1036,7 @@ def create_action_batch():
     except sqlite3.IntegrityError:
         return jsonify({"error": "could not create action batch"}), 409
     return jsonify({
-        "parent": execution_job_payload(parent, actor_public_id),
+        "parent": execution_job_payload(parent),
         "children": [action_batch_child_payload(job) for job in children],
     })
 
@@ -1021,6 +1049,130 @@ def get_action_batch(request_id):
         "batch.start", "batch.stop", "batch.restart", "batch.install_skill",
     }:
         return jsonify({"error": "action batch not found"}), 404
+    children = metadata_store.list_execution_jobs(
+        parent_request_id=request_id, limit=100, db_file=DB_FILE
+    )
+    return jsonify({
+        "parent": execution_job_payload(parent),
+        "children": [action_batch_child_payload(job) for job in children],
+    })
+
+
+@app.post("/internal/v1/admin/model-provider-batches")
+@require_services("manager-admin-web")
+def create_model_provider_batch():
+    payload = request.get_json(silent=True) or {}
+    if set(payload) - {"request_id", "actor_user_public_id", "instances"}:
+        return jsonify({"error": "unsupported batch fields"}), 400
+    request_id = payload.get("request_id")
+    actor_public_id = payload.get("actor_user_public_id")
+    rows = payload.get("instances")
+    if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+        return jsonify({"error": "invalid request_id"}), 400
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 100:
+        return jsonify({"error": "instances must contain 1-100 rows"}), 400
+    instance_ids = []
+    normalized_rows = []
+    required = {
+        "instance_public_id", "model_provider_id", "model_id",
+        "model_base_url", "model_alias",
+    }
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict) or set(row) != required:
+            return jsonify({"error": f"invalid fields in row {index}"}), 400
+        instance_public_id = row.get("instance_public_id")
+        if not isinstance(instance_public_id, str) or not instance_public_id:
+            return jsonify({"error": f"invalid instance_public_id in row {index}"}), 400
+        params = {key: row[key] for key in required - {"instance_public_id"}}
+        error = validate_model_provider_params(params)
+        if error:
+            return jsonify({"error": f"{error} in row {index}"}), 400
+        instance_ids.append(instance_public_id)
+        normalized_rows.append({"instance_public_id": instance_public_id, **params})
+    if len(set(instance_ids)) != len(instance_ids):
+        return jsonify({"error": "instance_public_id values must be unique"}), 400
+    actor = metadata_store.get_user_by_public_id(actor_public_id, db_file=DB_FILE)
+    if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+        return jsonify({"error": "active admin actor is required"}), 403
+
+    parent_action = "batch.set_model_provider"
+    parent_params = {"instances": normalized_rows}
+    try:
+        with metadata_store.connect(DB_FILE) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = metadata_store.get_execution_job(request_id, conn=conn)
+            if existing is None:
+                instances = []
+                for row in normalized_rows:
+                    instance = metadata_store.get_instance_by_public_id(
+                        row["instance_public_id"], conn=conn
+                    )
+                    if instance is None:
+                        raise ValueError(
+                            f"instance not found: {row['instance_public_id']}"
+                        )
+                    if instance["status"] != "active" or not product_supports(
+                        instance["product"], "batch_set_model_provider"
+                    ):
+                        raise ValueError(
+                            f"model provider update is not available: {row['instance_public_id']}"
+                        )
+                    if metadata_store.list_execution_jobs(
+                        statuses=("queued", "running"), limit=1,
+                        instance_public_id=row["instance_public_id"], conn=conn,
+                    ):
+                        raise ValueError(
+                            f"instance task is already active: {row['instance_public_id']}"
+                        )
+                    instances.append(instance)
+                metadata_store.create_execution_job(
+                    request_id=request_id, actor_user_id=actor["id"],
+                    action=parent_action, params=parent_params, conn=conn,
+                )
+                metadata_store.update_execution_job(
+                    request_id, "running", current_step="creating child jobs", conn=conn
+                )
+                for index, (instance, row) in enumerate(zip(instances, normalized_rows), 1):
+                    metadata_store.create_execution_job(
+                        request_id=f"{request_id}:{index}", parent_request_id=request_id,
+                        actor_user_id=actor["id"], instance_public_id=instance["public_id"],
+                        action="instance.set_model_provider",
+                        params={key: row[key] for key in required - {"instance_public_id"}},
+                        conn=conn,
+                    )
+                metadata_store.update_execution_job(
+                    request_id, "succeeded", output=f"queued {len(instances)} child jobs",
+                    conn=conn,
+                )
+                metadata_store.record_operation(
+                    request_id=request_id, actor_user_id=actor["id"],
+                    source_service="manager-control", action=parent_action,
+                    status="success", message=f"queued {len(instances)} child jobs",
+                    conn=conn,
+                )
+            parent = metadata_store.create_execution_job(
+                request_id=request_id, actor_user_id=actor["id"],
+                action=parent_action, params=parent_params, conn=conn,
+            )
+            children = metadata_store.list_execution_jobs(
+                parent_request_id=request_id, limit=100, conn=conn
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "could not create model provider batch"}), 409
+    return jsonify({
+        "parent": execution_job_payload(parent, actor_public_id),
+        "children": [action_batch_child_payload(job) for job in children],
+    })
+
+
+@app.get("/internal/v1/admin/model-provider-batches/<request_id>")
+@require_services("manager-admin-web")
+def get_model_provider_batch(request_id):
+    parent = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if parent is None or parent["action"] != "batch.set_model_provider":
+        return jsonify({"error": "model provider batch not found"}), 404
     children = metadata_store.list_execution_jobs(
         parent_request_id=request_id, limit=100, db_file=DB_FILE
     )
@@ -1286,6 +1438,10 @@ def create_execution_job():
         }
         if not isinstance(skill_id, str) or skill_id not in presets:
             return jsonify({"error": "invalid or unconfigured skill preset"}), 400
+    if action == "instance.set_model_provider":
+        error = validate_model_provider_params(params)
+        if error:
+            return jsonify({"error": error}), 400
     if not isinstance(instance_public_id, str) or not instance_public_id:
         return jsonify({"error": "instance_public_id is required"}), 400
     actor = metadata_store.get_user_by_public_id(
@@ -1590,6 +1746,7 @@ def update_execution_job(request_id):
                     "instance.set_basic_auth",
                     "instance.update_version",
                     "instance.install_skill",
+                    "instance.set_model_provider",
                     "instance.refresh_devices",
                     "instance.approve_latest_device",
                     "instance.delete",
@@ -1603,6 +1760,11 @@ def update_execution_job(request_id):
                     message = f"version={params['version']}"
                 elif job["action"] == "instance.install_skill":
                     message = f"skill={params['skill_id']}"
+                elif job["action"] == "instance.set_model_provider":
+                    message = (
+                        f"provider={params['model_provider_id']} "
+                        f"model={params['model_id']}"
+                    )
                 elif job["action"] in {"instance.delete", "instance.restore"}:
                     message = f"instance {job['action'].removeprefix('instance.')}d"
                 else:

@@ -47,6 +47,8 @@ def load_admin_app():
     control_client.create_admin_instance = lambda payload: payload
     control_client.create_instance_batch = lambda payload: payload
     control_client.get_instance_batch = lambda request_id: {}
+    control_client.create_model_provider_batch = lambda payload: payload
+    control_client.get_model_provider_batch = lambda request_id: {}
     control_client.create_device_batch = lambda payload: payload
     control_client.get_device_batch = lambda request_id: {}
     control_client.create_action_batch = lambda payload: payload
@@ -179,6 +181,37 @@ class AdminWebTests(unittest.TestCase):
         url_for.assert_called_once_with(
             "create_instance_batch_job", request_id="batch-1"
         )
+
+    def test_admin_model_provider_batch_discards_legacy_api_key(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        upload = types.SimpleNamespace(read=lambda: (
+            b"user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias\n"
+            b"alice,openai,openai/gpt-5,https://models.example/v1,legacy-secret,GPT-5\n"
+        ))
+        self.admin.request.files = {"input_csv": upload}
+        instances = [{
+            "public_id": "instance-1", "legacy_user_id": "alice", "status": "active",
+        }]
+        result = {"parent": {"request_id": "batch-1"}, "children": []}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_instances", return_value=instances
+        ), patch.object(
+            self.admin.control_client, "create_model_provider_batch", return_value=result
+        ) as create_batch, patch.object(
+            self.admin, "url_for", return_value="batch-url"
+        ):
+            response = self.admin.create_model_provider_batch()
+
+        payload = create_batch.call_args.args[0]
+        self.assertEqual(response, "batch-url")
+        self.assertEqual(payload["instances"], [{
+            "instance_public_id": "instance-1",
+            "model_provider_id": "openai",
+            "model_id": "openai/gpt-5",
+            "model_base_url": "https://models.example/v1",
+            "model_alias": "GPT-5",
+        }])
+        self.assertNotIn("legacy-secret", repr(payload))
 
     def test_admin_basic_auth_queues_structured_boolean_action(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

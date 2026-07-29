@@ -14,6 +14,12 @@ class ManagerExecutorImageTests(unittest.TestCase):
         for package in ("apache2-utils", "iproute2"):
             with self.subTest(package=package):
                 self.assertIn(package, dockerfile)
+        self.assertIn(
+            "COPY --from=docker-cli "
+            "/usr/local/libexec/docker/cli-plugins/docker-compose "
+            "/usr/local/lib/docker/cli-plugins/docker-compose",
+            dockerfile,
+        )
 
 
 if __name__ == "__main__":

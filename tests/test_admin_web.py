@@ -43,6 +43,8 @@ def load_admin_app():
     control_client.ControlError = ControlError
     control_client.get_admin_metadata = lambda: {}
     control_client.list_admin_instances = lambda: []
+    control_client.list_admin_users = lambda: []
+    control_client.create_admin_instance = lambda payload: payload
     control_client.create_device_batch = lambda payload: payload
     control_client.get_device_batch = lambda request_id: {}
     control_client.create_action_batch = lambda payload: payload
@@ -89,6 +91,58 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(context["counts"], {})
         self.assertEqual(context["instances"], [])
         self.assertEqual(context["operations"], [])
+
+    def test_admin_create_instance_lists_only_active_users(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        users = [
+            {"public_id": "user-1", "username": "alice", "status": "active"},
+            {"public_id": "user-2", "username": "bob", "status": "disabled"},
+        ]
+        self.admin.request.args = {}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_users", return_value=users
+        ):
+            template, context = self.admin.create_instance_page()
+
+        self.assertEqual(template, "admin_create_instance.html")
+        self.assertEqual(context["users"], [users[0]])
+
+    def test_admin_create_instance_submits_structured_payload(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {
+            "owner_user_public_id": "user-1",
+            "legacy_user_id": "alice-instance",
+            "instance_name": "Alice instance",
+            "basic_auth_enabled": "true",
+            "basic_auth_password": "secret",
+        }
+        result = {
+            "instance": {"public_id": "instance-1"},
+            "job": {"request_id": "create-1"},
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "create_admin_instance", return_value=result
+        ) as create_instance, patch.object(
+            self.admin, "url_for", return_value="job-url"
+        ) as url_for:
+            response = self.admin.create_instance()
+
+        self.assertEqual(response, "job-url")
+        self.assertEqual(
+            create_instance.call_args.args[0],
+            {
+                "request_id": create_instance.call_args.args[0]["request_id"],
+                "actor_user_public_id": "admin-1",
+                "owner_user_public_id": "user-1",
+                "legacy_user_id": "alice-instance",
+                "instance_name": "Alice instance",
+                "product": "openclaw",
+                "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            },
+        )
+        self.assertTrue(create_instance.call_args.args[0]["request_id"].startswith("instance-create-"))
+        url_for.assert_called_once_with("create_instance_job", request_id="create-1")
 
     def test_admin_basic_auth_queues_structured_boolean_action(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

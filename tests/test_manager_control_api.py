@@ -254,6 +254,26 @@ class ManagerControlApiTests(unittest.TestCase):
             instance["public_id"],
         )
 
+    def test_admin_lists_platform_users_without_sensitive_fields(self):
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ):
+            response, status = response_parts(self.control.admin_users())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            response.get_json()["users"],
+            [{
+                "public_id": self.user["public_id"],
+                "username": "alice",
+                "display_name": None,
+                "role": "user",
+                "status": "active",
+            }],
+        )
+
     def test_admin_reads_metadata_summary_without_sensitive_fields(self):
         instance = self.control.metadata_store.create_instance(
             owner_public_id=self.user["public_id"],

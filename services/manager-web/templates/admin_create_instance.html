@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}创建实例{% endblock %}
+{% block content %}
+  <div class="page-kicker">管理员控制台</div>
+  <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <h1 class="page-title">创建 OpenClaw 实例</h1>
+      <div class="page-subtitle">为已有平台用户创建单个实例，部署由 Executor 异步执行。</div>
+    </div>
+    <a class="btn btn-oc-outline" href="/admin/instances">实例列表</a>
+  </div>
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+
+  {% if job %}
+    <div class="surface p-3 p-lg-4">
+      <div class="section-title mb-3">创建任务</div>
+      <dl class="row mb-3">
+        <dt class="col-sm-3">请求 ID</dt><dd class="col-sm-9">{{ job.request_id }}</dd>
+        <dt class="col-sm-3">实例</dt><dd class="col-sm-9">{{ instance.instance_name if instance else job.instance_public_id }}</dd>
+        <dt class="col-sm-3">状态</dt><dd class="col-sm-9">{{ job.status }}</dd>
+        <dt class="col-sm-3">当前步骤</dt><dd class="col-sm-9">{{ job.current_step or "-" }}</dd>
+        <dt class="col-sm-3">结果</dt><dd class="col-sm-9"><pre class="mb-0">{{ job.output or job.error_summary or "等待 Executor 处理" }}</pre></dd>
+      </dl>
+      {% if job.status in ["queued", "running"] %}
+        <a class="btn btn-oc" href="/admin/create-instance/{{ job.request_id }}">刷新状态</a>
+      {% else %}
+        <a class="btn btn-oc-outline" href="/admin/create-instance">继续创建</a>
+      {% endif %}
+    </div>
+  {% else %}
+    <form class="surface p-3 p-lg-4" method="post" action="/admin/create-instance" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="mb-3">
+        <label class="form-label" for="owner_user_public_id">实例 Owner</label>
+        <select class="form-select" id="owner_user_public_id" name="owner_user_public_id" required>
+          <option value="">请选择已有平台用户</option>
+          {% for user in users %}
+            <option value="{{ user.public_id }}">{{ user.display_name or user.username }} ({{ user.username }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="legacy_user_id">实例 ID</label>
+        <input class="form-control" id="legacy_user_id" name="legacy_user_id" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" autocomplete="off">
+        <div class="muted-small mt-1">用于当前 OpenClaw 容器、目录和 Basic Auth 用户名。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="instance_name">实例名称</label>
+        <input class="form-control" id="instance_name" name="instance_name" required maxlength="128">
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="basic_auth_password">Basic Auth 密码</label>
+        <input class="form-control" id="basic_auth_password" name="basic_auth_password" type="password" required autocomplete="new-password">
+      </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" id="basic_auth_enabled" name="basic_auth_enabled" type="checkbox" value="true" checked>
+        <label class="form-check-label" for="basic_auth_enabled">启用 Basic Auth</label>
+      </div>
+      <button class="btn btn-oc" type="submit" {% if not users %}disabled{% endif %}>创建实例</button>
+    </form>
+  {% endif %}
+{% endblock %}

@@ -13,6 +13,7 @@ PRODUCT_CAPABILITIES = {
 }
 
 EXECUTION_ACTION_CAPABILITIES = {
+    "instance.create": "create",
     "instance.start": "start",
     "instance.stop": "stop",
     "instance.restart": "restart",

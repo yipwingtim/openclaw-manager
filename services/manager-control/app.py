@@ -2,6 +2,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 from functools import wraps
@@ -32,6 +33,10 @@ REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
+LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+PROVISIONING_SECRET_DIR = Path(
+    os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public")
+) / ".manager-secrets"
 JOB_STATUSES = {
     "queued",
     "running",
@@ -198,6 +203,7 @@ def executor_instance_payload(instance):
         "product": instance["product"],
         "runtime_identifier": instance["runtime_identifier"],
         "data_path": instance.get("data_path"),
+        "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
         "status": instance["status"],
         "restore_state": instance.get("restore_state"),
         "access_role": instance.get("access_role"),
@@ -454,6 +460,95 @@ def admin_instances():
             ]
         }
     )
+
+
+@app.post("/internal/v1/admin/instances")
+@require_services("manager-admin-web")
+def create_admin_instance():
+    payload = request.get_json(silent=True) or {}
+    allowed = {
+        "request_id", "actor_user_public_id", "owner_user_public_id",
+        "legacy_user_id", "instance_name", "product",
+        "basic_auth_enabled", "basic_auth_password",
+    }
+    if set(payload) - allowed:
+        return jsonify({"error": "unsupported instance fields"}), 400
+    request_id = payload.get("request_id")
+    actor_public_id = payload.get("actor_user_public_id")
+    owner_public_id = payload.get("owner_user_public_id")
+    legacy_user_id = payload.get("legacy_user_id")
+    instance_name = payload.get("instance_name")
+    product = payload.get("product")
+    basic_auth_enabled = payload.get("basic_auth_enabled")
+    password = payload.get("basic_auth_password")
+    if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+        return jsonify({"error": "invalid request_id"}), 400
+    if not isinstance(legacy_user_id, str) or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
+        return jsonify({"error": "invalid legacy_user_id"}), 400
+    if not isinstance(instance_name, str) or not instance_name.strip() or len(instance_name) > 128:
+        return jsonify({"error": "invalid instance_name"}), 400
+    if product != "openclaw" or not product_supports(product, "create"):
+        return jsonify({"error": "instance product does not support create"}), 400
+    if not isinstance(basic_auth_enabled, bool):
+        return jsonify({"error": "basic_auth_enabled must be a boolean"}), 400
+    if not isinstance(password, str) or not password:
+        return jsonify({"error": "basic_auth_password is required"}), 400
+
+    existing_job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if existing_job is not None:
+        if (
+            existing_job["action"] == "instance.create"
+            and existing_job.get("actor_user_public_id") == actor_public_id
+            and existing_job.get("instance_public_id")
+        ):
+            instance = metadata_store.get_instance_by_public_id(
+                existing_job["instance_public_id"], db_file=DB_FILE
+            )
+            return jsonify(
+                {"instance": admin_metadata_instance(instance), "job": execution_job_payload(existing_job)}
+            ), 202
+        return jsonify({"error": "request_id already used for another operation"}), 409
+
+    secret_path = PROVISIONING_SECRET_DIR / secrets.token_urlsafe(32)
+    try:
+        actor = metadata_store.get_user_by_public_id(actor_public_id, db_file=DB_FILE)
+        owner = metadata_store.get_user_by_public_id(owner_public_id, db_file=DB_FILE)
+        if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+            raise ValueError("active administrator not found")
+        if owner is None or owner["status"] != "active":
+            raise ValueError("active owner user not found")
+        PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        PROVISIONING_SECRET_DIR.chmod(0o700)
+        descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as secret_file:
+            secret_file.write(password)
+        with metadata_store.connect(DB_FILE) as conn:
+            instance = metadata_store.create_instance(
+                owner_public_id=owner_public_id,
+                product=product,
+                instance_name=instance_name.strip(),
+                legacy_user_id=legacy_user_id,
+                runtime_identifier=f"openclaw_{legacy_user_id}",
+                data_path=str(PROVISIONING_SECRET_DIR.parent / "users" / legacy_user_id),
+                status="provisioning",
+                basic_auth_enabled=basic_auth_enabled,
+                conn=conn,
+            )
+            job = metadata_store.create_execution_job(
+                request_id=request_id,
+                actor_user_id=actor["id"],
+                instance_public_id=instance["public_id"],
+                action="instance.create",
+                params={"secret_path": str(secret_path)},
+                conn=conn,
+            )
+    except ValueError as exc:
+        secret_path.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        secret_path.unlink(missing_ok=True)
+        raise
+    return jsonify({"instance": admin_metadata_instance(instance), "job": execution_job_payload(job)}), 202
 
 
 @app.get("/internal/v1/admin/metadata")
@@ -1243,7 +1338,7 @@ def cancel_execution_job(request_id):
 @require_services("manager-executor")
 def update_execution_job(request_id):
     payload = request.get_json(silent=True) or {}
-    allowed = {"status", "current_step", "error_summary", "output"}
+    allowed = {"status", "current_step", "error_summary", "output", "result"}
     if set(payload) - allowed:
         return jsonify({"error": "unsupported execution job fields"}), 400
     status = payload.get("status")
@@ -1253,11 +1348,28 @@ def update_execution_job(request_id):
         value = payload.get(field)
         if value is not None and not isinstance(value, str):
             return jsonify({"error": f"{field} must be a string"}), 400
+    result = payload.get("result")
+    if result is not None and not isinstance(result, dict):
+        return jsonify({"error": "result must be an object"}), 400
+    job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
+    if job is None:
+        return jsonify({"error": "execution job not found"}), 404
+    if job["action"] == "instance.create" and status == "succeeded":
+        required = {
+            "port", "version", "access_url", "admin_url",
+            "basic_auth_password_ref", "openclaw_token",
+        }
+        if not isinstance(result, dict) or set(result) != required:
+            return jsonify({"error": "invalid instance creation result"}), 400
+        if (
+            not isinstance(result["port"], int)
+            or not 1 <= result["port"] <= 65535
+            or any(not isinstance(result[field], str) or not result[field] for field in required - {"port"})
+        ):
+            return jsonify({"error": "invalid instance creation result"}), 400
     try:
         with metadata_store.connect(DB_FILE) as conn:
             job = metadata_store.get_execution_job(request_id, conn=conn)
-            if job is None:
-                raise ValueError("execution job not found")
             metadata_store.update_execution_job(
                 request_id,
                 status,
@@ -1266,6 +1378,27 @@ def update_execution_job(request_id):
                 output=payload.get("output"),
                 conn=conn,
             )
+            if job["action"] == "instance.create" and status in {"succeeded", "failed"}:
+                if status == "succeeded":
+                    metadata_store.finish_instance_provisioning(
+                        job["instance_public_id"], "active",
+                        port=result["port"], openclaw_version=result["version"],
+                        access_url=result["access_url"], admin_url=result["admin_url"],
+                        basic_auth_password_ref=result["basic_auth_password_ref"],
+                        openclaw_token=result["openclaw_token"], conn=conn,
+                    )
+                else:
+                    metadata_store.finish_instance_provisioning(
+                        job["instance_public_id"], "failed", conn=conn
+                    )
+                metadata_store.record_operation(
+                    request_id=request_id, actor_user_id=job["actor_user_id"],
+                    instance_id=job["instance_id"], source_service="manager-executor",
+                    action="instance.create",
+                    status="success" if status == "succeeded" else "failed",
+                    message="instance created" if status == "succeeded" else "instance creation failed",
+                    conn=conn,
+                )
             if status == "succeeded" and job["action"] == "instance.set_basic_auth":
                 enabled = json.loads(job["params_json"])["enabled"]
                 metadata_store.set_instance_basic_auth(

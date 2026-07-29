@@ -307,6 +307,93 @@ class ManagerControlApiTests(unittest.TestCase):
             payload["operations"][0]["instance_public_id"], instance["public_id"]
         )
 
+    def test_admin_creates_provisioning_instance_without_persisting_password(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "create-1",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-instance",
+            "instance_name": "Alice instance",
+            "product": "openclaw",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "do-not-store-this",
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_admin_instance())
+
+        self.assertEqual(status, 202)
+        body = response.get_json()
+        self.assertEqual(body["instance"]["status"], "provisioning")
+        self.assertNotIn("basic_auth_password", body["job"]["params"])
+        secret_path = Path(body["job"]["params"]["secret_path"])
+        self.assertEqual(secret_path.read_text(encoding="utf-8"), "do-not-store-this")
+        self.assertEqual(secret_path.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(b"do-not-store-this", self.db_file.read_bytes())
+
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            repeated, repeated_status = response_parts(
+                self.control.create_admin_instance()
+            )
+        self.assertEqual(repeated_status, 202)
+        self.assertEqual(repeated.get_json()["job"]["request_id"], "create-1")
+        self.assertEqual(len(list(secret_dir.iterdir())), 1)
+
+    def test_executor_finishes_created_instance_with_structured_result(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Alice instance", legacy_user_id="alice-instance",
+            runtime_identifier="openclaw_alice-instance", status="provisioning",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="create-1", actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"], action="instance.create",
+            params={"secret_path": "/tmp/opaque"}, db_file=self.db_file,
+        )
+        self.control.metadata_store.update_execution_job(
+            "create-1", "running", db_file=self.db_file
+        )
+        result = {
+            "port": 41001,
+            "version": "2026.6.6",
+            "access_url": "https://example.test:41001",
+            "admin_url": "https://example.test:41001/admin/",
+            "basic_auth_password_ref": "nginx-auth:/etc/nginx/auth/users/alice-instance/.htpasswd",
+            "openclaw_token": "runtime-token",
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(
+            self.control.request, "get_json",
+            return_value={"status": "succeeded", "output": "instance created", "result": result},
+        ):
+            response, status = response_parts(
+                self.control.update_execution_job("create-1")
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["job"]["output"], "instance created")
+        stored = self.control.metadata_store.get_instance_by_public_id(
+            instance["public_id"], db_file=self.db_file
+        )
+        self.assertEqual((stored["status"], stored["port"]), ("active", 41001))
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            credentials = self.control.metadata_store.get_credentials(
+                "alice-instance", conn=conn
+            )
+        self.assertEqual(credentials["openclaw_token"], "runtime-token")
+
     def test_health_does_not_create_a_missing_database(self):
         missing = Path(self.temp_dir.name) / "missing.db"
         self.control.DB_FILE = missing
@@ -892,6 +979,44 @@ class ManagerControlApiTests(unittest.TestCase):
             self.control.metadata_store.list_execution_jobs(
                 limit=10,
                 db_file=self.db_file,
+            ),
+            [],
+        )
+
+    def test_generic_execution_job_endpoint_rejects_instance_create(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        payload = {
+            "request_id": "create-bypass",
+            "actor_user_public_id": self.user["public_id"],
+            "instance_public_id": instance["public_id"],
+            "action": "instance.create",
+            "params": {"secret_path": "/etc/shadow"},
+        }
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_execution_job())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response.get_json(),
+            {"error": "unsupported execution action"},
+        )
+        self.assertEqual(
+            self.control.metadata_store.list_execution_jobs(
+                limit=10, db_file=self.db_file
             ),
             [],
         )

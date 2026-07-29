@@ -247,7 +247,9 @@ metadata_args=(
 if [ -n "$PORT" ]; then
   metadata_args+=(--port "$PORT")
 fi
-python3 "${metadata_args[@]}" || echo "[WARN] Metadata update failed for deleted user: $USER_ID"
+if [ "${OPENCLAW_SKIP_METADATA_WRITE:-0}" != "1" ]; then
+  python3 "${metadata_args[@]}" || echo "[WARN] Metadata update failed for deleted user: $USER_ID"
+fi
 
 echo ""
 echo "=============================="

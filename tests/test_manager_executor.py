@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import json
 import sys
 import unittest
 import tempfile
@@ -54,6 +55,89 @@ class ManagerExecutorTests(unittest.TestCase):
             ("request-1", "succeeded"),
         )
         self.assertEqual(control.update.call_args_list[-1].kwargs["output"], "started")
+
+    def test_run_once_creates_instance_once_and_consumes_secret(self):
+        control = Mock()
+        instance = {
+            "public_id": "instance-1", "product": "openclaw",
+            "legacy_user_id": "alice", "runtime_identifier": "openclaw_alice",
+            "basic_auth_enabled": True, "status": "provisioning",
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.create.return_value = (0, "password and token must be discarded")
+        adapter.run_command.return_value = (0, "nginx compose updated")
+        adapter.reload_nginx.return_value = (0, "nginx reloaded")
+        with tempfile.TemporaryDirectory() as directory:
+            public_dir = Path(directory)
+            secret_dir = public_dir / ".manager-secrets"
+            secret_dir.mkdir()
+            secret_path = secret_dir / "secret"
+            secret_path.write_text("secret-password", encoding="utf-8")
+            config_dir = public_dir / "users" / "alice" / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "openclaw.json").write_text(
+                json.dumps({"gateway": {"auth": {"token": "runtime-token"}}}),
+                encoding="utf-8",
+            )
+            nginx_dir = public_dir / "nginx"
+            nginx_dir.mkdir()
+            (nginx_dir / "alice.conf").write_text("listen 41001 ssl;\n", encoding="utf-8")
+            control.claim.return_value = {
+                "job": {"request_id": "create-1", "action": "instance.create",
+                        "params": {"secret_path": str(secret_path)}},
+                "instance": instance,
+            }
+            with patch.object(self.executor, "PUBLIC_DIR", public_dir), patch.object(
+                self.executor, "PROVISIONING_SECRET_DIR", secret_dir
+            ), patch.dict(
+                self.executor.os.environ,
+                {"NGINX_USERS_CONF_DIR": str(nginx_dir), "PUBLIC_HOST": "example.test",
+                 "OPENCLAW_VERSION": "2026.6.6",
+                 "NGINX_HTPASSWD_FILE_IN_CONTAINER": "/etc/nginx/auth/.htpasswd"},
+            ):
+                self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.create.assert_called_once_with(
+            instance, "true", "secret-password", skip_nginx_reload=True,
+            skip_metadata_write=True,
+        )
+        adapter.reload_nginx.assert_called_once()
+        self.assertFalse(secret_path.exists())
+        self.assertEqual(control.update.call_args.args, ("create-1", "succeeded"))
+        self.assertEqual(control.update.call_args.kwargs["output"], "instance created")
+        self.assertEqual(control.update.call_args.kwargs["result"]["openclaw_token"], "runtime-token")
+
+    def test_run_once_rolls_back_created_resources_when_nginx_update_fails(self):
+        control = Mock()
+        instance = {
+            "product": "openclaw", "legacy_user_id": "alice",
+            "runtime_identifier": "openclaw_alice", "status": "provisioning",
+            "basic_auth_enabled": True,
+        }
+        adapter = Mock()
+        adapter.manager_dir = Path("/manager")
+        adapter.supports.return_value = True
+        adapter.create.return_value = (0, "created")
+        adapter.run_command.side_effect = [(1, "nginx failed"), (0, "deleted")]
+        with tempfile.TemporaryDirectory() as directory:
+            secret_dir = Path(directory)
+            secret_path = secret_dir / "secret"
+            secret_path.write_text("password", encoding="utf-8")
+            control.claim.return_value = {
+                "job": {"request_id": "create-1", "action": "instance.create",
+                        "params": {"secret_path": str(secret_path)}},
+                "instance": instance,
+            }
+            with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir):
+                self.executor.run_once(control, lambda product: adapter)
+
+        self.assertEqual(adapter.run_command.call_count, 2)
+        rollback = adapter.run_command.call_args_list[1]
+        self.assertTrue(str(rollback.args[0][0]).endswith("scripts/delete_user.sh"))
+        self.assertEqual(rollback.kwargs["env"]["OPENCLAW_SKIP_METADATA_WRITE"], "1")
+        self.assertEqual(control.update.call_args.args, ("create-1", "failed"))
+        self.assertIn("recycle bin", control.update.call_args.kwargs["output"])
 
     def test_run_once_skips_start_when_instance_is_already_up(self):
         control = Mock()

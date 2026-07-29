@@ -23,6 +23,8 @@ MAX_ATTEMPTS = max(1, int(os.environ.get("MANAGER_EXECUTOR_MAX_ATTEMPTS", "2")))
 MAX_OUTPUT_LENGTH = 32 * 1024
 WECHAT_URL_RE = re.compile(r"https://liteapp\.weixin\.qq\.com/q/[^\s\"'<>]+")
 FILE_ROOTS = {"workspace": "workspace", "workspaces": "workspaces", "uploads": "uploads"}
+PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
+PROVISIONING_SECRET_DIR = PUBLIC_DIR / ".manager-secrets"
 
 
 class ControlClient:
@@ -99,6 +101,63 @@ def job_cancelled(control, request_id):
         return False
 
 
+def consume_provisioning_secret(secret_path):
+    path = Path(secret_path).resolve()
+    if path.parent != PROVISIONING_SECRET_DIR.resolve() or not path.is_file():
+        raise ValueError("invalid provisioning secret")
+    try:
+        return path.read_text(encoding="utf-8")
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def openclaw_creation_result(instance):
+    user_id = instance["legacy_user_id"]
+    config = json.loads(
+        (PUBLIC_DIR / "users" / user_id / "config" / "openclaw.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    nginx_conf = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf")) / f"{user_id}.conf"
+    match = re.search(r"^\s*listen\s+([0-9]+)\b", nginx_conf.read_text(encoding="utf-8"), re.MULTILINE)
+    if match is None:
+        raise ValueError("created instance port not found")
+    port = int(match.group(1))
+    public_host = os.environ.get("PUBLIC_HOST", "").strip()
+    version = os.environ.get("OPENCLAW_VERSION", "").strip()
+    token = config.get("gateway", {}).get("auth", {}).get("token", "")
+    htpasswd = os.environ.get("NGINX_HTPASSWD_FILE_IN_CONTAINER", "").strip()
+    if not public_host or not version or not token or not htpasswd:
+        raise ValueError("created instance metadata is incomplete")
+    access_url = f"https://{public_host}:{port}"
+    return {
+        "port": port,
+        "version": version,
+        "access_url": access_url,
+        "admin_url": f"{access_url}/admin/",
+        "basic_auth_password_ref": f"nginx-auth:{Path(htpasswd).parent}/users/{user_id}/.htpasswd",
+        "openclaw_token": token,
+    }
+
+
+def reload_nginx_after_create(adapter):
+    code, output = adapter.run_command(
+        ["docker", "compose", "up", "-d"], timeout=90,
+        cwd=Path(os.environ.get("NGINX_COMPOSE_DIR", "/data/docker/nginx/compose")),
+    )
+    if code != 0:
+        return code, output
+    return adapter.reload_nginx()
+
+
+def rollback_created_instance(adapter, instance):
+    return adapter.run_command(
+        [str(adapter.manager_dir / "scripts" / "delete_user.sh"), instance["legacy_user_id"]],
+        timeout=180,
+        env={**os.environ, "OPENCLAW_SKIP_METADATA_WRITE": "1"},
+    )
+
+
 def get_adapter(product):
     adapter_type = {
         "openclaw": OpenClawDockerAdapter,
@@ -139,6 +198,42 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             )
         if instance.get("status") == "deleted" and action != "restore":
             raise ValueError("deleted instance only supports restore")
+        if action == "create":
+            control.update(request_id, "running", current_step="creating instance")
+            password = consume_provisioning_secret(job["params"]["secret_path"])
+            code, _ = adapter.create(
+                instance,
+                "true" if instance.get("basic_auth_enabled") else "false",
+                password,
+                skip_nginx_reload=True,
+                skip_metadata_write=True,
+            )
+            created = code == 0
+            if created:
+                code, _ = reload_nginx_after_create(adapter)
+            if code == 0:
+                try:
+                    result = openclaw_creation_result(instance)
+                    control.update(
+                        request_id, "succeeded", output="instance created", result=result
+                    )
+                    return True
+                except Exception:
+                    code = 1
+            rollback_code = rollback_created_instance(adapter, instance)[0] if created else 0
+            control.update(
+                request_id,
+                "failed",
+                error_summary="instance creation failed",
+                output=(
+                    "instance creation failed; resources moved to recycle bin"
+                    if created and rollback_code == 0
+                    else "instance creation failed; create script rolled back resources"
+                    if not created
+                    else "instance creation failed; manual cleanup required"
+                ),
+            )
+            return True
         if action == "wechat_bind":
             instance = control.get_runtime_instance(
                 job["instance_public_id"], job["actor_user_public_id"]

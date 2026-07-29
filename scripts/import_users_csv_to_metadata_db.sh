@@ -134,6 +134,12 @@ with sqlite3.connect(db_file) as conn:
                 "[ERROR] Metadata schema v1 requires: "
                 "python3 scripts/migrate_identity_instance_model.py --db <path> --dry-run"
             )
+        if version < 5:
+            raise SystemExit(
+                "[ERROR] Metadata schema requires: "
+                "python3 scripts/migrate_instance_provisioning_model.py "
+                "--db <path> --apply"
+            )
     conn.executescript(schema)
 
     for row in iter_user_rows(users_csv):

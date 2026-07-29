@@ -3017,7 +3017,11 @@ def run_admin_create_user():
 
     try:
         returncode, output = get_instance_adapter("openclaw").create(
-            user_id,
+            {
+                "product": "openclaw",
+                "legacy_user_id": user_id,
+                "runtime_identifier": f"openclaw_{user_id}",
+            },
             basic_auth_enabled,
             basic_auth_password,
             skip_nginx_reload=True,

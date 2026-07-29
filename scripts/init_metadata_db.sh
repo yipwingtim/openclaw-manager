@@ -43,6 +43,12 @@ with sqlite3.connect(db_file) as conn:
                 "[ERROR] Metadata schema requires: "
                 "python3 scripts/migrate_local_auth_model.py --db <path>"
             )
+        if version < 5:
+            raise SystemExit(
+                "[ERROR] Metadata schema requires: "
+                "python3 scripts/migrate_instance_provisioning_model.py "
+                "--db <path> --apply"
+            )
     conn.executescript(schema)
     conn.commit()
 

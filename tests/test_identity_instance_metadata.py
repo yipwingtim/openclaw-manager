@@ -394,6 +394,37 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
                 db_file=self.db_file,
             )
 
+    def test_provisioning_instance_transitions_only_to_active_or_failed(self):
+        owner = self.store.create_user("owner", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=owner["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_owner",
+            status="provisioning",
+            db_file=self.db_file,
+        )
+
+        active = self.store.finish_instance_provisioning(
+            instance["public_id"], "active", db_file=self.db_file
+        )
+
+        self.assertEqual(active["status"], "active")
+        self.assertEqual(
+            self.store.finish_instance_provisioning(
+                instance["public_id"], "active", db_file=self.db_file
+            )["status"],
+            "active",
+        )
+        with self.assertRaisesRegex(ValueError, "invalid provisioning result"):
+            self.store.finish_instance_provisioning(
+                instance["public_id"], "stopped", db_file=self.db_file
+            )
+        with self.assertRaisesRegex(ValueError, "invalid instance provisioning transition"):
+            self.store.finish_instance_provisioning(
+                instance["public_id"], "failed", db_file=self.db_file
+            )
+
     def test_data_path_is_globally_unique(self):
         alice = self.store.create_user("alice", db_file=self.db_file)
         bob = self.store.create_user("bob", db_file=self.db_file)

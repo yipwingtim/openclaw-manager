@@ -629,7 +629,17 @@ class BatchCreatePreflightTests(unittest.TestCase):
             )
 
             with patch.object(adapter, "run_command", return_value=(0, "created")) as run_command:
-                code, output = adapter.create("alice", "true", "secret", timeout=123)
+                code, output = adapter.create(
+                    {
+                        "public_id": "instance-1",
+                        "product": "openclaw",
+                        "legacy_user_id": "alice",
+                        "runtime_identifier": "openclaw_alice",
+                    },
+                    "true",
+                    "secret",
+                    timeout=123,
+                )
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "created")

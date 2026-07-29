@@ -34,8 +34,8 @@ def main():
             admins,
         ).fetchone()[0] if admins else 0
 
-    if version not in {2, 3, 4}:
-        print(f"[ERROR] schema version 2, 3, or 4 is required; found {version}")
+    if version not in {2, 3, 4, 5}:
+        print(f"[ERROR] schema version 2, 3, 4, or 5 is required; found {version}")
         return 1
 
     print(f"[PLAN] users={users} admins={matched_admins} provider=nginx-basic")
@@ -75,6 +75,7 @@ def main():
             """
         )
         conn.executescript(schema)
+        conn.execute("DELETE FROM schema_migrations WHERE version > 3")
         conn.execute(
             "INSERT OR REPLACE INTO schema_migrations (version, name) VALUES (3, 'local_auth_session')"
         )

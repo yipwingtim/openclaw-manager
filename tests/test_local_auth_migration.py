@@ -45,7 +45,7 @@ class LocalAuthMigrationTests(unittest.TestCase):
                 version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
 
             self.assertIn("Local authentication data migration completed", result.stdout)
-            self.assertEqual((role, provider, credentials, version), ("admin", "nginx-basic", 0, 4))
+            self.assertEqual((role, provider, credentials, version), ("admin", "nginx-basic", 0, 3))
 
 
 if __name__ == "__main__":

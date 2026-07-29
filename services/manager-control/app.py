@@ -249,7 +249,7 @@ def health():
                 "service_tokens_configured": tokens_valid,
             }
         ), 503
-    ready = version == 4 and tokens_valid
+    ready = version == 5 and tokens_valid
     return jsonify(
         {
             "ok": ready,

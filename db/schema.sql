@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS instances (
     runtime_identifier TEXT NOT NULL UNIQUE,
     port INTEGER,
     status TEXT NOT NULL DEFAULT 'active'
-        CHECK (status IN ('active', 'stopped', 'deleted', 'failed')),
+        CHECK (status IN ('provisioning', 'active', 'stopped', 'deleted', 'failed')),
     restore_state TEXT NOT NULL DEFAULT 'not_applicable'
         CHECK (restore_state IN ('not_applicable', 'restorable', 'incomplete')),
     openclaw_version TEXT,
@@ -108,7 +108,7 @@ ON instances(data_path)
 WHERE data_path IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_live_port
 ON instances(port)
-WHERE port IS NOT NULL AND status IN ('active', 'stopped', 'failed');
+WHERE port IS NOT NULL AND status IN ('provisioning', 'active', 'stopped', 'failed');
 
 CREATE TABLE IF NOT EXISTS instance_members (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -263,3 +263,6 @@ VALUES (3, 'local_auth_session');
 
 INSERT OR IGNORE INTO schema_migrations (version, name)
 VALUES (4, 'control_plane_model');
+
+INSERT OR IGNORE INTO schema_migrations (version, name)
+VALUES (5, 'instance_provisioning');

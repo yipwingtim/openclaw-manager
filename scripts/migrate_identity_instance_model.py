@@ -229,6 +229,11 @@ def migrate(conn, instances, schema_file, public_dir):
         for table in ("instance_credentials_v1", "ports_v1", "operation_records_v1", "instances_v1"):
             conn.execute(f"DROP TABLE {table}")
         execute_schema(conn, schema_file)
+        conn.execute("DELETE FROM schema_migrations WHERE version > 2")
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_migrations (version, name) "
+            "VALUES (2, 'identity_instance_model')"
+        )
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:
             raise RuntimeError(f"foreign key violations after migration: {violations}")

@@ -96,6 +96,42 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(context["instances"], [])
         self.assertEqual(context["operations"], [])
 
+    def test_admin_instances_filters_searches_and_paginates(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        instances = [
+            {
+                "public_id": f"instance-{index}", "legacy_user_id": f"user-{index}",
+                "instance_name": f"Instance {index:02d}", "product": "openclaw",
+                "status": "deleted" if index == 25 else "active",
+            }
+            for index in range(1, 26)
+        ]
+        self.admin.request.args = {
+            "status": "active", "q": "instance", "page": "2", "per_page": "10",
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_instances", return_value=instances
+        ):
+            template, context = self.admin.instances()
+
+        self.assertEqual(template, "admin_instances.html")
+        self.assertEqual(len(context["instances"]), 10)
+        self.assertEqual(context["pagination"]["page"], 2)
+        self.assertEqual(context["pagination"]["total"], 24)
+        self.assertEqual(context["status_filter"], "active")
+        self.assertEqual(context["query"], "instance")
+
+    def test_admin_instances_template_preserves_table_and_collapses_extra_actions(self):
+        template = (
+            ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("data-instance-table", template)
+        self.assertIn("select-current-page", template)
+        self.assertIn("data-instance-actions", template)
+        self.assertIn("显示 {{ pagination.start }}-{{ pagination.end }}", template)
+        self.assertIn("<th>访问认证</th><th>操作</th>", template)
+
     def test_admin_create_instance_lists_only_active_users(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         users = [

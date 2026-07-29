@@ -1,41 +1,65 @@
 {% extends "base.html" %}
-{% block title %}实例管理{% endblock %}
+{% block title %}实例管理 - 容器实例管理与运维平台{% endblock %}
 {% block content %}
-  <div class="page-kicker">管理员控制台</div>
-  <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
-    <h1 class="page-title">实例管理</h1>
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
+    <div>
+      <div class="page-kicker">管理控制台</div>
+      <h1 class="page-title">实例管理</h1>
+      <div class="page-subtitle">查看实例、访问入口、认证状态和运维操作。</div>
+    </div>
     <a class="btn btn-oc-outline" href="/admin/metadata">元数据与操作记录</a>
   </div>
+
   {% if result %}<div class="alert soft-success">{{ result }}</div>{% endif %}
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
-  <form method="post" action="/admin/action-batches" class="surface p-3 mb-3">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="row g-2 align-items-end">
-      <div class="col-lg-5">
-        <label class="form-label" for="batch_instances">批量实例</label>
-        <select class="form-select" id="batch_instances" name="instance_public_ids" multiple required size="4">
-          {% for instance in instances if instance.status != "deleted" %}
-            <option value="{{ instance.public_id }}">{{ instance.instance_name }} ({{ instance.product }})</option>
-          {% endfor %}
-        </select>
+
+  <div class="surface p-3 mb-3">
+    <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+      <div>
+        <div class="section-title">实例筛选</div>
+        <div class="muted-small">默认显示有效实例，可按状态、名称、ID、UUID 或产品筛选。</div>
       </div>
-      <div class="col-lg-3">
-        <label class="form-label" for="batch_action">批量操作</label>
-        <select class="form-select" id="batch_action" name="action" required>
-          <option value="start">启动</option><option value="stop">停止</option>
-          <option value="restart">重启</option><option value="install_skill">安装 Skill</option>
-        </select>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        {% for value, label in [("active", "有效"), ("deleted", "已删除"), ("all", "全部")] %}
+          <a class="btn btn-sm {% if status_filter == value %}btn-oc{% else %}btn-oc-outline{% endif %}"
+             href="/admin/instances?status={{ value }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">{{ label }}</a>
+        {% endfor %}
+        <form class="d-flex gap-2 align-items-center" method="get" action="/admin/instances">
+          <input type="hidden" name="status" value="{{ status_filter }}">
+          <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
+          <input class="form-control form-control-sm" style="width: 220px;" type="search" name="q" value="{{ query }}" placeholder="实例名称、ID、UUID 或产品">
+          <button class="btn btn-sm btn-oc-outline" type="submit">筛选</button>
+          {% if query %}<a class="btn btn-sm btn-outline-secondary" href="/admin/instances?status={{ status_filter }}&per_page={{ pagination.per_page }}">清除</a>{% endif %}
+        </form>
       </div>
-      <div class="col-lg-3">
-        <label class="form-label" for="batch_skill">Skill（安装时必选）</label>
-        <select class="form-select" id="batch_skill" name="skill_id">
-          <option value="">请选择</option>
-          {% for skill in skill_presets %}<option value="{{ skill }}">{{ skill }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-lg-1"><button class="btn btn-oc" type="submit" onclick="return confirm('确认提交批量操作？');">提交</button></div>
     </div>
-  </form>
+  </div>
+
+  <div class="surface p-3 mb-3">
+    <div class="section-title">批量操作</div>
+    <div class="muted-small mb-3">勾选当前页实例后执行生命周期操作或安装预设 Skill。</div>
+    <form id="batch-action-form" method="post" action="/admin/action-batches" onsubmit="return confirm('确认对勾选实例执行批量操作？');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="row g-3 align-items-end">
+        <div class="col-12 col-md-4 col-lg-3">
+          <label class="form-label" for="batch_action">操作</label>
+          <select class="form-select" id="batch_action" name="action" required>
+            <option value="start">批量启动</option><option value="stop">批量停止</option>
+            <option value="restart">批量重启</option><option value="install_skill">批量安装 Skill</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-4 col-lg-3">
+          <label class="form-label" for="batch_skill">Skill（安装时必选）</label>
+          <select class="form-select" id="batch_skill" name="skill_id">
+            <option value="">请选择</option>
+            {% for skill in skill_presets %}<option value="{{ skill }}">{{ skill }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-auto"><button class="btn btn-oc" type="submit" {% if not instances or status_filter == "deleted" %}disabled{% endif %}>执行批量操作</button></div>
+      </div>
+    </form>
+  </div>
+
   {% if batch_result %}
     <div class="surface table-responsive mb-3">
       <table class="table align-middle mb-0">
@@ -47,78 +71,117 @@
       </table>
     </div>
   {% endif %}
-  <div class="surface table-responsive">
-    <table class="table align-middle mb-0">
-      <thead><tr><th>实例</th><th>产品</th><th>状态</th><th>Basic Auth</th><th>操作</th><th>Skill</th><th>设备</th><th>保留策略</th></tr></thead>
-      <tbody>
-      {% for instance in instances %}
-        <tr>
-          <td>{{ instance.instance_name }} <span class="muted-small">{{ instance.legacy_user_id or instance.public_id }}</span></td>
-          <td>{{ instance.product }}</td><td>{{ instance.status }}</td>
-          <td>
-            {% if instance.status != "deleted" and "basic_auth" in instance.capabilities %}
-              <form method="post" action="/admin/instances/{{ instance.public_id }}/basic-auth" class="d-flex gap-2 align-items-center">
-                <span>{{ "已启用" if instance.basic_auth_enabled else "已禁用" }}</span>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="enabled" value="{{ 'false' if instance.basic_auth_enabled else 'true' }}">
-                <button class="btn btn-sm btn-oc-outline" type="submit">{{ "禁用" if instance.basic_auth_enabled else "启用" }}</button>
-              </form>
-            {% else %}
-              <span class="muted-small">不支持</span>
-            {% endif %}
-          </td>
-          <td>{% if instance.status != "deleted" %}<form method="post" action="/admin/instances/{{ instance.public_id }}/lifecycle" class="d-flex gap-2">
-            {% for action in ["start", "stop", "restart"] %}<button class="btn btn-sm btn-oc-outline" name="action" value="{{ action }}">{{ action }}</button>{% endfor %}
-          </form>
-          {% if "update_version" in instance.capabilities %}
-            <form method="post" action="/admin/instances/{{ instance.public_id }}/version" class="d-flex gap-2 mt-2 align-items-center" onsubmit="return confirm('确认升级实例版本？');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input class="form-control form-control-sm" style="width: 120px;" name="version" value="{{ instance.version or '' }}" placeholder="目标版本" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}">
-              <label class="muted-small"><input type="checkbox" name="restore_model_provider" value="true"> 恢复模型</label>
-              <button class="btn btn-sm btn-oc-outline" type="submit">升级</button>
-            </form>
-          {% endif %}{% else %}<span class="muted-small">已删除</span>{% endif %}</td>
-          <td>
-            {% if instance.status == "deleted" %}<span class="muted-small">已删除</span>
-            {% elif "skill_install" in instance.capabilities and skill_presets %}
-              <form method="post" action="/admin/instances/{{ instance.public_id }}/skill" class="d-flex gap-2 align-items-center" onsubmit="return confirm('确认安装 Skill？');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <select class="form-select form-select-sm" name="skill_id" required>
-                  {% for skill in skill_presets %}<option value="{{ skill }}">{{ skill }}</option>{% endfor %}
-                </select>
-                <button class="btn btn-sm btn-oc-outline" type="submit">安装</button>
-              </form>
-            {% elif "skill_install" in instance.capabilities %}
-              <span class="muted-small">未配置 Skill 白名单</span>
-            {% else %}<span class="muted-small">不支持</span>{% endif %}
-          </td>
-          <td>
-            {% if instance.status == "deleted" %}<span class="muted-small">已删除</span>
-            {% elif "device_pairing" in instance.capabilities %}
-              <form method="post" action="/admin/instances/{{ instance.public_id }}/devices" class="d-flex gap-2">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="btn btn-sm btn-oc-outline" name="action" value="refresh">刷新</button>
-                <button class="btn btn-sm btn-oc" name="action" value="approve_latest" onclick="return confirm('确认审批最新设备请求？');">审批最新</button>
-              </form>
-            {% else %}<span class="muted-small">不支持</span>{% endif %}
-          </td>
-          <td>
-            {% if instance.status == "deleted" and instance.restore_state == "restorable" and "restore" in instance.capabilities %}
-              <form method="post" action="/admin/instances/{{ instance.public_id }}/retention" onsubmit="return confirm('确认恢复该实例？');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="btn btn-sm btn-oc" name="action" value="restore">恢复</button>
-              </form>
-            {% elif instance.status != "deleted" and "delete" in instance.capabilities %}
-              <form method="post" action="/admin/instances/{{ instance.public_id }}/retention" onsubmit="return confirm('确认删除该实例？数据将移入回收目录。');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="btn btn-sm btn-outline-danger" name="action" value="delete">删除</button>
-              </form>
-            {% elif instance.status == "deleted" %}<span class="muted-small">不可恢复</span>
-            {% else %}<span class="muted-small">不支持</span>{% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+
+  <div class="surface" data-instance-table>
+    {% if instances %}
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead><tr>
+            <th style="width: 52px;"><input class="form-check-input" type="checkbox" id="select-current-page" aria-label="全选当前页"></th>
+            <th>实例</th><th>类型</th><th>状态</th><th>版本</th><th>访问地址</th><th>访问认证</th><th>操作</th>
+          </tr></thead>
+          <tbody>
+          {% for instance in instances %}
+            <tr>
+              <td><input class="form-check-input batch-instance-checkbox" type="checkbox" name="instance_public_ids" value="{{ instance.public_id }}" form="batch-action-form" {% if instance.status == "deleted" %}disabled{% endif %}></td>
+              <td>
+                <div class="fw-semibold">{{ instance.instance_name }}</div>
+                <div class="muted-small">{{ instance.legacy_user_id or instance.public_id }}</div>
+              </td>
+              <td><span class="badge-status badge-neutral">{{ instance.product }}</span></td>
+              <td><span class="badge-status {% if instance.status == 'deleted' %}badge-neutral{% else %}badge-running{% endif %}">{{ instance.status }}</span></td>
+              <td>{% if instance.version %}<span class="badge-status badge-neutral">{{ instance.version }}</span>{% else %}<span class="muted-small">未知</span>{% endif %}</td>
+              <td>{% if instance.access_url %}<a href="{{ instance.access_url }}" target="_blank" rel="noreferrer">{{ instance.access_url }}</a>{% else %}<span class="muted-small">未知</span>{% endif %}</td>
+              <td>
+                {% if "basic_auth" not in instance.capabilities or instance.status == "deleted" %}<span class="badge-status badge-neutral">不适用</span>
+                {% else %}
+                  <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="badge-status {% if instance.basic_auth_enabled %}badge-running{% else %}badge-stopped{% endif %}">{{ "已启用" if instance.basic_auth_enabled else "已禁用" }}</span>
+                    <form method="post" action="/admin/instances/{{ instance.public_id }}/basic-auth">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="enabled" value="{{ 'false' if instance.basic_auth_enabled else 'true' }}">
+                      <button class="btn btn-sm btn-oc-outline" type="submit">{{ "禁用" if instance.basic_auth_enabled else "启用" }}</button>
+                    </form>
+                  </div>
+                {% endif %}
+              </td>
+              <td style="min-width: 280px;">
+                {% if instance.status == "deleted" %}
+                  {% if instance.restore_state == "restorable" and "restore" in instance.capabilities %}
+                    <form method="post" action="/admin/instances/{{ instance.public_id }}/retention" onsubmit="return confirm('确认恢复该实例？');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="btn btn-sm btn-oc" name="action" value="restore">恢复</button>
+                    </form>
+                  {% else %}<span class="badge-status badge-neutral">无可用恢复数据</span>{% endif %}
+                {% else %}
+                  <div class="d-flex gap-2 flex-wrap mb-2">
+                    <form method="post" action="/admin/instances/{{ instance.public_id }}/lifecycle" class="d-flex gap-2 flex-wrap">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      {% for action, label in [("start", "启动"), ("stop", "停止"), ("restart", "重启")] %}<button class="btn btn-sm btn-oc-outline" name="action" value="{{ action }}">{{ label }}</button>{% endfor %}
+                    </form>
+                    {% if "delete" in instance.capabilities %}
+                      <form method="post" action="/admin/instances/{{ instance.public_id }}/retention" onsubmit="return confirm('确认删除该实例？数据将移入回收目录。');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="btn btn-sm btn-outline-danger" name="action" value="delete">删除</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                  {% if "update_version" in instance.capabilities or "skill_install" in instance.capabilities or "device_pairing" in instance.capabilities %}
+                    <details data-instance-actions>
+                      <summary class="muted-small">更多操作</summary>
+                      <div class="action-panel d-grid gap-3 mt-2">
+                        {% if "update_version" in instance.capabilities %}
+                          <form method="post" action="/admin/instances/{{ instance.public_id }}/version" class="d-flex gap-2 flex-wrap align-items-center" onsubmit="return confirm('确认升级实例版本？');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input class="form-control form-control-sm" style="width: 120px;" name="version" value="{{ instance.version or '' }}" placeholder="目标版本" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}">
+                            <label class="muted-small"><input type="checkbox" name="restore_model_provider" value="true"> 恢复模型</label>
+                            <button class="btn btn-sm btn-oc-outline" type="submit">升级</button>
+                          </form>
+                        {% endif %}
+                        {% if "skill_install" in instance.capabilities %}
+                          {% if skill_presets %}<form method="post" action="/admin/instances/{{ instance.public_id }}/skill" class="d-flex gap-2 flex-wrap" onsubmit="return confirm('确认安装 Skill？');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <select class="form-select form-select-sm w-auto" name="skill_id" required>{% for skill in skill_presets %}<option value="{{ skill }}">{{ skill }}</option>{% endfor %}</select>
+                            <button class="btn btn-sm btn-oc-outline" type="submit">安装 Skill</button>
+                          </form>{% else %}<span class="muted-small">未配置 Skill 白名单</span>{% endif %}
+                        {% endif %}
+                        {% if "device_pairing" in instance.capabilities %}
+                          <form method="post" action="/admin/instances/{{ instance.public_id }}/devices" class="d-flex gap-2 flex-wrap">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="btn btn-sm btn-oc-outline" name="action" value="refresh">刷新设备</button>
+                            <button class="btn btn-sm btn-oc" name="action" value="approve_latest" onclick="return confirm('确认审批最新设备请求？');">审批最新</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    </details>
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap p-3 border-top">
+        <div class="muted-small">显示 {{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }} 个实例</div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/instances?status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">上一页</a>
+          <span class="muted-small">第 {{ pagination.page }} / {{ pagination.total_pages }} 页</span>
+          <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/instances?status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">下一页</a>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap"><span class="muted-small">每页</span>
+          {% for option in page_size_options %}<a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/instances?status={{ status_filter }}&page=1&per_page={{ option }}&q={{ query|urlencode }}">{{ option }}</a>{% endfor %}
+        </div>
+      </div>
+    {% else %}<div class="p-4 muted-small">当前筛选条件下没有实例。</div>{% endif %}
   </div>
+
+  <script>
+    (() => {
+      const selectAll = document.getElementById("select-current-page");
+      const checkboxes = Array.from(document.querySelectorAll(".batch-instance-checkbox:not(:disabled)"));
+      if (!selectAll || !checkboxes.length) return;
+      selectAll.addEventListener("change", () => checkboxes.forEach((item) => { item.checked = selectAll.checked; }));
+    })();
+  </script>
 {% endblock %}

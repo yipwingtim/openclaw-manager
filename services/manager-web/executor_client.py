@@ -47,6 +47,13 @@ def snapshot(actor_public_id, instance_public_id):
     ).json()
 
 
+def admin_instance_statuses(actor_public_id, instance_public_ids):
+    return request(
+        "POST", "/internal/v1/admin/instance-statuses", actor_public_id,
+        json={"instance_public_ids": instance_public_ids},
+    ).json()["statuses"]
+
+
 def device_action(actor_public_id, instance_public_id, action):
     instance_id = urllib.parse.quote(instance_public_id, safe="")
     return request(

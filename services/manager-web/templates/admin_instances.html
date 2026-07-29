@@ -16,10 +16,10 @@
     <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap">
       <div>
         <div class="section-title">实例筛选</div>
-        <div class="muted-small">默认显示有效实例，可按状态、名称、ID、UUID 或产品筛选。</div>
+        <div class="muted-small">默认显示运行中的实例，可按状态、名称、ID、UUID 或产品筛选。</div>
       </div>
       <div class="d-flex gap-2 flex-wrap align-items-center">
-        {% for value, label in [("active", "有效"), ("deleted", "已删除"), ("all", "全部")] %}
+        {% for value, label in [("running", "运行中"), ("stopped", "已停止"), ("deleted", "已删除"), ("all", "全部")] %}
           <a class="btn btn-sm {% if status_filter == value %}btn-oc{% else %}btn-oc-outline{% endif %}"
              href="/admin/instances?status={{ value }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">{{ label }}</a>
         {% endfor %}
@@ -88,7 +88,12 @@
                 <div class="muted-small">{{ instance.legacy_user_id or instance.public_id }}</div>
               </td>
               <td><span class="badge-status badge-neutral">{{ instance.product }}</span></td>
-              <td><span class="badge-status {% if instance.status == 'deleted' %}badge-neutral{% else %}badge-running{% endif %}">{{ instance.status }}</span></td>
+              <td>
+                {% if instance.runtime_status == "running" %}<span class="badge-status badge-running">运行中</span>
+                {% elif instance.runtime_status == "stopped" %}<span class="badge-status badge-stopped">已停止</span>
+                {% elif instance.runtime_status == "deleted" %}<span class="badge-status badge-neutral">已删除</span>
+                {% else %}<span class="badge-status badge-neutral">未知</span>{% endif %}
+              </td>
               <td>{% if instance.version %}<span class="badge-status badge-neutral">{{ instance.version }}</span>{% else %}<span class="muted-small">未知</span>{% endif %}</td>
               <td>{% if instance.access_url %}<a href="{{ instance.access_url }}" target="_blank" rel="noreferrer">{{ instance.access_url }}</a>{% else %}<span class="muted-small">未知</span>{% endif %}</td>
               <td>

@@ -128,6 +128,32 @@ def snapshot(instance_public_id):
     )
 
 
+@app.post("/internal/v1/admin/instance-statuses")
+def admin_instance_statuses():
+    if caller_role() != "admin":
+        return jsonify({"error": "admin service token is required"}), 403
+    actor = request.headers.get("X-Actor-User-Public-Id", "").strip()
+    instance_ids = (request.get_json(silent=True) or {}).get("instance_public_ids")
+    if not actor:
+        return jsonify({"error": "actor user public ID is required"}), 400
+    if (
+        not isinstance(instance_ids, list) or not 1 <= len(instance_ids) <= 100
+        or any(not isinstance(value, str) or not value for value in instance_ids)
+        or len(set(instance_ids)) != len(instance_ids)
+    ):
+        return jsonify({"error": "instance_public_ids must contain 1-100 unique IDs"}), 400
+    statuses = []
+    for instance_id in instance_ids:
+        try:
+            instance = CONTROL.get_runtime_instance(instance_id, actor, True)
+            raw = get_adapter(instance["product"]).status(instance)
+        except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+            raw = "UNKNOWN"
+        status = "running" if raw.startswith("Up") else "stopped" if raw == "STOPPED" else "unknown"
+        statuses.append({"instance_public_id": instance_id, "status": status})
+    return jsonify({"statuses": statuses})
+
+
 @app.post("/internal/v1/instances/<instance_public_id>/devices/<action>")
 def device_action(instance_public_id, action):
     instance, error = runtime_instance(instance_public_id)

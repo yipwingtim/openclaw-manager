@@ -54,6 +54,13 @@ def load_admin_app():
     control_client.create_action_batch = lambda payload: payload
     control_client.get_action_batch = lambda request_id: {}
     control_client.create_execution_job = lambda payload: payload
+    executor_client = types.ModuleType("executor_client")
+
+    class ExecutorError(Exception):
+        pass
+
+    executor_client.ExecutorError = ExecutorError
+    executor_client.admin_instance_statuses = lambda actor, instance_ids: []
     web_common = types.ModuleType("web_common")
     web_common.SESSION_SECRET = "test"
     web_common.require_internal_token = lambda: None
@@ -61,8 +68,11 @@ def load_admin_app():
     web_common.context = lambda: {}
     web_common.actor = lambda: None
 
-    previous = {name: sys.modules.get(name) for name in ("flask", "control_client", "web_common")}
-    sys.modules.update(flask=flask, control_client=control_client, web_common=web_common)
+    previous = {name: sys.modules.get(name) for name in ("flask", "control_client", "executor_client", "web_common")}
+    sys.modules.update(
+        flask=flask, control_client=control_client,
+        executor_client=executor_client, web_common=web_common,
+    )
     spec = importlib.util.spec_from_file_location("manager_admin_web_app", ADMIN_APP)
     module = importlib.util.module_from_spec(spec)
     try:
@@ -107,10 +117,16 @@ class AdminWebTests(unittest.TestCase):
             for index in range(1, 26)
         ]
         self.admin.request.args = {
-            "status": "active", "q": "instance", "page": "2", "per_page": "10",
+            "status": "running", "q": "instance", "page": "2", "per_page": "10",
         }
+        statuses = [
+            {"instance_public_id": item["public_id"], "status": "running"}
+            for item in instances if item["status"] != "deleted"
+        ]
         with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
             self.admin.control_client, "list_admin_instances", return_value=instances
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses", return_value=statuses
         ):
             template, context = self.admin.instances()
 
@@ -118,7 +134,7 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(len(context["instances"]), 10)
         self.assertEqual(context["pagination"]["page"], 2)
         self.assertEqual(context["pagination"]["total"], 24)
-        self.assertEqual(context["status_filter"], "active")
+        self.assertEqual(context["status_filter"], "running")
         self.assertEqual(context["query"], "instance")
 
     def test_admin_instances_template_preserves_table_and_collapses_extra_actions(self):
@@ -131,6 +147,30 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn("data-instance-actions", template)
         self.assertIn("显示 {{ pagination.start }}-{{ pagination.end }}", template)
         self.assertIn("<th>访问认证</th><th>操作</th>", template)
+
+    def test_admin_instances_fetches_runtime_statuses_in_bounded_batches(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        instances = [
+            {"public_id": f"instance-{index}", "instance_name": str(index),
+             "product": "openclaw", "status": "active"}
+            for index in range(101)
+        ]
+        self.admin.request.args = {"status": "all"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_instances", return_value=instances
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses", return_value=[]
+        ) as statuses:
+            self.admin.instances()
+
+        self.assertEqual([len(call.args[1]) for call in statuses.call_args_list], [100, 1])
+
+    def test_admin_sidebar_calls_model_provider_page_model_settings(self):
+        template = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("<span>模型设置</span>", template)
+        self.assertNotIn("<span>模型供应商</span>", template)
 
     def test_admin_metadata_is_in_the_admin_sidebar(self):
         template = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(

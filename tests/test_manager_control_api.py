@@ -120,7 +120,7 @@ class ManagerControlApiTests(unittest.TestCase):
             response.get_json(),
             {
                 "ok": True,
-                "schema_version": 4,
+                "schema_version": 5,
                 "service_tokens_configured": True,
             },
         )

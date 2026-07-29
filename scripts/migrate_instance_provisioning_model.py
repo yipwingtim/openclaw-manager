@@ -16,17 +16,12 @@ def schema_version(conn):
     return int(row[0] or 0)
 
 
-def table_columns(conn, table):
-    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-
-
 def execute_schema(conn, schema_file):
     statement = ""
     for line in schema_file.read_text(encoding="utf-8").splitlines(True):
         statement += line
         if sqlite3.complete_statement(statement):
-            sql = statement.strip()
-            statement = ""
+            sql, statement = statement.strip(), ""
             if sql:
                 conn.execute(sql)
     if statement.strip():
@@ -40,10 +35,10 @@ def validate_schema(schema_file):
 
 def backup_database(db_file):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup = db_file.with_name(f"{db_file.name}.pre-v4-{stamp}.bak")
+    backup = db_file.with_name(f"{db_file.name}.pre-v5-{stamp}.bak")
     suffix = 1
     while backup.exists():
-        backup = db_file.with_name(f"{db_file.name}.pre-v4-{stamp}-{suffix}.bak")
+        backup = db_file.with_name(f"{db_file.name}.pre-v5-{stamp}-{suffix}.bak")
         suffix += 1
     with sqlite3.connect(db_file) as source, sqlite3.connect(backup) as destination:
         source.backup(destination)
@@ -51,37 +46,51 @@ def backup_database(db_file):
 
 
 def migrate(conn, schema_file):
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
     conn.execute("BEGIN IMMEDIATE")
     try:
-        local_columns = table_columns(conn, "local_credentials")
-        if "must_change_password" not in local_columns:
-            conn.execute(
-                """
-                ALTER TABLE local_credentials
-                ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1
-                    CHECK (must_change_password IN (0, 1))
-                """
+        conn.execute("ALTER TABLE instances RENAME TO instances_v4")
+        conn.execute(
+            """
+            CREATE TABLE instances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                public_id TEXT NOT NULL UNIQUE,
+                legacy_user_id TEXT UNIQUE,
+                owner_user_id INTEGER NOT NULL,
+                product TEXT NOT NULL DEFAULT 'openclaw',
+                instance_name TEXT NOT NULL,
+                runtime_identifier TEXT NOT NULL UNIQUE,
+                port INTEGER,
+                status TEXT NOT NULL DEFAULT 'active' CHECK (
+                    status IN ('provisioning', 'active', 'stopped', 'deleted', 'failed')
+                ),
+                restore_state TEXT NOT NULL DEFAULT 'not_applicable' CHECK (
+                    restore_state IN ('not_applicable', 'restorable', 'incomplete')
+                ),
+                openclaw_version TEXT,
+                basic_auth_enabled INTEGER NOT NULL DEFAULT 1 CHECK (
+                    basic_auth_enabled IN (0, 1)
+                ),
+                container_name TEXT,
+                access_url TEXT,
+                admin_url TEXT,
+                data_path TEXT,
+                nginx_conf_path TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                deleted_at TEXT,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                UNIQUE (owner_user_id, product, instance_name)
             )
-
-        session_columns = table_columns(conn, "user_sessions")
-        if "session_kind" not in session_columns:
-            conn.execute(
-                """
-                ALTER TABLE user_sessions
-                ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'user'
-                    CHECK (session_kind IN ('user', 'admin', 'emergency'))
-                """
-            )
-
-        operation_columns = table_columns(conn, "operation_records")
-        if "request_id" not in operation_columns:
-            conn.execute("ALTER TABLE operation_records ADD COLUMN request_id TEXT")
-        if "source_service" not in operation_columns:
-            conn.execute("ALTER TABLE operation_records ADD COLUMN source_service TEXT")
-
+            """
+        )
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(instances_v4)")]
+        names = ", ".join(columns)
+        conn.execute(f"INSERT INTO instances ({names}) SELECT {names} FROM instances_v4")
+        conn.execute("DROP TABLE instances_v4")
         execute_schema(conn, schema_file)
-        conn.execute("DELETE FROM schema_migrations WHERE version > 4")
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:
             raise RuntimeError(f"foreign key violations after migration: {violations}")
@@ -89,18 +98,20 @@ def migrate(conn, schema_file):
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Migrate metadata schema v3 to control-plane schema v4."
+        description="Migrate metadata schema v4 to instance provisioning schema v5."
     )
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--no-backup", action="store_true")
     args = parser.parse_args()
-
     if not args.db.is_file() or not args.schema.is_file():
         parser.error("database and schema files must exist")
     try:
@@ -108,35 +119,28 @@ def main():
     except (OSError, sqlite3.Error, RuntimeError) as exc:
         print(f"[ERROR] invalid schema: {exc}", file=sys.stderr)
         return 1
-
     with sqlite3.connect(args.db) as conn:
         version = schema_version(conn)
-        users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         instances = conn.execute("SELECT COUNT(*) FROM instances").fetchone()[0]
-    if version == 4:
-        print("[INFO] already at schema version 4")
+    if version == 5:
+        print("[INFO] already at schema version 5")
         return 0
-    if version != 3:
-        print(f"[ERROR] schema version 3 is required; found {version}", file=sys.stderr)
+    if version != 4:
+        print(f"[ERROR] schema version 4 is required; found {version}", file=sys.stderr)
         return 1
-
-    print(f"[PLAN] schema v3 -> v4 users={users} instances={instances}")
+    print(f"[PLAN] schema v4 -> v5 instances={instances}")
     if not args.apply:
         print("[INFO] Dry-run completed; no database changes were made")
         return 0
-
     if not args.no_backup:
-        backup = backup_database(args.db)
-        print(f"[INFO] Backup created: {backup}")
-
+        print(f"[INFO] Backup created: {backup_database(args.db)}")
     try:
         with sqlite3.connect(args.db, isolation_level=None) as conn:
             migrate(conn, args.schema)
     except (sqlite3.Error, RuntimeError) as exc:
         print(f"[ERROR] migration failed: {exc}", file=sys.stderr)
         return 1
-
-    print("[INFO] Metadata migration to schema version 4 completed")
+    print("[INFO] Metadata migration to schema version 5 completed")
     return 0
 
 

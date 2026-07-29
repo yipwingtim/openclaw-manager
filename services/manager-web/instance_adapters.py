@@ -257,7 +257,8 @@ class OpenClawDockerAdapter:
             rollback_note += f"\nRollback reload failed:\n{rollback_output}"
         return reload_code, f"{combined}{rollback_note}"
 
-    def create(self, user_id, basic_auth_enabled, basic_auth_password="", skip_nginx_reload=True, timeout=420):
+    def create(self, instance, basic_auth_enabled, basic_auth_password="", skip_nginx_reload=True, timeout=420):
+        user_id = self.get_legacy_user_id(instance)
         command = [
             str(self.manager_dir / "scripts" / "create_user.sh"),
             user_id,

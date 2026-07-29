@@ -47,6 +47,10 @@ def initialize(db_file=None, schema_file=None):
                 raise RuntimeError(
                     "metadata schema requires scripts/migrate_control_plane_model.py"
                 )
+            if version < 5:
+                raise RuntimeError(
+                    "metadata schema requires scripts/migrate_instance_provisioning_model.py"
+                )
         conn.executescript(schema)
 
 
@@ -490,6 +494,28 @@ def create_instance(
                 "SELECT * FROM instances WHERE public_id = ?", (public_id,)
             ).fetchone()
         )
+
+
+def finish_instance_provisioning(instance_public_id, status, *, db_file=None, conn=None):
+    if status not in {"active", "failed"}:
+        raise ValueError("invalid provisioning result")
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        instance = active_conn.execute(
+            "SELECT status FROM instances WHERE public_id = ?", (instance_public_id,)
+        ).fetchone()
+        if instance is None:
+            raise ValueError("instance not found")
+        if instance["status"] == status:
+            return get_instance_by_public_id(instance_public_id, conn=active_conn)
+        if instance["status"] != "provisioning":
+            raise ValueError("invalid instance provisioning transition")
+        active_conn.execute(
+            "UPDATE instances SET status = ?, updated_at = ? WHERE public_id = ?",
+            (status, utc_now(), instance_public_id),
+        )
+        return get_instance_by_public_id(instance_public_id, conn=active_conn)
 
 
 def list_instances_for_user(user_public_id, *, db_file=None, conn=None):

@@ -348,6 +348,18 @@ class OpenClawDockerAdapter:
             if previous_sigterm is not None:
                 signal.signal(signal.SIGTERM, previous_sigterm)
 
+    def set_model_provider(
+        self, instance, provider_id, model_id, base_url="", alias="", timeout=180,
+    ):
+        return self.run_command(
+            [
+                str(self.manager_dir / "scripts" / "set_model_provider.sh"),
+                self.get_legacy_user_id(instance), provider_id, model_id,
+                base_url, alias or model_id,
+            ],
+            timeout=timeout,
+        )
+
     def install_skill(self, instance, skill_id, request_id, timeout=180):
         runtime_target = self.get_runtime_target(instance)
         validation_code, validation_output = self._validate_skill_install(

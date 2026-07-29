@@ -409,6 +409,28 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     output=output,
                 )
             return True
+        if action == "set_model_provider":
+            control.update(request_id, "running", current_step="setting model provider")
+            if not adapter.status(instance).startswith("Up"):
+                control.update(
+                    request_id, "failed", error_summary="instance is not running",
+                    output="Model provider update requires a running instance.",
+                )
+                return True
+            params = job["params"]
+            code, output = adapter.set_model_provider(
+                instance, params["model_provider_id"], params["model_id"],
+                params["model_base_url"], params["model_alias"],
+            )
+            output = output[-MAX_OUTPUT_LENGTH:]
+            if code == 0:
+                control.update(request_id, "succeeded", output=output)
+            else:
+                control.update(
+                    request_id, "failed", error_summary="model provider update failed",
+                    output=output,
+                )
+            return True
         if action in {"refresh_devices", "approve_latest_device"}:
             control.update(request_id, "running", current_step=action.replace("_", " "))
             if not adapter.status(instance).startswith("Up"):

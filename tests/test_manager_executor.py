@@ -387,6 +387,37 @@ class ManagerExecutorTests(unittest.TestCase):
         )
         self.assertEqual(control.update.call_args.args, ("skill-1", "succeeded"))
 
+    def test_run_once_sets_model_provider_without_sensitive_params(self):
+        control = Mock()
+        control.claim.return_value = {
+            "job": {
+                "request_id": "model-provider-1",
+                "action": "instance.set_model_provider",
+                "params": {
+                    "model_provider_id": "openai",
+                    "model_id": "openai/gpt-5",
+                    "model_base_url": "https://models.example/v1",
+                    "model_alias": "GPT-5",
+                },
+            },
+            "instance": {
+                "product": "openclaw",
+                "runtime_identifier": "openclaw_alice",
+            },
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.status.return_value = "Up"
+        adapter.set_model_provider.return_value = (0, "updated")
+
+        self.executor.run_once(control, lambda product: adapter, max_attempts=2)
+
+        adapter.set_model_provider.assert_called_once_with(
+            control.claim.return_value["instance"], "openai", "openai/gpt-5",
+            "https://models.example/v1", "GPT-5",
+        )
+        self.assertEqual(control.update.call_args.args, ("model-provider-1", "succeeded"))
+
     def test_run_once_refreshes_devices_without_retry(self):
         control = Mock()
         control.claim.return_value = {

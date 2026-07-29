@@ -20,6 +20,7 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.set_basic_auth": "basic_auth",
     "instance.update_version": "update_version",
     "instance.install_skill": "skill_install",
+    "instance.set_model_provider": "batch_set_model_provider",
     "instance.refresh_devices": "device_pairing",
     "instance.approve_latest_device": "device_pairing",
     "instance.delete": "delete",

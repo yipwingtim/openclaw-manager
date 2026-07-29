@@ -1502,15 +1502,13 @@ def list_active_users(status_filter="running"):
     if status_filter == "deleted":
         return list_deleted_users()
 
-    users_dir = PUBLIC_DIR / "users"
-    if not users_dir.is_dir():
-        return []
-
     if status_filter not in {"running", "stopped", "all", "deleted"}:
         status_filter = "running"
 
+    users_dir = PUBLIC_DIR / "users"
     users = []
-    for user_dir in sorted(users_dir.iterdir(), key=lambda item: item.name):
+    user_dirs = sorted(users_dir.iterdir(), key=lambda item: item.name) if users_dir.is_dir() else []
+    for user_dir in user_dirs:
         if not user_dir.is_dir():
             continue
         user_id = validate_user_id(user_dir.name)
@@ -1537,6 +1535,8 @@ def list_active_users(status_filter="running"):
                 "basic_auth_enabled": is_basic_auth_enabled(user_id),
             }
         )
+    if status_filter == "all":
+        users.extend(list_deleted_users())
     return users
 
 

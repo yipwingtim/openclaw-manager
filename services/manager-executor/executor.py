@@ -161,7 +161,23 @@ def reload_nginx_after_create(adapter):
     )
     if code != 0:
         return code, output
-    return adapter.reload_nginx()
+    connect_code, connect_output = adapter.run_command(
+        [
+            "bash", "-lc",
+            'source "$1"; connect_shared_services_to_tenant_networks "$2" "$3"',
+            "bash",
+            str(adapter.manager_dir / "scripts" / "lib_tenant_network.sh"),
+            adapter.nginx_container_name,
+            os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"),
+        ],
+        timeout=90,
+    )
+    if connect_code != 0:
+        return connect_code, connect_output
+    reload_code, reload_output = adapter.reload_nginx()
+    return reload_code, "\n".join(
+        part for part in (output, connect_output, reload_output) if part
+    )
 
 
 def rollback_created_instance(adapter, instance):

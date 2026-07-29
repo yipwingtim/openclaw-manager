@@ -64,6 +64,8 @@ class ManagerExecutorTests(unittest.TestCase):
             "basic_auth_enabled": True, "status": "provisioning",
         }
         adapter = Mock()
+        adapter.manager_dir = Path("/manager")
+        adapter.nginx_container_name = "nginx"
         adapter.supports.return_value = True
         adapter.create.return_value = (0, "password and token must be discarded")
         adapter.run_command.return_value = (0, "nginx compose updated")
@@ -103,6 +105,9 @@ class ManagerExecutorTests(unittest.TestCase):
             skip_metadata_write=True,
         )
         adapter.reload_nginx.assert_called_once()
+        connect = adapter.run_command.call_args_list[1]
+        self.assertIn("connect_shared_services_to_tenant_networks", connect.args[0][2])
+        self.assertEqual(connect.args[0][-2:], ["nginx", "openclaw-model-proxy"])
         self.assertFalse(secret_path.exists())
         self.assertEqual(control.update.call_args.args, ("create-1", "succeeded"))
         self.assertEqual(control.update.call_args.kwargs["output"], "instance created")
@@ -139,6 +144,39 @@ class ManagerExecutorTests(unittest.TestCase):
         self.assertEqual(control.update.call_args.args, ("create-1", "failed"))
         self.assertIn("recycle bin", control.update.call_args.kwargs["output"])
         self.assertIn("nginx failed", control.update.call_args.kwargs["output"])
+
+    def test_run_once_rolls_back_when_shared_network_reconnect_fails(self):
+        control = Mock()
+        instance = {
+            "product": "openclaw", "legacy_user_id": "alice",
+            "runtime_identifier": "openclaw_alice", "status": "provisioning",
+            "basic_auth_enabled": True,
+        }
+        adapter = Mock()
+        adapter.manager_dir = Path("/manager")
+        adapter.nginx_container_name = "nginx"
+        adapter.supports.return_value = True
+        adapter.create.return_value = (0, "created")
+        adapter.run_command.side_effect = [
+            (0, "nginx recreated"),
+            (1, "network reconnect failed"),
+            (0, "deleted"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            secret_dir = Path(directory)
+            secret_path = secret_dir / "secret"
+            secret_path.write_text("password", encoding="utf-8")
+            control.claim.return_value = {
+                "job": {"request_id": "create-1", "action": "instance.create",
+                        "params": {"secret_path": str(secret_path)}},
+                "instance": instance,
+            }
+            with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir):
+                self.executor.run_once(control, lambda product: adapter)
+
+        adapter.reload_nginx.assert_not_called()
+        self.assertEqual(control.update.call_args.args, ("create-1", "failed"))
+        self.assertIn("network reconnect failed", control.update.call_args.kwargs["output"])
 
     def test_run_once_redacts_secrets_from_creation_failure(self):
         control = Mock()

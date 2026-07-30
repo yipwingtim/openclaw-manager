@@ -87,6 +87,8 @@ for completing the multi-product control plane.
   model. Add creation only after the real Hermes deployment contract is known.
 - 首期基于统一实例和能力模型支持已有 Hermes 实例登记、启停、重启、状态、日志和
   访问；待明确 Hermes 的实际部署契约后再增加创建能力。
+- 已登记 Hermes 的 Dashboard 通过独立外部端口经 `openclaw-nginx` 转发到单容器
+  `9119`；Nginx 负责 TLS 和路由，Dashboard 登录继续使用 Hermes 自身认证。
 - Require owner/member authorization and operation audit for every action.
 - 每个动作必须校验所有者或成员权限并记录审计日志。
 - Do not require OpenClaw-only file, device, or Skill features.

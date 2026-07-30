@@ -12,6 +12,7 @@ from legacy_recycle import deleted_payload
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = SCRIPT_DIR.parent
+sys.path.insert(0, str(MANAGER_DIR / "services" / "manager-web"))
 CONFIG_FILE = MANAGER_DIR / "config" / "openclaw-manager.env"
 METADATA_STORE_FILE = MANAGER_DIR / "services" / "manager-web" / "metadata_store.py"
 
@@ -247,6 +248,23 @@ def register_owned_instance(args):
             access_url=args.access_url,
             conn=conn,
         )
+        if args.product == "hermes":
+            from instance_adapters import HermesDockerAdapter
+
+            adapter = HermesDockerAdapter(
+                manager_dir=MANAGER_DIR,
+                public_dir=OPENCLAW_PUBLIC_DIR,
+                nginx_users_conf_dir=NGINX_USERS_CONF_DIR,
+                nginx_compose_dir=Path(
+                    os.environ.get("NGINX_COMPOSE_DIR", "/data/docker/nginx/compose")
+                ),
+                nginx_container_name=os.environ.get(
+                    "NGINX_CONTAINER_NAME", "openclaw-nginx"
+                ),
+            )
+            code, output = adapter.configure_ingress(instance)
+            if code != 0:
+                raise RuntimeError(output)
         metadata_store.record_operation(
             action="register_instance",
             status="success",

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -697,15 +698,215 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
 class HermesDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities("hermes")
 
+    _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+    def ingress_conf(self, instance, disabled=False):
+        public_id = instance.get("public_id")
+        if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
+            raise ValueError("Hermes instance public_id is not safe for ingress")
+        directory = self.nginx_disabled_conf_dir() if disabled else self.nginx_users_conf_dir
+        return directory / f"hermes-{public_id}.conf"
+
     def start(self, instance):
-        return self.run_command(
+        code, output = self.run_command(
             ["docker", "start", self.get_runtime_target(instance)], timeout=90
         )
+        if code != 0:
+            return code, output
+        disabled = self.ingress_conf(instance, disabled=True)
+        active = self.ingress_conf(instance)
+        if not disabled.is_file():
+            return 0, output
+        active.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(disabled, active)
+        reload_code, reload_output = self.reload_nginx()
+        if reload_code == 0:
+            return 0, "\n".join(part for part in (output, reload_output) if part)
+        shutil.move(active, disabled)
+        self.run_command(["docker", "stop", self.get_runtime_target(instance)], timeout=60)
+        return reload_code, reload_output
 
     def stop(self, instance):
-        return self.run_command(
+        active = self.ingress_conf(instance)
+        disabled = self.ingress_conf(instance, disabled=True)
+        if active.is_file():
+            disabled.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(active, disabled)
+            reload_code, reload_output = self.reload_nginx()
+            if reload_code != 0:
+                shutil.move(disabled, active)
+                self.reload_nginx()
+                return reload_code, reload_output
+        code, output = self.run_command(
             ["docker", "stop", self.get_runtime_target(instance)], timeout=60
         )
+        if code == 0:
+            return 0, output
+        if disabled.is_file():
+            shutil.move(disabled, active)
+            self.reload_nginx()
+        return code, output
+
+    def configure_ingress(self, instance):
+        """Publish the registered Hermes dashboard through the shared Nginx."""
+        runtime_target = self.get_runtime_target(instance)
+        port = instance.get("port")
+        public_id = instance.get("public_id")
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("Hermes ingress port is required")
+        if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
+            raise ValueError("Hermes instance public_id is not safe for ingress")
+        if not self._SAFE_DOCKER_NAME.fullmatch(runtime_target):
+            raise ValueError("Hermes runtime_identifier is not a valid container name")
+
+        inspected = subprocess.run(
+            [
+                "docker", "inspect", "--format",
+                "{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}",
+                runtime_target,
+            ],
+            cwd=str(self.manager_dir),
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        if inspected.returncode != 0:
+            return inspected.returncode, inspected.stderr.strip() or "Hermes container not found."
+        networks = [
+            line.strip() for line in inspected.stdout.splitlines()
+            if line.strip() not in {"manager-net", "bridge", "host", "none"}
+        ]
+        if len(networks) != 1 or not self._SAFE_DOCKER_NAME.fullmatch(networks[0]):
+            return 1, "Hermes container must have exactly one safe tenant network."
+        target_network = networks[0]
+
+        self.nginx_users_conf_dir.mkdir(parents=True, exist_ok=True)
+        conf = self.ingress_conf(instance)
+        compose_file = self.nginx_compose_dir / "docker-compose.yml"
+        if not compose_file.is_file():
+            return 1, f"Nginx compose file not found: {compose_file}"
+        old_conf = conf.read_bytes() if conf.is_file() else None
+        old_compose = compose_file.read_bytes()
+        cert = os.environ.get("NGINX_SSL_CERT", "/etc/nginx/ssl/fullchain.pem")
+        key = os.environ.get("NGINX_SSL_KEY", "/etc/nginx/ssl/privkey.pem")
+        try:
+            conf.write_text(
+                f"upstream hermes_backend_{port} {{\n"
+                f"    zone hermes_backend_{port} 64k;\n"
+                "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+                "    resolver_timeout 5s;\n"
+                f"    server {runtime_target}:9119 resolve;\n"
+                "}\n\n"
+                "server {\n"
+                f"    listen {port} ssl;\n"
+                "    server_name _;\n"
+                f"    ssl_certificate {cert};\n"
+                f"    ssl_certificate_key {key};\n\n"
+                "    location / {\n"
+                f"        proxy_pass http://hermes_backend_{port};\n"
+                "        proxy_http_version 1.1;\n"
+                "        proxy_set_header Upgrade $http_upgrade;\n"
+                '        proxy_set_header Connection "upgrade";\n'
+                "        proxy_set_header Host $host;\n"
+                "        proxy_set_header X-Real-IP $remote_addr;\n"
+                "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+                "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+                "        proxy_read_timeout 86400;\n"
+                "        proxy_send_timeout 86400;\n"
+                "    }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            compose_file.write_text(
+                self._add_ingress_to_nginx_compose(
+                    old_compose.decode("utf-8"), port, target_network
+                ),
+                encoding="utf-8",
+            )
+            up_code, up_output = self.run_command(
+                ["docker", "compose", "-f", str(compose_file), "up", "-d"],
+                timeout=120,
+            )
+            if up_code != 0:
+                raise RuntimeError(up_output)
+            reload_code, reload_output = self.reload_nginx()
+            if reload_code != 0:
+                raise RuntimeError(reload_output)
+            return 0, "\n".join(part for part in (up_output, reload_output) if part)
+        except Exception as exc:
+            compose_file.write_bytes(old_compose)
+            if old_conf is None:
+                conf.unlink(missing_ok=True)
+            else:
+                conf.write_bytes(old_conf)
+            self.run_command(
+                ["docker", "compose", "-f", str(compose_file), "up", "-d"],
+                timeout=120,
+            )
+            rollback_code, rollback_output = self.reload_nginx()
+            if rollback_code != 0:
+                return 1, (
+                    "Hermes ingress configuration failed; file rollback completed "
+                    f"but Nginx recovery failed: {rollback_output}"
+                )
+            return 1, f"Hermes ingress configuration failed and was rolled back: {exc}"
+
+    @staticmethod
+    def _add_ingress_to_nginx_compose(text, port, network):
+        mapping = f'      - "{port}:{port}"\n'
+        service_network = f"      - {network}\n"
+        network_definition = f"  {network}:\n    external: true\n"
+        lines = text.splitlines(keepends=True)
+        service_start = next(
+            (index for index, line in enumerate(lines) if line == "  nginx:\n"), None
+        )
+        if service_start is None:
+            raise ValueError("Nginx compose service not found")
+        service_end = next(
+            (
+                index for index in range(service_start + 1, len(lines))
+                if re.match(r"^  [^ ]+:[ ]*\n$", lines[index])
+            ),
+            len(lines),
+        )
+        port_pattern = re.compile(
+            rf"^\s*-\s*['\"]?{port}:{port}['\"]?\s*$"
+        )
+        if not any(port_pattern.match(line) for line in lines[service_start:service_end]):
+            ports_index = next(
+                (
+                    index for index in range(service_start + 1, service_end)
+                    if lines[index] == "    ports:\n"
+                ),
+                None,
+            )
+            if ports_index is None:
+                raise ValueError("Nginx compose ports section not found")
+            lines.insert(ports_index + 1, mapping)
+            service_end += 1
+        if not any(
+            line.strip().lstrip("-").strip() == network
+            for line in lines[service_start:service_end]
+        ):
+            networks_index = next(
+                (
+                    index for index in range(service_start + 1, service_end)
+                    if lines[index] == "    networks:\n"
+                ),
+                None,
+            )
+            if networks_index is None:
+                raise ValueError("Nginx compose service networks section not found")
+            lines.insert(networks_index + 1, service_network)
+        if network_definition not in "".join(lines):
+            for index, line in enumerate(lines):
+                if line == "networks:\n":
+                    lines.insert(index + 1, network_definition)
+                    break
+            else:
+                raise ValueError("Nginx compose top-level networks section not found")
+        return "".join(lines)
 
     def create(self, *args, **kwargs):
         return 1, "Hermes create is not supported yet."

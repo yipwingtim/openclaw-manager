@@ -497,6 +497,9 @@ Control/Executor 任务执行，全局 `/admin/*` 已切换到 `manager-admin-we
 - 所有操作使用实例 UUID、成员权限和审计记录
 - 按 Hermes 实际能力声明功能，不强制对齐 OpenClaw 的文件、设备或 Skill 功能
 - 在确认 Hermes 的容器拓扑、健康检查、日志和入口模型后，再定义创建契约
+- 已登记 Hermes 使用 Nginx 独立端口转发到容器 Dashboard `9119`；Nginx 持久加入
+  Hermes 的唯一租户网络。Dashboard 使用 Hermes 自身 Basic Auth/OAuth/OIDC，API
+  `8642` 的 `API_SERVER_KEY` 不作为 Dashboard 登录凭据。
 
 ### Phase 6：运行时与入口解耦
 

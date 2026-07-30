@@ -1,7 +1,9 @@
 import hashlib
+import base64
 import json
 import os
 import re
+import secrets
 import signal
 import shutil
 import subprocess
@@ -697,8 +699,22 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
 
 class HermesDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities("hermes")
+    IMAGE = "nousresearch/hermes-agent:v2026.7.20"
 
     _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+    @staticmethod
+    def _password_hash(password):
+        salt = secrets.token_bytes(16)
+        derived = hashlib.scrypt(
+            password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32
+        )
+        return (
+            "scrypt$16384$8$1$"
+            + base64.b64encode(salt).decode()
+            + "$"
+            + base64.b64encode(derived).decode()
+        )
 
     def ingress_conf(self, instance, disabled=False):
         public_id = instance.get("public_id")
@@ -750,7 +766,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
     def configure_ingress(self, instance):
         """Publish the registered Hermes dashboard through the shared Nginx."""
         runtime_target = self.get_runtime_target(instance)
-        port = instance.get("port")
+        port = instance.get("_created_port", instance.get("port"))
         public_id = instance.get("public_id")
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError("Hermes ingress port is required")
@@ -908,11 +924,181 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 raise ValueError("Nginx compose top-level networks section not found")
         return "".join(lines)
 
-    def create(self, *args, **kwargs):
-        return 1, "Hermes create is not supported yet."
+    def create(
+        self, instance, basic_auth_enabled, basic_auth_password="",
+        skip_nginx_reload=True, skip_metadata_write=False, timeout=420,
+    ):
+        del skip_nginx_reload, skip_metadata_write
+        runtime_target = self.get_runtime_target(instance)
+        data_path = Path(instance["data_path"])
+        user_id = self.get_legacy_user_id(instance)
+        if (
+            basic_auth_enabled != "true"
+            or not basic_auth_password
+            or not self._SAFE_DOCKER_NAME.fullmatch(runtime_target)
+            or data_path.parent != self.public_dir / "hermes"
+        ):
+            return 1, "Invalid Hermes creation parameters."
+        if data_path.exists():
+            return 1, f"Hermes data path already exists: {data_path}"
+
+        network = "openclaw-user-" + hashlib.sha256(user_id.encode()).hexdigest()
+        port_file = os.environ.get("PORT_FILE", str(self.public_dir / "ports.txt"))
+        port_start = os.environ.get("PORT_START", "30021")
+        port_end = os.environ.get("PORT_END", "39999")
+        created_network = False
+        try:
+            data_path.mkdir(parents=True)
+            (data_path / ".env").write_text(
+                "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=" + user_id + "\n"
+                "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH="
+                + self._password_hash(basic_auth_password) + "\n"
+                "HERMES_DASHBOARD_BASIC_AUTH_SECRET=" + secrets.token_urlsafe(48) + "\n",
+                encoding="utf-8",
+            )
+            (data_path / ".env").chmod(0o600)
+            network_existed = self.run_command(
+                ["docker", "network", "inspect", network], timeout=10
+            )[0] == 0
+            code, output = self.run_command(
+                [
+                    "bash", "-lc",
+                    'source "$1"; prepare_tenant_networks "$2"', "bash",
+                    str(self.manager_dir / "scripts" / "lib_tenant_network.sh"), network,
+                ],
+                timeout=60,
+            )
+            if code != 0:
+                raise RuntimeError(output)
+            created_network = not network_existed
+            code, output = self.run_command(
+                [
+                    "bash", "-lc",
+                    'source "$1"; allocate_port "$2" "$3" "$4"', "bash",
+                    str(self.manager_dir / "scripts" / "lib_port_allocator.sh"),
+                    port_file, port_start, port_end,
+                ],
+                timeout=30,
+            )
+            allocated_ports = [line for line in output.splitlines() if line.isdigit()]
+            if code != 0 or len(allocated_ports) != 1:
+                raise RuntimeError(output or "Hermes ingress port allocation failed")
+            instance["_created_port"] = int(allocated_ports[0])
+            code, output = self.run_command(
+                [
+                    "docker", "run", "-d", "--name", runtime_target,
+                    "--restart", "unless-stopped", "--network", network,
+                    "--shm-size", "1g", "-v", f"{data_path}:/opt/data",
+                    "-e", "HERMES_DASHBOARD=1", self.IMAGE, "gateway", "run",
+                ],
+                timeout=timeout,
+            )
+            if code != 0:
+                raise RuntimeError(output)
+            code, readiness = self.run_command(
+                [
+                    "docker", "exec", runtime_target, "sh", "-lc",
+                    "i=0; while [ $i -lt 30 ]; do "
+                    "curl -fsS --max-time 2 http://127.0.0.1:9119/ >/dev/null && exit 0; "
+                    "i=$((i+1)); sleep 2; done; exit 1",
+                ],
+                timeout=70,
+            )
+            if code != 0:
+                raise RuntimeError(readiness or "Hermes Dashboard did not become ready")
+            return 0, output
+        except Exception as exc:
+            self.run_command(["docker", "rm", "-f", runtime_target], timeout=60)
+            shutil.rmtree(data_path, ignore_errors=True)
+            if created_network:
+                self.run_command(["docker", "network", "rm", network], timeout=30)
+            instance.pop("_created_port", None)
+            return 1, f"Hermes creation failed and was rolled back: {exc}"
 
     def delete(self, instance):
-        return 1, "Hermes delete is not supported yet."
+        runtime_target = self.get_runtime_target(instance)
+        data_path = Path(instance["data_path"])
+        port = instance.get("_created_port", instance.get("port"))
+        conf = self.ingress_conf(instance)
+        disabled_conf = self.ingress_conf(instance, disabled=True)
+        compose_file = self.nginx_compose_dir / "docker-compose.yml"
+        networks = subprocess.run(
+            [
+                "docker", "inspect", "--format",
+                "{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}",
+                runtime_target,
+            ],
+            text=True, capture_output=True, timeout=10, check=False,
+        ).stdout.splitlines()
+        old_compose = compose_file.read_bytes() if compose_file.is_file() else None
+        old_conf = conf.read_bytes() if conf.is_file() else None
+        old_disabled_conf = disabled_conf.read_bytes() if disabled_conf.is_file() else None
+        if isinstance(port, int) and compose_file.is_file():
+            conf.unlink(missing_ok=True)
+            disabled_conf.unlink(missing_ok=True)
+            compose_file.write_text(
+                self._remove_ingress_from_nginx_compose(
+                    compose_file.read_text(encoding="utf-8"), port, networks
+                ),
+                encoding="utf-8",
+            )
+            apply_code, apply_output = self.run_command(
+                ["docker", "compose", "-f", str(compose_file), "up", "-d"], timeout=120
+            )
+            reload_code, reload_output = self.reload_nginx() if apply_code == 0 else (apply_code, apply_output)
+            if reload_code != 0:
+                compose_file.write_bytes(old_compose)
+                if old_conf is not None:
+                    conf.write_bytes(old_conf)
+                if old_disabled_conf is not None:
+                    disabled_conf.parent.mkdir(parents=True, exist_ok=True)
+                    disabled_conf.write_bytes(old_disabled_conf)
+                self.run_command(
+                    ["docker", "compose", "-f", str(compose_file), "up", "-d"], timeout=120
+                )
+                self.reload_nginx()
+                return reload_code, f"Hermes ingress cleanup failed: {reload_output}"
+        code, output = self.run_command(["docker", "rm", "-f", runtime_target], timeout=60)
+        if code != 0:
+            if old_compose is not None:
+                compose_file.write_bytes(old_compose)
+            if old_conf is not None:
+                conf.write_bytes(old_conf)
+            if old_disabled_conf is not None:
+                disabled_conf.parent.mkdir(parents=True, exist_ok=True)
+                disabled_conf.write_bytes(old_disabled_conf)
+            self.run_command(
+                ["docker", "compose", "-f", str(compose_file), "up", "-d"], timeout=120
+            )
+            self.reload_nginx()
+            return code, output
+        shutil.rmtree(data_path, ignore_errors=True)
+        for network in networks:
+            if network.startswith("openclaw-user-"):
+                for shared in (
+                    self.nginx_container_name,
+                    os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"),
+                ):
+                    self.run_command(
+                        ["docker", "network", "disconnect", network, shared], timeout=30
+                    )
+                self.run_command(["docker", "network", "rm", network], timeout=30)
+        return 0, output
+
+    @staticmethod
+    def _remove_ingress_from_nginx_compose(text, port, networks):
+        tenant_networks = {network for network in networks if network.startswith("openclaw-user-")}
+        lines = text.splitlines(keepends=True)
+        lines = [
+            line for line in lines
+            if not re.match(rf"^\s*-\s*['\"]?{port}:{port}['\"]?\s*$", line)
+            and line.strip().lstrip("-").strip() not in tenant_networks
+        ]
+        for network in tenant_networks:
+            definition = f"  {network}:\n    external: true\n"
+            text = "".join(lines).replace(definition, "")
+            lines = text.splitlines(keepends=True)
+        return "".join(lines)
 
     def restore(self, instance):
         return 1, "Hermes restore is not supported yet."

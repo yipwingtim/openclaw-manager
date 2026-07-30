@@ -214,10 +214,13 @@ def create_instance():
     owner_public_id = request.form.get("owner_user_public_id", "").strip()
     legacy_user_id = request.form.get("legacy_user_id", "").strip()
     instance_name = request.form.get("instance_name", "").strip()
+    product = request.form.get("product", "openclaw").strip()
     password = request.form.get("basic_auth_password", "")
     basic_auth_enabled = request.form.get("basic_auth_enabled") == "true"
     if not owner_public_id or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
         return redirect(url_for("create_instance_page", error="请选择 Owner 并填写有效的实例 ID。"))
+    if product not in {"openclaw", "hermes"}:
+        return redirect(url_for("create_instance_page", error="不支持该实例产品。"))
     if not instance_name or len(instance_name) > 128 or not password:
         return redirect(url_for("create_instance_page", error="实例名称和 Basic Auth 密码不能为空。"))
     request_id = "instance-create-" + uuid.uuid4().hex
@@ -229,7 +232,7 @@ def create_instance():
                 "owner_user_public_id": owner_public_id,
                 "legacy_user_id": legacy_user_id,
                 "instance_name": instance_name,
-                "product": "openclaw",
+                "product": product,
                 "basic_auth_enabled": basic_auth_enabled,
                 "basic_auth_password": password,
             }

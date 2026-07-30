@@ -120,6 +120,39 @@ class ManagerExecutorTests(unittest.TestCase):
         self.assertEqual(control.update.call_args.kwargs["output"], "instance created")
         self.assertEqual(control.update.call_args.kwargs["result"]["openclaw_token"], "runtime-token")
 
+    def test_run_once_creates_hermes_and_configures_ingress(self):
+        control = Mock()
+        instance = {
+            "public_id": "instance-1", "product": "hermes",
+            "legacy_user_id": "alice", "runtime_identifier": "hermes_alice",
+            "data_path": "/data/hermes/alice", "basic_auth_enabled": True,
+            "status": "provisioning",
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.create.side_effect = lambda *args, **kwargs: (
+            instance.__setitem__("_created_port", 39119) or (0, "created")
+        )
+        adapter.configure_ingress.return_value = (0, "published")
+        with tempfile.TemporaryDirectory() as directory:
+            secret_dir = Path(directory)
+            secret_path = secret_dir / "secret"
+            secret_path.write_text("password", encoding="utf-8")
+            control.claim.return_value = {
+                "job": {"request_id": "create-1", "action": "instance.create",
+                        "params": {"secret_path": str(secret_path)}},
+                "instance": instance,
+            }
+            with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir), patch.dict(
+                self.executor.os.environ, {"PUBLIC_HOST": "example.test"}
+            ):
+                self.executor.run_once(control, lambda product: adapter)
+
+        adapter.configure_ingress.assert_called_once_with(instance)
+        result = control.update.call_args.kwargs["result"]
+        self.assertEqual(result["access_url"], "https://example.test:39119")
+        self.assertEqual(result["openclaw_token"], "")
+
     def test_run_once_rolls_back_created_resources_when_nginx_update_fails(self):
         control = Mock()
         instance = {

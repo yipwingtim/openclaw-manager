@@ -4,7 +4,7 @@
   <div class="page-kicker">管理员控制台</div>
   <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
     <div>
-      <h1 class="page-title">创建 OpenClaw 实例</h1>
+      <h1 class="page-title">创建实例</h1>
       <div class="page-subtitle">为已有平台用户创建单个实例，部署由 Executor 异步执行。</div>
     </div>
     <a class="btn btn-oc-outline" href="/admin/instances">实例列表</a>
@@ -51,6 +51,13 @@
     <form class="surface p-3 p-lg-4" method="post" action="/admin/create-instance" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="mb-3">
+        <label class="form-label" for="product">产品</label>
+        <select class="form-select" id="product" name="product" required>
+          <option value="openclaw">OpenClaw</option>
+          <option value="hermes">Hermes</option>
+        </select>
+      </div>
+      <div class="mb-3">
         <label class="form-label" for="owner_user_public_id">实例 Owner</label>
         <select class="form-select" id="owner_user_public_id" name="owner_user_public_id" required>
           <option value="">请选择已有平台用户</option>
@@ -62,26 +69,26 @@
       <div class="mb-3">
         <label class="form-label" for="legacy_user_id">实例 ID</label>
         <input class="form-control" id="legacy_user_id" name="legacy_user_id" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" autocomplete="off">
-        <div class="muted-small mt-1">用于当前 OpenClaw 容器、目录和 Basic Auth 用户名。</div>
+        <div class="muted-small mt-1">用于容器、数据目录和访问认证用户名。</div>
       </div>
       <div class="mb-3">
         <label class="form-label" for="instance_name">实例名称</label>
         <input class="form-control" id="instance_name" name="instance_name" required maxlength="128">
       </div>
       <div class="mb-3">
-        <label class="form-label" for="basic_auth_password">Basic Auth 密码</label>
+        <label class="form-label" for="basic_auth_password">访问认证密码</label>
         <input class="form-control" id="basic_auth_password" name="basic_auth_password" type="password" required autocomplete="new-password">
       </div>
       <div class="form-check mb-3">
         <input class="form-check-input" id="basic_auth_enabled" name="basic_auth_enabled" type="checkbox" value="true" checked>
-        <label class="form-check-label" for="basic_auth_enabled">启用 Basic Auth</label>
+        <label class="form-check-label" for="basic_auth_enabled">启用访问认证（Hermes 必须启用）</label>
       </div>
       <button class="btn btn-oc" type="submit" {% if not users %}disabled{% endif %}>创建实例</button>
     </form>
 
     <form class="surface p-3 p-lg-4 mt-3" method="post" action="/admin/create-instance/batch" enctype="multipart/form-data" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <div class="section-title mb-2">批量创建</div>
+      <div class="section-title mb-2">批量创建 OpenClaw</div>
       <div class="muted-small mb-3">CSV 表头：owner_username,legacy_user_id,instance_name,basic_auth_password,basic_auth_enabled。最多 100 行。</div>
       <input class="form-control mb-3" name="input_csv" type="file" accept=".csv,text/csv" required>
       <button class="btn btn-oc-outline" type="submit">提交批量创建</button>

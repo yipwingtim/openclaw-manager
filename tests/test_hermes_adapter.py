@@ -15,7 +15,10 @@ from instance_adapters import HermesDockerAdapter
 
 
 class HermesAdapterTests(unittest.TestCase):
-    INSTANCE = {"runtime_identifier": "hermes-alice"}
+    INSTANCE = {
+        "public_id": "11111111-1111-1111-1111-111111111111",
+        "runtime_identifier": "hermes-alice",
+    }
 
     def make_adapter(self, root):
         return HermesDockerAdapter(
@@ -26,7 +29,7 @@ class HermesAdapterTests(unittest.TestCase):
             nginx_container_name="openclaw-nginx",
         )
 
-    def test_start_and_stop_only_manage_registered_container(self):
+    def test_start_and_stop_manage_registered_container_without_ingress(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
             with patch.object(
@@ -57,6 +60,137 @@ class HermesAdapterTests(unittest.TestCase):
 
             self.assertNotEqual(code, 0)
             self.assertIn("not supported", output)
+
+    def test_compose_ingress_is_persistent_and_idempotent(self):
+        text = (
+            "services:\n  nginx:\n    ports:\n      - \"443:443\"\n"
+            "    networks:\n      - manager-net\n"
+            "networks:\n  manager-net:\n    external: true\n"
+        )
+
+        updated = HermesDockerAdapter._add_ingress_to_nginx_compose(
+            text, 39119, "hermes-net"
+        )
+        repeated = HermesDockerAdapter._add_ingress_to_nginx_compose(
+            updated, 39119, "hermes-net"
+        )
+
+        self.assertEqual(updated, repeated)
+        self.assertEqual(updated.count('"39119:39119"'), 1)
+        self.assertEqual(updated.count("      - hermes-net"), 1)
+        self.assertEqual(updated.count("  hermes-net:\n"), 1)
+
+    def test_configure_ingress_targets_dashboard_and_rolls_back_on_reload_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            compose = root / "nginx" / "compose" / "docker-compose.yml"
+            compose.parent.mkdir(parents=True)
+            original = (
+                "services:\n  nginx:\n    ports:\n      - \"443:443\"\n"
+                "    networks:\n      - manager-net\n"
+                "networks:\n  manager-net:\n    external: true\n"
+            )
+            compose.write_text(original, encoding="utf-8")
+            inspected = type(
+                "Result", (), {"returncode": 0, "stdout": "hermes-net\n", "stderr": ""}
+            )()
+            with patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
+                adapter, "run_command", return_value=(0, "applied")
+            ), patch.object(
+                adapter,
+                "reload_nginx",
+                side_effect=[(1, "invalid"), (0, "restored")],
+            ):
+                code, output = adapter.configure_ingress(
+                    {**self.INSTANCE, "port": 39119}
+                )
+
+            self.assertEqual(code, 1)
+            self.assertIn("rolled back", output)
+            self.assertEqual(compose.read_text(encoding="utf-8"), original)
+            self.assertFalse(adapter.ingress_conf(self.INSTANCE).exists())
+
+    def test_configure_ingress_reports_failed_nginx_recovery(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            compose = root / "nginx" / "compose" / "docker-compose.yml"
+            compose.parent.mkdir(parents=True)
+            compose.write_text(
+                "services:\n  nginx:\n    ports:\n      - \"443:443\"\n"
+                "    networks:\n      - manager-net\n"
+                "networks:\n  manager-net:\n    external: true\n",
+                encoding="utf-8",
+            )
+            inspected = type(
+                "Result", (), {"returncode": 0, "stdout": "hermes-net\n", "stderr": ""}
+            )()
+            with patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
+                adapter, "run_command", return_value=(0, "applied")
+            ), patch.object(
+                adapter,
+                "reload_nginx",
+                side_effect=[(1, "invalid"), (1, "still invalid")],
+            ):
+                code, output = adapter.configure_ingress(
+                    {**self.INSTANCE, "port": 39119}
+                )
+
+            self.assertEqual(code, 1)
+            self.assertIn("Nginx recovery failed: still invalid", output)
+
+    def test_configure_ingress_publishes_dashboard_and_persists_network(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            compose = root / "nginx" / "compose" / "docker-compose.yml"
+            compose.parent.mkdir(parents=True)
+            compose.write_text(
+                "services:\n  nginx:\n    ports:\n      - \"443:443\"\n"
+                "    networks:\n      - manager-net\n"
+                "networks:\n  manager-net:\n    external: true\n",
+                encoding="utf-8",
+            )
+            inspected = type(
+                "Result", (), {"returncode": 0, "stdout": "hermes-net\n", "stderr": ""}
+            )()
+            with patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
+                adapter, "run_command", return_value=(0, "applied")
+            ) as run_command, patch.object(
+                adapter, "reload_nginx", return_value=(0, "reloaded")
+            ):
+                code, output = adapter.configure_ingress(
+                    {**self.INSTANCE, "port": 39119}
+                )
+
+            self.assertEqual((code, output), (0, "applied\nreloaded"))
+            nginx = adapter.ingress_conf(self.INSTANCE).read_text(encoding="utf-8")
+            self.assertIn("server hermes-alice:9119 resolve;", nginx)
+            self.assertIn("listen 39119 ssl;", nginx)
+            compose_text = compose.read_text(encoding="utf-8")
+            self.assertIn('      - "39119:39119"', compose_text)
+            self.assertIn("      - hermes-net", compose_text)
+            self.assertEqual(run_command.call_count, 1)
+
+    def test_stop_disables_ingress_and_start_restores_it(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            active = adapter.ingress_conf(self.INSTANCE)
+            active.parent.mkdir(parents=True)
+            active.write_text("server {}\n", encoding="utf-8")
+            with patch.object(adapter, "run_command", return_value=(0, "ok")), patch.object(
+                adapter, "reload_nginx", return_value=(0, "reloaded")
+            ):
+                self.assertEqual(adapter.stop(self.INSTANCE), (0, "ok"))
+                self.assertFalse(active.exists())
+                self.assertTrue(adapter.ingress_conf(self.INSTANCE, disabled=True).exists())
+                code, output = adapter.start(self.INSTANCE)
+
+            self.assertEqual(code, 0)
+            self.assertIn("reloaded", output)
+            self.assertTrue(active.exists())
+            self.assertFalse(adapter.ingress_conf(self.INSTANCE, disabled=True).exists())
 
 if __name__ == "__main__":
     unittest.main()

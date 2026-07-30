@@ -540,10 +540,12 @@ def create_admin_instance():
         return jsonify({"error": "invalid legacy_user_id"}), 400
     if not isinstance(instance_name, str) or not instance_name.strip() or len(instance_name) > 128:
         return jsonify({"error": "invalid instance_name"}), 400
-    if product != "openclaw" or not product_supports(product, "create"):
+    if product not in {"openclaw", "hermes"} or not product_supports(product, "create"):
         return jsonify({"error": "instance product does not support create"}), 400
     if not isinstance(basic_auth_enabled, bool):
         return jsonify({"error": "basic_auth_enabled must be a boolean"}), 400
+    if product == "hermes" and not basic_auth_enabled:
+        return jsonify({"error": "Hermes Dashboard requires Basic Auth"}), 400
     if not isinstance(password, str) or not password:
         return jsonify({"error": "basic_auth_password is required"}), 400
 
@@ -581,8 +583,12 @@ def create_admin_instance():
                 product=product,
                 instance_name=instance_name.strip(),
                 legacy_user_id=legacy_user_id,
-                runtime_identifier=f"openclaw_{legacy_user_id}",
-                data_path=str(PROVISIONING_SECRET_DIR.parent / "users" / legacy_user_id),
+                runtime_identifier=f"{product}_{legacy_user_id}",
+                data_path=str(
+                    PROVISIONING_SECRET_DIR.parent
+                    / ("hermes" if product == "hermes" else "users")
+                    / legacy_user_id
+                ),
                 status="provisioning",
                 basic_auth_enabled=basic_auth_enabled,
                 conn=conn,
@@ -1682,6 +1688,10 @@ def update_execution_job(request_id):
     if job is None:
         return jsonify({"error": "execution job not found"}), 404
     if job["action"] == "instance.create" and status == "succeeded":
+        created_instance = metadata_store.get_instance_by_public_id(
+            job["instance_public_id"], db_file=DB_FILE
+        )
+        product = created_instance["product"]
         required = {
             "port", "version", "access_url", "admin_url",
             "basic_auth_password_ref", "openclaw_token",
@@ -1691,7 +1701,12 @@ def update_execution_job(request_id):
         if (
             not isinstance(result["port"], int)
             or not 1 <= result["port"] <= 65535
-            or any(not isinstance(result[field], str) or not result[field] for field in required - {"port"})
+            or any(
+                not isinstance(result[field], str)
+                or (field != "openclaw_token" and not result[field])
+                or (field == "openclaw_token" and product == "openclaw" and not result[field])
+                for field in required - {"port"}
+            )
         ):
             return jsonify({"error": "invalid instance creation result"}), 400
     try:

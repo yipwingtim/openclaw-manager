@@ -366,6 +366,33 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(repeated.get_json()["job"]["request_id"], "create-1")
         self.assertEqual(len(list(secret_dir.iterdir())), 1)
 
+    def test_admin_creates_hermes_provisioning_instance(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "create-hermes-1",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-hermes",
+            "instance_name": "Alice Hermes",
+            "product": "hermes",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "secret",
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_admin_instance())
+
+        self.assertEqual(status, 202)
+        instance = self.control.metadata_store.get_instance_by_public_id(
+            response.get_json()["instance"]["public_id"], db_file=self.db_file
+        )
+        self.assertEqual(instance["runtime_identifier"], "hermes_alice-hermes")
+        self.assertTrue(instance["data_path"].endswith("/hermes/alice-hermes"))
+
     def test_admin_batch_creates_provisioning_instances_without_persisting_passwords(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

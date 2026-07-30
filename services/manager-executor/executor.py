@@ -158,6 +158,26 @@ def openclaw_creation_result(instance):
     }
 
 
+def hermes_creation_result(instance):
+    port = instance.get("_created_port")
+    public_host = os.environ.get("PUBLIC_HOST", "").strip()
+    if not public_host or not isinstance(port, int):
+        raise ValueError("created Hermes metadata is incomplete")
+    access_url = f"https://{public_host}:{port}"
+    return {
+        "port": port,
+        "version": os.environ.get("HERMES_VERSION", "v2026.7.20"),
+        "access_url": access_url,
+        "admin_url": access_url,
+        "basic_auth_password_ref": f"hermes-env:{instance['data_path']}/.env",
+        "openclaw_token": "",
+    }
+
+
+def creation_result(instance):
+    return hermes_creation_result(instance) if instance["product"] == "hermes" else openclaw_creation_result(instance)
+
+
 def reload_nginx_after_create(adapter):
     code, output = adapter.run_command(
         ["docker", "compose", "up", "-d"], timeout=90,
@@ -185,6 +205,8 @@ def reload_nginx_after_create(adapter):
 
 
 def rollback_created_instance(adapter, instance):
+    if instance["product"] == "hermes":
+        return adapter.delete(instance)
     return adapter.run_command(
         [str(adapter.manager_dir / "scripts" / "delete_user.sh"), instance["legacy_user_id"]],
         timeout=180,
@@ -245,10 +267,13 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             )
             created = code == 0
             if created:
-                code, failure_output = reload_nginx_after_create(adapter)
+                if instance["product"] == "hermes":
+                    code, failure_output = adapter.configure_ingress(instance)
+                else:
+                    code, failure_output = reload_nginx_after_create(adapter)
             if code == 0:
                 try:
-                    result = openclaw_creation_result(instance)
+                    result = creation_result(instance)
                     control.update(
                         request_id, "succeeded", output="instance created", result=result
                     )
@@ -258,7 +283,9 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     failure_output = str(exc)
             rollback_code = rollback_created_instance(adapter, instance)[0] if created else 0
             rollback_note = (
-                "resources moved to recycle bin"
+                "resources removed"
+                if instance["product"] == "hermes" and created and rollback_code == 0
+                else "resources moved to recycle bin"
                 if created and rollback_code == 0
                 else "create script rolled back resources"
                 if not created

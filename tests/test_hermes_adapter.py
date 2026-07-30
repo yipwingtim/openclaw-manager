@@ -17,6 +17,7 @@ from instance_adapters import HermesDockerAdapter
 class HermesAdapterTests(unittest.TestCase):
     INSTANCE = {
         "public_id": "11111111-1111-1111-1111-111111111111",
+        "legacy_user_id": "alice",
         "runtime_identifier": "hermes-alice",
     }
 
@@ -191,6 +192,69 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertIn("reloaded", output)
             self.assertTrue(active.exists())
             self.assertFalse(adapter.ingress_conf(self.INSTANCE, disabled=True).exists())
+
+    def test_create_uses_pinned_single_container_and_hashes_password(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            instance = {
+                **self.INSTANCE,
+                "data_path": str(root / "public" / "hermes" / "alice"),
+            }
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                if command[:3] == ["docker", "network", "inspect"]:
+                    return 1, "missing"
+                if any("allocate_port" in part for part in command):
+                    return 0, "39119\n[INFO] Port 39118 is already in use, skip"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run):
+                code, _ = adapter.create(instance, "true", "line1\nINJECTED=value")
+
+            self.assertEqual(code, 0)
+            self.assertEqual(instance["_created_port"], 39119)
+            docker_run = next(command for command in calls if command[:2] == ["docker", "run"])
+            self.assertIn("nousresearch/hermes-agent:v2026.7.20", docker_run)
+            self.assertIn("HERMES_DASHBOARD=1", docker_run)
+            self.assertNotIn("-p", docker_run)
+            self.assertTrue(any(command[:3] == ["docker", "exec", "hermes-alice"] for command in calls))
+            env_text = (Path(instance["data_path"]) / ".env").read_text(encoding="utf-8")
+            self.assertIn("HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH=scrypt$", env_text)
+            self.assertNotIn("line1", env_text)
+            self.assertNotIn("INJECTED", env_text)
+
+    def test_create_failure_removes_container_data_and_new_network(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            instance = {
+                **self.INSTANCE,
+                "data_path": str(root / "public" / "hermes" / "alice"),
+            }
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                if command[:3] == ["docker", "network", "inspect"]:
+                    return 1, "missing"
+                if any("allocate_port" in part for part in command):
+                    return 0, "39119"
+                if command[:2] == ["docker", "run"]:
+                    return 1, "start failed"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run):
+                code, output = adapter.create(instance, "true", "password")
+
+            self.assertEqual(code, 1)
+            self.assertIn("rolled back", output)
+            self.assertFalse(Path(instance["data_path"]).exists())
+            self.assertNotIn("_created_port", instance)
+            self.assertTrue(any(command[:3] == ["docker", "rm", "-f"] for command in calls))
+            self.assertTrue(any(command[:3] == ["docker", "network", "rm"] for command in calls))
 
 if __name__ == "__main__":
     unittest.main()

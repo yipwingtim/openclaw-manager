@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import contextlib
 import importlib.util
 import os
 import shutil
@@ -327,18 +328,40 @@ class ResolveWorkspaceFileTests(_SymlinkEscapeTestBase):
 
 class UploadFileSymlinkEscapeTests(_SymlinkEscapeTestBase):
 
-    def _run_upload(self, user_id, fake_file):
-        """执行 upload_file_for_user 并捕获 redirect_to_user_dashboard 的调用参数。"""
+    def _run_upload(self, user_id, fake_file, extra_patches=(), call_original_redirect=False):
+        """执行 upload_file_for_user 并捕获 redirect_to_user_dashboard 的调用参数。
+
+        extra_patches: 额外的 patch 上下文（如 os.open 注入），将按顺序进入。
+        call_original_redirect: True 时在捕获 calls 后调用原始 redirect_to_user_dashboard，
+            用于需要原函数副作用的场景。
+        """
         calls = []
+        original_redirect = self.app_module.redirect_to_user_dashboard
 
         def fake_redirect(uid, instance_mode=False, *, instance_public_id=None, result="", error="", wechat_url=""):
             calls.append({"user_id": uid, "result": result, "error": error})
+            if call_original_redirect:
+                return original_redirect(
+                    uid,
+                    instance_mode=instance_mode,
+                    instance_public_id=instance_public_id,
+                    result=result,
+                    error=error,
+                    wechat_url=wechat_url,
+                )
             return ("redirected", 302)
 
-        with patch.object(self.app_module, "redirect_to_user_dashboard", fake_redirect):
-            with patch.object(self.app_module, "persist_operation_metadata", return_value=""):
-                with patch.object(self.app_module.request, "files", {"file": fake_file}):
-                    self.app_module.upload_file_for_user(user_id, instance_mode=True)
+        patches = [
+            patch.object(self.app_module, "redirect_to_user_dashboard", fake_redirect),
+            patch.object(self.app_module, "persist_operation_metadata", return_value=""),
+            patch.object(self.app_module.request, "files", {"file": fake_file}),
+        ]
+        patches.extend(extra_patches)
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            self.app_module.upload_file_for_user(user_id, instance_mode=True)
 
         return calls
 
@@ -456,25 +479,14 @@ class UploadFileSymlinkEscapeTests(_SymlinkEscapeTestBase):
 
         patched_open, patched_supports = _patch_os_open_with_toctou_swap(swap)
 
-        calls = []
-        original_redirect = self.app_module.redirect_to_user_dashboard
-
-        def capture_redirect(uid, instance_mode=False, *, instance_public_id=None, result="", error="", wechat_url=""):
-            calls.append({"user_id": uid, "result": result, "error": error})
-            return original_redirect(
-                uid,
-                instance_mode=instance_mode,
-                instance_public_id=instance_public_id,
-                result=result,
-                error=error,
-                wechat_url=wechat_url,
-            )
-
-        with patch.object(self.app_module, "redirect_to_user_dashboard", capture_redirect):
-            with patch.object(self.app_module, "persist_operation_metadata", return_value=""):
-                with patch.object(self.app_module.request, "files", {"file": fake_file}):
-                    with patch("os.open", patched_open), patch("os.supports_dir_fd", patched_supports):
-                        self.app_module.upload_file_for_user("alice", instance_mode=True)
+        calls = self._run_upload(
+            "alice", fake_file,
+            extra_patches=[
+                patch("os.open", patched_open),
+                patch("os.supports_dir_fd", patched_supports),
+            ],
+            call_original_redirect=True,
+        )
 
         self.assertEqual(len(calls), 1, "应只产生一次 redirect 响应")
         self.assertIn("Invalid file path", calls[0]["error"],
@@ -541,23 +553,14 @@ class UploadFileSymlinkEscapeTests(_SymlinkEscapeTestBase):
                 raise RuntimeError("injected close failure")
 
         def boom_fdopen(fd, *args, **kwargs):
-            real_fp = real_fdopen(fd, *args, **kwargs)
-            return _CloseBoomWrapper(real_fp)
+            return _CloseBoomWrapper(real_fdopen(fd, *args, **kwargs))
 
         fake_file = FakeUploadedFile("boom_close.md", b"written but close fails")
 
-        calls = []
-
-        def fake_redirect(uid, instance_mode=False, *, instance_public_id=None,
-                          result="", error="", wechat_url=""):
-            calls.append({"user_id": uid, "result": result, "error": error})
-            return ("redirected", 302)
-
-        with patch.object(self.app_module, "redirect_to_user_dashboard", fake_redirect):
-            with patch.object(self.app_module, "persist_operation_metadata", return_value=""):
-                with patch.object(self.app_module.request, "files", {"file": fake_file}):
-                    with patch("os.fdopen", boom_fdopen):
-                        self.app_module.upload_file_for_user("alice", instance_mode=True)
+        calls = self._run_upload(
+            "alice", fake_file,
+            extra_patches=[patch("os.fdopen", boom_fdopen)],
+        )
 
         self.assertEqual(len(calls), 1,
                          "close() 异常应被清理路径捕获，不应逃逸到顶层")

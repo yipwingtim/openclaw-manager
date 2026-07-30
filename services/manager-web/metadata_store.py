@@ -575,7 +575,13 @@ def finish_instance_provisioning(
         if status == "active":
             instance = get_instance_by_public_id(instance_public_id, conn=active_conn)
             if port is not None:
-                record_port(port, user_id=instance["legacy_user_id"], status="allocated", conn=active_conn)
+                record_port(
+                    port,
+                    user_id=instance["legacy_user_id"],
+                    instance_id=instance["id"],
+                    status="allocated",
+                    conn=active_conn,
+                )
                 active_conn.execute(
                     """
                     INSERT INTO instance_endpoints (
@@ -589,13 +595,14 @@ def finish_instance_provisioning(
                     """,
                     (instance["id"], port, access_url, now, now),
                 )
-            upsert_credentials(
-                user_id=instance["legacy_user_id"],
-                basic_auth_username=instance["legacy_user_id"],
-                basic_auth_password_ref=basic_auth_password_ref,
-                openclaw_token=openclaw_token,
-                conn=active_conn,
-            )
+            if instance["legacy_user_id"] is not None:
+                upsert_credentials(
+                    user_id=instance["legacy_user_id"],
+                    basic_auth_username=instance["legacy_user_id"],
+                    basic_auth_password_ref=basic_auth_password_ref,
+                    openclaw_token=openclaw_token,
+                    conn=active_conn,
+                )
         return get_instance_by_public_id(instance_public_id, conn=active_conn)
 
 
@@ -1340,13 +1347,14 @@ def get_credentials(user_id, conn=None):
         return value
 
 
-def record_port(port, user_id=None, status="allocated", conn=None):
+def record_port(port, user_id=None, status="allocated", conn=None, *, instance_id=None):
     now = utc_now()
     released_at = now if status == "released" else None
     owns_conn = conn is None
     context = connect() if owns_conn else nullcontext(conn)
     with context as active_conn:
-        instance_id = instance_id_for_legacy_user(user_id, active_conn) if user_id else None
+        if instance_id is None and user_id:
+            instance_id = instance_id_for_legacy_user(user_id, active_conn)
         active_conn.execute(
             """
             INSERT INTO ports (port, instance_id, status, created_at, released_at)

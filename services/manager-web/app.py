@@ -1925,6 +1925,8 @@ def _save_uploaded_file_atomic(uploaded, filename, resolved_upload_dir):
             uploaded.save(out_fp)
             out_fp.flush()
             os.fchmod(fd, 0o644)
+            out_fp.close()
+            fd = None
         except Exception:
             if out_fp is None:
                 try:
@@ -1942,9 +1944,6 @@ def _save_uploaded_file_atomic(uploaded, filename, resolved_upload_dir):
             except OSError:
                 pass
             return f"Failed to save upload: {filename}"
-        else:
-            out_fp.close()
-            fd = None
     finally:
         if fd is not None:
             try:

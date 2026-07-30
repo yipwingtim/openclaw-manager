@@ -508,6 +508,65 @@ class UploadFileSymlinkEscapeTests(_SymlinkEscapeTestBase):
         self.assertFalse(leftover.exists(),
                          "写入失败后新建的空文件必须被 unlink，避免卡死同名上传")
 
+    @unittest.skipUnless(
+        ATOMIC_OPEN_AVAILABLE,
+        "原子上传需要 O_NOFOLLOW、O_DIRECTORY 与 dir_fd 支持（仅 POSIX）",
+    )
+    def test_upload_close_non_oserror_failure_unlinks_file(self):
+        """out_fp.close() 抛非 OSError 异常（如 RuntimeError）时，新建的文件必须被清理。"""
+        roots_a = self._make_user_dirs("alice")
+
+        real_fdopen = os.fdopen
+
+        class _CloseBoomWrapper:
+            """包装真实 file object，write/flush 正常工作，close() 抛 RuntimeError。"""
+            def __init__(self, real_fp):
+                self._real_fp = real_fp
+
+            def write(self, data):
+                return self._real_fp.write(data)
+
+            def flush(self):
+                return self._real_fp.flush()
+
+            @property
+            def name(self):
+                return self._real_fp.name
+
+            def close(self):
+                try:
+                    self._real_fp.close()
+                except Exception:
+                    pass
+                raise RuntimeError("injected close failure")
+
+        def boom_fdopen(fd, *args, **kwargs):
+            real_fp = real_fdopen(fd, *args, **kwargs)
+            return _CloseBoomWrapper(real_fp)
+
+        fake_file = FakeUploadedFile("boom_close.md", b"written but close fails")
+
+        calls = []
+
+        def fake_redirect(uid, instance_mode=False, *, instance_public_id=None,
+                          result="", error="", wechat_url=""):
+            calls.append({"user_id": uid, "result": result, "error": error})
+            return ("redirected", 302)
+
+        with patch.object(self.app_module, "redirect_to_user_dashboard", fake_redirect):
+            with patch.object(self.app_module, "persist_operation_metadata", return_value=""):
+                with patch.object(self.app_module.request, "files", {"file": fake_file}):
+                    with patch("os.fdopen", boom_fdopen):
+                        self.app_module.upload_file_for_user("alice", instance_mode=True)
+
+        self.assertEqual(len(calls), 1,
+                         "close() 异常应被清理路径捕获，不应逃逸到顶层")
+        self.assertIn("Failed to save upload", calls[0]["error"],
+                      "close() 非 OSError 失败应返回 Failed to save upload 错误")
+        leftover = roots_a["uploads"] / "boom_close.md"
+        self.assertFalse(leftover.exists(),
+                         "close() 失败后新建的文件必须被 unlink，避免卡死同名上传")
+
 
 class OpenDownloadFileAtomicTests(_SymlinkEscapeTestBase):
 

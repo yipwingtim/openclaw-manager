@@ -11,7 +11,10 @@
 - 定义平台层、产品适配层、运行时层的职责边界
 - 指导后续 Web 控制台、API、脚本重构和目录演进
 
-当前用户、身份和实例基础模型已经落地到 metadata schema v3；产品能力、执行器拆分和统一入口仍属于后续演进内容。本文档用于统一长期方向和术语，不代表所有模块均已实现。
+当前用户、身份、实例、产品能力以及 Control/Executor 执行边界已经落地；全局用户与
+管理员入口也已拆分；实例 `/admin/` 已转入 `manager-user-web`。旧 `manager-web`
+仅作为临时回滚目标保留，统一实例入口仍属于后续演进内容。本文档用于统一长期方向和
+术语，不代表所有模块均已实现。
 
 ## 2. 背景与当前问题
 
@@ -464,7 +467,7 @@
 - Local 密码哈希、服务端 Session、CSRF 和失败锁定
 - 外部认证用户必须预置、不在首次登录时自动创建的策略
 
-### Phase 3：实例 Adapter 与用户门户基础（部分完成）
+### Phase 3：实例 Adapter 与用户门户基础（已完成）
 
 已完成：
 
@@ -473,35 +476,27 @@
 - 基于实例 UUID 的用户多实例门户和权限校验
 - 结构化 control、executor 和操作记录基础
 - 用户 Web 与管理员 Web 进程拆分
-
-仍需完成：
-
 - 在后端与 executor 统一执行产品能力校验
-- 将 OpenClaw `create` 从单独的 `user_id` 参数迁移到明确的实例创建契约
+- OpenClaw 实例创建使用明确的 provisioning 契约和 Executor 任务
 - 在迁移期保留 `legacy_user_id`，仅用于既有 OpenClaw 文件和 Nginx 路径
-- 避免在本阶段同时修改认证、页面路由和入口发布模型
 
-### Phase 4：管理员功能与高权限边界收口
+### Phase 4：管理员功能与高权限边界收口（已完成）
 
-当前 `manager-admin-web` 仅覆盖实例列表和基础生命周期操作。批量创建、版本、
-Basic Auth、Skill、设备管理、元数据页面和操作记录等功能仍由旧
-`manager-web` 兼容服务提供。
+`manager-admin-web` 已覆盖实例创建、批量创建、生命周期、保留策略、版本、
+Basic Auth、Skill、设备管理、模型供应商和元数据页面。高权限写操作通过结构化
+Control/Executor 任务执行，全局 `/admin/*` 已切换到 `manager-admin-web`。
 
-这一阶段按以下顺序实施：
-
-1. 将旧管理员功能迁入 `manager-admin-web`，保持功能等价
-2. 为每项高权限操作增加结构化 control/executor 动作
-3. 将 Docker、Nginx 和宿主机文件操作移出 Web 进程
-4. 完整验收后将 `/admin/*` 切回 `manager-admin-web`
-5. 经过回滚观察期后移除旧 `manager-web` 兼容服务
+当前仅剩部署收尾：确认历史实例的 `/admin/` Nginx 配置均已指向
+`manager-user-web`，并在生产回滚观察期结束后移除旧兼容容器及其高权限挂载。
 
 ### Phase 5：Hermes MVP
 
-管理员功能和执行器边界稳定后，使用统一实例模型接入 Hermes：
+当前管理员功能和执行器边界已经具备接入 Hermes MVP 的基础。首期使用统一实例模型：
 
-- 创建或注册、启动、停止、重启、状态、日志和访问入口
+- 登记已有实例，并支持启动、停止、重启、状态、日志和访问入口
 - 所有操作使用实例 UUID、成员权限和审计记录
 - 按 Hermes 实际能力声明功能，不强制对齐 OpenClaw 的文件、设备或 Skill 功能
+- 在确认 Hermes 的容器拓扑、健康检查、日志和入口模型后，再定义创建契约
 
 ### Phase 6：运行时与入口解耦
 

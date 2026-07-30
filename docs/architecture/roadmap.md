@@ -23,11 +23,11 @@ for completing the multi-product control plane.
   longer needs privileged host mounts.
 - `manager-user-web`、`manager-admin-web`、`manager-control` 和
   `manager-executor` 已拆分部署，用户门户不再需要宿主机高权限挂载。
-- The legacy `manager-web` remains as an admin compatibility service because
-  batch creation, version management, Basic Auth, Skill, and batch-device
-  operations have not all moved to structured control and executor actions.
-- 旧 `manager-web` 仍作为管理员兼容服务，因为批量创建、版本管理、Basic Auth、
-  Skill 和批量设备操作尚未全部迁入结构化 control/executor 动作。
+- The global `/admin/*` portal now runs on `manager-admin-web`, while
+  per-instance `/admin/` redirects through `manager-user-web`. The legacy
+  `manager-web` remains only as a temporary rollback target.
+- 全局 `/admin/*` 管理门户现已由 `manager-admin-web` 提供，实例独立端口下的
+  `/admin/` 则转入 `manager-user-web`。旧 `manager-web` 仅作为临时回滚目标保留。
 - OpenClaw and EvoScientist adapters declare capabilities. Existing runtime
   lifecycle methods accept instance records and resolve targets from
   `runtime_identifier`; OpenClaw creation and legacy Nginx/file paths still use
@@ -49,6 +49,11 @@ for completing the multi-product control plane.
 5. Initial Adapter objectification and product capability declarations.
 6. Control, executor, user Web, and admin Web process split with a legacy admin
    compatibility path.
+7. Product capability enforcement in Control and Executor.
+8. Structured Executor actions for instance creation, lifecycle, retention,
+   version, Basic Auth, Skill, device, and model-provider operations.
+9. Admin feature migration and production `/admin/*` routing to
+   `manager-admin-web`.
 
 1. 用户、身份、实例、端点、凭据和审计数据模型。
 2. 历史 OpenClaw 元数据迁移与兼容读取。
@@ -56,61 +61,32 @@ for completing the multi-product control plane.
 4. 多实例用户门户与实例 UUID 权限校验。
 5. Adapter 初步实例对象化与产品能力声明。
 6. control、executor、用户 Web 和管理员 Web 进程拆分，以及旧管理员兼容入口。
+7. Control 与 Executor 的产品能力校验。
+8. 实例创建、生命周期、保留策略、版本、Basic Auth、Skill、设备和模型供应商的
+   结构化 Executor 动作。
+9. 管理员功能迁移以及生产 `/admin/*` 切换到 `manager-admin-web`。
 
-## Next 1: Adapter Contract and Capability Enforcement | 下一步 1：收口 Adapter 契约与能力校验
+## Current Transition: Retire Legacy manager-web | 当前过渡：退出旧 manager-web
 
-- Use instance records for all existing runtime lifecycle operations.
-- 现有运行时生命周期操作统一使用实例记录。
-- Enforce product capabilities in the backend and executor before dispatch;
-  frontend visibility remains presentation only.
-- 后端与执行器在分发前统一校验产品能力，前端隐藏仅用于展示。
-- Keep `legacy_user_id` for current OpenClaw filesystem and Nginx compatibility.
-- 当前 OpenClaw 文件系统和 Nginx 路径继续保留 `legacy_user_id` 兼容。
-- Do not change authentication, Web routes, instance creation, or ingress in
-  this step.
-- 本阶段不修改认证、Web 路由、实例创建或入口发布方式。
+- Verify that existing as well as newly generated instance `/admin/` routes use
+  `manager-user-web`, not the compatibility container.
+- 验证历史及新生成的实例 `/admin/` 路由均使用 `manager-user-web`，不再依赖兼容容器。
+- Keep the legacy container during the production rollback window, then remove
+  the service and its Docker Socket, Nginx, repository, and writable runtime
+  mounts.
+- 在生产回滚观察期内保留旧容器，随后删除该服务及其 Docker Socket、Nginx、仓库和
+  可写运行时挂载。
+- Continue using `legacy_user_id` only for existing OpenClaw filesystem and
+  Nginx compatibility until those paths are replaced.
+- 在对应路径替换前，`legacy_user_id` 仅用于既有 OpenClaw 文件系统与 Nginx 兼容。
 
-## Next 2: Complete Admin Feature Migration | 下一步 2：完成管理员功能迁移
+## Next: Hermes MVP | 下一步：Hermes MVP
 
-- Move batch creation, version management, Basic Auth, Skill management,
-  device operations, metadata views, and operation history to
-  `manager-admin-web` without reducing existing functionality.
-- 将批量创建、版本管理、Basic Auth、Skill 管理、设备操作、元数据查看和操作记录
-  迁入 `manager-admin-web`，不得降低旧页面现有功能。
-- Address instance creation separately because it must coordinate platform
-  records, runtime provisioning, endpoint publication, rollback, and audit.
-- 单独处理实例创建，因为它需要协调平台记录、运行时部署、入口发布、回滚和审计。
-- Keep production `/admin/*` on the compatibility service until each migrated
-  operation passes parity and rollback verification.
-- 每项迁移功能通过等价性与回滚验证前，生产 `/admin/*` 继续使用兼容服务。
-
-## Next 3: Move Privileged Actions Behind Executor | 下一步 3：高权限操作收敛到 Executor
-
-- Define structured, allowlisted actions identified by instance UUID.
-- 定义以实例 UUID 为目标的结构化白名单动作。
-- Move Docker, Nginx, host filesystem, create, delete, restore, version, Skill,
-  and device operations out of Web processes.
-- 将 Docker、Nginx、宿主机文件、创建、删除、恢复、版本、Skill 和设备操作移出 Web 进程。
-- Preserve authorization, idempotency, audit records, bounded output, and safe
-  rollback for every action.
-- 每个动作均保留权限校验、幂等性、审计记录、输出限制和安全回滚。
-
-## Next 4: Retire Legacy manager-web | 下一步 4：退出旧 manager-web
-
-- Route `/admin/*` to `manager-admin-web` only after full admin parity.
-- 仅在管理员功能完整对齐后，将 `/admin/*` 切换到 `manager-admin-web`。
-- Remove Docker Socket, Nginx, repository, and writable runtime mounts from all
-  Web services.
-- 从全部 Web 服务移除 Docker Socket、Nginx、仓库和可写运行时挂载。
-- Remove the compatibility container only after production acceptance and a
-  tested rollback window.
-- 生产验收和回滚观察期通过后，再移除兼容容器。
-
-## Next 5: Hermes MVP | 下一步 5：Hermes MVP
-
-- Add Hermes registration or creation, start, stop, restart, status, logs, and
-  access using the shared instance and capability model.
-- 基于统一实例和能力模型增加 Hermes 注册或创建、启停、重启、状态、日志和访问。
+- Start with registration of existing Hermes instances plus start, stop,
+  restart, status, logs, and access using the shared instance and capability
+  model. Add creation only after the real Hermes deployment contract is known.
+- 首期基于统一实例和能力模型支持已有 Hermes 实例登记、启停、重启、状态、日志和
+  访问；待明确 Hermes 的实际部署契约后再增加创建能力。
 - Require owner/member authorization and operation audit for every action.
 - 每个动作必须校验所有者或成员权限并记录审计日志。
 - Do not require OpenClaw-only file, device, or Skill features.

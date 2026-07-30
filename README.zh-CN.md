@@ -27,22 +27,22 @@ OpenClaw Manager 在不修改上游应用代码的前提下开通并管理相互
 ## 架构概览
 
 ```text
-                         +--------------------+
-                         |   Manager Web UI   |
-                         |  生命周期与认证管理  |
-                         +----------+---------+
-                                    |
-                                    v
-用户 -> HTTPS 独立端口 -> Nginx -> 每实例独立租户网络 -> 用户实例容器
-                                    |
-                                    +----------> OpenClaw
-                                    +----------> EvoScientist
+用户   -> Nginx -> manager-user-web  --+
+管理员 -> Nginx -> manager-admin-web --+-> manager-control -> manager-executor
+                                       |                         |
+                                       +-> manager-executor-api -+-> 产品 Adapter
+                                                                 +-> Docker / Nginx / 宿主机数据
+
+实例 HTTPS 独立端口 -> Nginx -> 每实例独立租户网络 -> OpenClaw / EvoScientist
 
 元数据：manager.db + 迁移期 users.csv / ports.txt
 运行数据：/data/docker/openclaw-public + /data/docker/nginx
 ```
 
-每个公网端口由 Nginx 统一监听。Nginx 通过容器名解析上游，因此容器重启后不会依赖失效的旧 IP。长期设计请参阅[智能体托管平台架构](docs/architecture/agent-hosting-platform.md)。
+用户门户和全局管理门户均以非高权限服务运行。结构化动作经过 Control 与 Executor，
+再由 Adapter 执行高权限运行时操作。旧 `manager-web` 仅作为临时回滚目标保留；
+当前 Nginx 模板已将全局和实例管理流量转发到拆分后的 Web 服务。长期设计请参阅
+[智能体托管平台架构](docs/architecture/agent-hosting-platform.md)。
 
 ## 环境要求
 
@@ -115,6 +115,7 @@ sudo -E python3 scripts/check_metadata_consistency.py
 - [用户、身份与实例迁移](docs/architecture/user-identity-instance-migration.md)
 - [元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [元数据数据字典](docs/architecture/metadata-data-dictionary.md)
+- [Web 服务拆分](docs/architecture/web-service-split.md)
 - [项目路线图](docs/architecture/roadmap.md)
 
 ## 安全说明

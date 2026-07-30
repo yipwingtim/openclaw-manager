@@ -21,7 +21,11 @@ from werkzeug.utils import secure_filename
 import metadata_store
 import control_client
 import auth_providers
-from instance_adapters import EvoScientistDockerAdapter, OpenClawDockerAdapter
+from instance_adapters import (
+    EvoScientistDockerAdapter,
+    HermesDockerAdapter,
+    OpenClawDockerAdapter,
+)
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -235,6 +239,7 @@ def get_instance_adapter(product="openclaw"):
     adapter_types = {
         "openclaw": OpenClawDockerAdapter,
         "evoscientist": EvoScientistDockerAdapter,
+        "hermes": HermesDockerAdapter,
     }
     adapter_type = adapter_types.get(product)
     if adapter_type is None:

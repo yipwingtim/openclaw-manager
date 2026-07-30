@@ -448,6 +448,8 @@ def create_instance(
     data_path=None,
     status="active",
     basic_auth_enabled=True,
+    port=None,
+    access_url=None,
     db_file=None,
     conn=None,
 ):
@@ -461,6 +463,12 @@ def create_instance(
         ).fetchone()
         if owner is None:
             raise ValueError("owner user not found")
+        if port is not None:
+            allocated = active_conn.execute(
+                "SELECT status FROM ports WHERE port = ?", (port,)
+            ).fetchone()
+            if allocated is not None and allocated["status"] != "released":
+                raise ValueError("port is already allocated")
         now = utc_now()
         public_id = str(uuid.uuid4())
         try:
@@ -469,8 +477,8 @@ def create_instance(
                 INSERT INTO instances (
                     public_id, legacy_user_id, owner_user_id, product, instance_name,
                     runtime_identifier, status, container_name, data_path,
-                    basic_auth_enabled, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    basic_auth_enabled, port, access_url, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     public_id,
@@ -483,6 +491,8 @@ def create_instance(
                     runtime_identifier,
                     data_path,
                     1 if basic_auth_enabled else 0,
+                    port,
+                    access_url,
                     now,
                     now,
                 ),
@@ -493,11 +503,34 @@ def create_instance(
             if "data_path" in str(exc):
                 raise ValueError("data path already exists") from exc
             raise
-        return instance_dict(
+        instance = instance_dict(
             active_conn.execute(
                 "SELECT * FROM instances WHERE public_id = ?", (public_id,)
             ).fetchone()
         )
+        if port is not None:
+            active_conn.execute(
+                """
+                INSERT INTO instance_endpoints (
+                    instance_id, endpoint_type, external_port, access_url,
+                    status, created_at, updated_at
+                ) VALUES (?, 'legacy_port', ?, ?, 'active', ?, ?)
+                """,
+                (instance["id"], port, access_url, now, now),
+            )
+            active_conn.execute(
+                """
+                INSERT INTO ports (port, instance_id, status, created_at, released_at)
+                VALUES (?, ?, 'allocated', ?, NULL)
+                ON CONFLICT(port) DO UPDATE SET
+                    instance_id = excluded.instance_id,
+                    status = 'allocated',
+                    created_at = excluded.created_at,
+                    released_at = NULL
+                """,
+                (port, instance["id"], now),
+            )
+        return instance
 
 
 def finish_instance_provisioning(

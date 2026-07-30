@@ -406,6 +406,8 @@ class AdapterInstanceModelTests(unittest.TestCase):
 
     def test_product_capabilities_fail_closed(self):
         self.assertTrue(product_supports("openclaw", "restart"))
+        self.assertTrue(product_supports("hermes", "restart"))
+        self.assertFalse(product_supports("hermes", "delete"))
         self.assertFalse(product_supports("evoscientist", "file_upload"))
         self.assertFalse(product_supports("unknown", "restart"))
         self.assertEqual(

@@ -9,7 +9,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from instance_adapters import EvoScientistDockerAdapter, OpenClawDockerAdapter
+from instance_adapters import (
+    EvoScientistDockerAdapter,
+    HermesDockerAdapter,
+    OpenClawDockerAdapter,
+)
 from product_capabilities import execution_action_capability
 
 
@@ -192,6 +196,7 @@ def get_adapter(product):
     adapter_type = {
         "openclaw": OpenClawDockerAdapter,
         "evoscientist": EvoScientistDockerAdapter,
+        "hermes": HermesDockerAdapter,
     }.get(product)
     if adapter_type is None:
         raise ValueError(f"unsupported instance product: {product}")

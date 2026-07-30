@@ -56,6 +56,13 @@ class ManagerExecutorTests(unittest.TestCase):
         )
         self.assertEqual(control.update.call_args_list[-1].kwargs["output"], "started")
 
+    def test_registry_returns_hermes_adapter(self):
+        adapter = self.executor.get_adapter("hermes")
+
+        self.assertIsInstance(adapter, self.executor.HermesDockerAdapter)
+        self.assertTrue(adapter.supports("restart"))
+        self.assertFalse(adapter.supports("delete"))
+
     def test_run_once_creates_instance_once_and_consumes_secret(self):
         control = Mock()
         instance = {

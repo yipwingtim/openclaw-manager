@@ -10,6 +10,9 @@ PRODUCT_CAPABILITIES = {
     "evoscientist": frozenset(
         {"access", "status", "logs", "start", "stop", "restart"}
     ),
+    "hermes": frozenset(
+        {"access", "status", "logs", "start", "stop", "restart"}
+    ),
 }
 
 EXECUTION_ACTION_CAPABILITIES = {

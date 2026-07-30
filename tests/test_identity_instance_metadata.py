@@ -447,10 +447,20 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
         )
 
         active = self.store.finish_instance_provisioning(
-            instance["public_id"], "active", db_file=self.db_file
+            instance["public_id"], "active", port=41001, db_file=self.db_file
         )
 
         self.assertEqual(active["status"], "active")
+        with self.store.connect(self.db_file) as conn:
+            port = conn.execute(
+                "SELECT instance_id FROM ports WHERE port = 41001"
+            ).fetchone()
+            credentials = conn.execute(
+                "SELECT 1 FROM instance_credentials WHERE instance_id = ?",
+                (instance["id"],),
+            ).fetchone()
+        self.assertEqual(port["instance_id"], instance["id"])
+        self.assertIsNone(credentials)
         self.assertEqual(
             self.store.finish_instance_provisioning(
                 instance["public_id"], "active", db_file=self.db_file

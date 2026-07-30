@@ -640,6 +640,7 @@ class ManagerControlApiTests(unittest.TestCase):
                         "instance_name": "Primary",
                         "status": "active",
                         "version": None,
+                        "port": None,
                         "access_url": None,
                         "access_role": "owner",
                         "created_at": instance["created_at"],
@@ -1076,7 +1077,7 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(forbidden_status, 403)
         self.assertEqual(
             forbidden.get_json(),
-            {"error": "service is not allowed"},
+            {"error": "user service cannot impersonate another user"},
         )
 
     def test_control_rejects_execution_action_not_supported_by_product(self):
@@ -1911,6 +1912,7 @@ class ManagerControlApiTests(unittest.TestCase):
                 "product": "openclaw",
                 "runtime_identifier": "openclaw_alice",
                 "data_path": None,
+                "basic_auth_enabled": True,
                 "status": "active",
                 "restore_state": "not_applicable",
                 "access_role": None,

@@ -1034,6 +1034,7 @@ def create_action_batch():
                 request_id=request_id, actor_user_id=actor["id"],
                 action=parent_action, params=params, conn=conn,
             )
+            parent = metadata_store.get_execution_job(request_id, conn=conn)
             children = metadata_store.list_execution_jobs(
                 parent_request_id=request_id, limit=100, conn=conn
             )
@@ -1592,8 +1593,8 @@ def list_execution_jobs():
     except (TypeError, ValueError):
         return jsonify({"error": "limit must be an integer"}), 400
     jobs = metadata_store.list_execution_jobs(
-        status,
-        limit,
+        status=status,
+        limit=limit,
         db_file=DB_FILE,
     )
     return jsonify({"jobs": [execution_job_payload(job) for job in jobs]})

@@ -47,6 +47,8 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
             instance_name="Lab Hermes",
             runtime_identifier="hermes_alice_lab",
             data_path="/data/instances/hermes-a",
+            port=39119,
+            access_url="https://manager.example.test:39119",
             db_file=self.db_file,
         )
 
@@ -61,6 +63,45 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
             ],
         )
         self.assertTrue(all(row["owner_user_id"] == user["id"] for row in instances))
+        self.assertEqual(hermes["port"], 39119)
+        self.assertEqual(hermes["access_url"], "https://manager.example.test:39119")
+        with self.store.connect(self.db_file) as conn:
+            endpoint = conn.execute(
+                "SELECT external_port, access_url FROM instance_endpoints "
+                "WHERE instance_id = ?",
+                (hermes["id"],),
+            ).fetchone()
+            port = conn.execute(
+                "SELECT instance_id, status FROM ports WHERE port = 39119"
+            ).fetchone()
+        self.assertEqual(tuple(endpoint), (39119, "https://manager.example.test:39119"))
+        self.assertEqual(tuple(port), (hermes["id"], "allocated"))
+
+    def test_create_instance_rejects_allocated_port_without_creating_instance(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        first = self.store.create_instance(
+            owner_public_id=user["public_id"],
+            product="openclaw",
+            instance_name="OpenClaw",
+            runtime_identifier="openclaw_alice",
+            port=39119,
+            db_file=self.db_file,
+        )
+
+        with self.assertRaisesRegex(ValueError, "port is already allocated"):
+            self.store.create_instance(
+                owner_public_id=user["public_id"],
+                product="hermes",
+                instance_name="Hermes",
+                runtime_identifier="hermes_alice",
+                port=39119,
+                db_file=self.db_file,
+            )
+
+        instances = self.store.list_instances_for_user(
+            user["public_id"], db_file=self.db_file
+        )
+        self.assertEqual([row["public_id"] for row in instances], [first["public_id"]])
 
     def test_user_lists_owned_and_shared_instances_with_access_role(self):
         owner = self.store.create_user("owner", db_file=self.db_file)

@@ -233,6 +233,31 @@ def register_instance(args):
         )
 
 
+def register_owned_instance(args):
+    initialize_metadata()
+    with metadata_store.connect() as conn:
+        instance = metadata_store.create_instance(
+            owner_public_id=args.owner_user_public_id,
+            product=args.product,
+            instance_name=args.instance_name,
+            runtime_identifier=args.container_name,
+            status="active",
+            basic_auth_enabled=False,
+            port=args.port,
+            access_url=args.access_url,
+            conn=conn,
+        )
+        metadata_store.record_operation(
+            action="register_instance",
+            status="success",
+            instance_id=instance["id"],
+            source_service="metadata-cli",
+            message=f"product={args.product} container={args.container_name}",
+            finished_at=metadata_store.utc_now(),
+            conn=conn,
+        )
+
+
 def set_instance_status(args):
     initialize_metadata()
     deleted_at = metadata_store.utc_now() if args.status == "deleted" else None
@@ -364,6 +389,15 @@ def build_parser():
     register.add_argument("--basic-auth-enabled", type=bool_arg)
     register.add_argument("--actor")
     register.set_defaults(func=register_instance)
+
+    register_owned = subparsers.add_parser("register-owned-instance")
+    register_owned.add_argument("--owner-user-public-id", required=True)
+    register_owned.add_argument("--product", required=True, choices=["hermes"])
+    register_owned.add_argument("--instance-name", required=True)
+    register_owned.add_argument("--container-name", required=True)
+    register_owned.add_argument("--port", type=int, required=True)
+    register_owned.add_argument("--access-url", required=True)
+    register_owned.set_defaults(func=register_owned_instance)
 
     status = subparsers.add_parser("set-instance-status")
     status.add_argument("--user-id", required=True)

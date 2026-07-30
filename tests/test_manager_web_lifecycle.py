@@ -308,17 +308,12 @@ class LifecycleActionTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(output, "started alice")
 
-    def test_lifecycle_rejects_unsupported_product(self):
-        with TemporaryDirectory() as public_dir:
-            self.app_module.PUBLIC_DIR = Path(public_dir)
-            (Path(public_dir) / "users" / "alice").mkdir(parents=True)
+    def test_registry_returns_hermes_adapter(self):
+        adapter = self.app_module.get_instance_adapter("hermes")
 
-            with patch.object(self.app_module, "get_instance_record", return_value={"legacy_user_id": "alice", "runtime_identifier": "hermes_alice", "product": "hermes"}):
-                with patch.object(self.app_module, "get_instance_product", return_value="hermes"):
-                    code, output = self.app_module.run_instance_lifecycle_action("alice", "start")
-
-            self.assertEqual(code, 1)
-            self.assertEqual(output, "Unsupported instance product: hermes")
+        self.assertIsInstance(adapter, self.app_module.HermesDockerAdapter)
+        self.assertTrue(adapter.supports("restart"))
+        self.assertFalse(adapter.supports("delete"))
 
     def test_registry_returns_evoscientist_adapter(self):
         adapter = self.app_module.get_instance_adapter("evoscientist")

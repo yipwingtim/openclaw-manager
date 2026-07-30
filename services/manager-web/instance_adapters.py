@@ -692,3 +692,29 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
 
     def update_version(self, *args, **kwargs):
         return 1, "EvoScientist version update is not supported yet."
+
+
+class HermesDockerAdapter(OpenClawDockerAdapter):
+    CAPABILITIES = product_capabilities("hermes")
+
+    def start(self, instance):
+        return self.run_command(
+            ["docker", "start", self.get_runtime_target(instance)], timeout=90
+        )
+
+    def stop(self, instance):
+        return self.run_command(
+            ["docker", "stop", self.get_runtime_target(instance)], timeout=60
+        )
+
+    def create(self, *args, **kwargs):
+        return 1, "Hermes create is not supported yet."
+
+    def delete(self, instance):
+        return 1, "Hermes delete is not supported yet."
+
+    def restore(self, instance):
+        return 1, "Hermes restore is not supported yet."
+
+    def update_version(self, *args, **kwargs):
+        return 1, "Hermes version update is not supported yet."

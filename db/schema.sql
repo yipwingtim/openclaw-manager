@@ -1,5 +1,7 @@
 PRAGMA foreign_keys = ON;
 
+BEGIN;
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -266,3 +268,5 @@ VALUES (4, 'control_plane_model');
 
 INSERT OR IGNORE INTO schema_migrations (version, name)
 VALUES (5, 'instance_provisioning');
+
+COMMIT;

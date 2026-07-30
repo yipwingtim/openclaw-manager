@@ -27,22 +27,24 @@ OpenClaw is the primary managed product today. The adapter layer also supports l
 ## Architecture
 
 ```text
-                         +--------------------+
-                         |  Manager Web UI    |
-                         |  lifecycle + auth  |
-                         +----------+---------+
-                                    |
-                                    v
-User -> HTTPS : dedicated port -> Nginx -> per-tenant network -> user container
-                                    |
-                                    +----------> OpenClaw
-                                    +----------> EvoScientist
+Users  -> Nginx -> manager-user-web  --+
+Admins -> Nginx -> manager-admin-web --+-> manager-control -> manager-executor
+                                       |                         |
+                                       +-> manager-executor-api -+-> product adapters
+                                                                 +-> Docker / Nginx / host data
+
+Instance HTTPS ports -> Nginx -> per-tenant network -> OpenClaw / EvoScientist
 
 Metadata: manager.db + transitional users.csv / ports.txt
 Runtime:  /data/docker/openclaw-public + /data/docker/nginx
 ```
 
-Nginx owns each public port and resolves containers by name, so container restarts do not depend on stale IP addresses. For the longer-term design, read [Agent Hosting Platform Architecture](docs/architecture/agent-hosting-platform.md).
+The user and global admin portals run as unprivileged services. Structured
+actions pass through Control and Executor before an Adapter performs privileged
+runtime work. The legacy `manager-web` container remains only as a temporary
+rollback target; current Nginx templates route global and per-instance manager
+traffic to the split Web services.
+For the longer-term design, read [Agent Hosting Platform Architecture](docs/architecture/agent-hosting-platform.md).
 
 ## Requirements
 
@@ -115,6 +117,7 @@ Runtime paths are configurable in `config/openclaw-manager.env` and intentionall
 - [User, Identity, and Instance Migration](docs/architecture/user-identity-instance-migration.md)
 - [Metadata Storage Plan](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary](docs/architecture/metadata-data-dictionary.md)
+- [Web Service Split](docs/architecture/web-service-split.md)
 - [Roadmap](docs/architecture/roadmap.md)
 
 ## Security

@@ -723,6 +723,24 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         directory = self.nginx_disabled_conf_dir() if disabled else self.nginx_users_conf_dir
         return directory / f"hermes-{public_id}.conf"
 
+    def tenant_network(self, instance):
+        user_id = self.get_legacy_user_id(instance)
+        return "openclaw-user-" + hashlib.sha256(user_id.encode()).hexdigest()
+
+    @staticmethod
+    def _write_private_file(path, content):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            descriptor, temporary = tempfile.mkstemp(dir=path.parent)
+            with os.fdopen(descriptor, "wb") as output:
+                os.fchmod(output.fileno(), 0o600)
+                output.write(content)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                Path(temporary).unlink(missing_ok=True)
+
     def start(self, instance):
         code, output = self.run_command(
             ["docker", "start", self.get_runtime_target(instance)], timeout=90
@@ -943,7 +961,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         if data_path.exists():
             return 1, f"Hermes data path already exists: {data_path}"
 
-        network = "openclaw-user-" + hashlib.sha256(user_id.encode()).hexdigest()
+        network = self.tenant_network(instance)
         port_file = os.environ.get("PORT_FILE", str(self.public_dir / "ports.txt"))
         port_start = os.environ.get("PORT_START", "30021")
         port_end = os.environ.get("PORT_END", "39999")
@@ -1110,3 +1128,123 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
 
     def update_version(self, *args, **kwargs):
         return 1, "Hermes version update is not supported yet."
+
+    def set_model_provider(
+        self, instance, provider_id, model_id, base_url="", alias="", timeout=180,
+    ):
+        del base_url, alias
+        runtime_target = self.get_runtime_target(instance)
+        user_id = self.get_legacy_user_id(instance)
+        data_path = Path(instance["data_path"])
+        config_file = data_path / "config.yaml"
+        if not config_file.is_file():
+            return 1, f"Hermes config file not found: {config_file}"
+
+        model_short_id = model_id.removeprefix(provider_id + "/")
+        proxy_base_url = os.environ.get(
+            "MODEL_PROXY_PUBLIC_BASE_URL",
+            "http://openclaw-model-proxy:8081/v1",
+        )
+        proxy_container = os.environ.get(
+            "MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"
+        )
+        token_dir = Path(os.environ.get(
+            "MODEL_PROXY_TOKEN_DIR",
+            str(self.public_dir / "model-proxy-tokens"),
+        ))
+        token_file = token_dir / f"{user_id}.token"
+        models_file = token_dir / f"{user_id}.models"
+        old_config = config_file.read_bytes()
+        old_token = token_file.read_bytes() if token_file.is_file() else None
+        old_models = models_file.read_bytes() if models_file.is_file() else None
+        network = self.tenant_network(instance)
+        connected = False
+        token = ""
+
+        try:
+            existing_token = old_token.decode("utf-8").strip() if old_token else ""
+            token = existing_token or "ocm_" + secrets.token_urlsafe(32)
+            old_allowed_models = {
+                line.strip()
+                for line in (old_models or b"").decode("utf-8").splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            }
+            staged_models = old_allowed_models | {model_short_id}
+            self._write_private_file(
+                models_file,
+                ("\n".join(sorted(staged_models)) + "\n").encode(),
+            )
+            if not existing_token:
+                self._write_private_file(token_file, (token + "\n").encode())
+
+            inspect_code, inspect_output = self.run_command(
+                [
+                    "docker", "inspect", "--format",
+                    '{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s\\n" $name}}{{end}}',
+                    proxy_container,
+                ],
+                timeout=10,
+            )
+            if inspect_code != 0:
+                raise RuntimeError(inspect_output or "Model Proxy container not found")
+            if network not in inspect_output.splitlines():
+                code, output = self.run_command(
+                    ["docker", "network", "connect", network, proxy_container],
+                    timeout=30,
+                )
+                if code != 0:
+                    raise RuntimeError(output or "Could not connect Model Proxy network")
+                connected = True
+
+            for key, value in (
+                ("model.default", model_short_id),
+                ("model.provider", "custom"),
+                ("model.base_url", proxy_base_url),
+                ("model.api_key", token),
+                ("model.api_mode", "chat_completions"),
+            ):
+                code, output = self.run_command(
+                    [
+                        "docker", "exec", runtime_target,
+                        "hermes", "config", "set", key, value,
+                    ],
+                    timeout=timeout,
+                )
+                if code != 0:
+                    raise RuntimeError(output or f"Could not set {key}")
+            self._write_private_file(models_file, (model_short_id + "\n").encode())
+            return 0, "Hermes model provider updated."
+        except Exception as exc:
+            rollback_errors = []
+            try:
+                config_file.write_bytes(old_config)
+            except Exception as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+            for path, content in ((token_file, old_token), (models_file, old_models)):
+                try:
+                    if content is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        self._write_private_file(path, content)
+                except Exception as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            if connected:
+                try:
+                    rollback_code, rollback_output = self.run_command(
+                        ["docker", "network", "disconnect", network, proxy_container],
+                        timeout=30,
+                    )
+                    if rollback_code != 0:
+                        rollback_errors.append(
+                            rollback_output or "Could not disconnect Model Proxy network"
+                        )
+                except Exception as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            detail = str(exc).replace(token, "[REDACTED]")
+            if rollback_errors:
+                recovery = "; ".join(rollback_errors).replace(token, "[REDACTED]")
+                return 1, (
+                    "Hermes model provider update failed; automatic rollback was "
+                    f"incomplete and manual recovery is required: {detail}; {recovery}"
+                )
+            return 1, f"Hermes model provider update failed and was rolled back: {detail}"

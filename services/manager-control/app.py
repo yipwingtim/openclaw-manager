@@ -490,7 +490,7 @@ def admin_instances():
                         capability
                         for capability in (
                             "basic_auth", "update_version", "skill_install", "device_pairing",
-                            "delete", "restore",
+                            "delete", "restore", "batch_set_model_provider",
                         )
                         if product_supports(instance["product"], capability)
                     ),

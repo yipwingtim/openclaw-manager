@@ -99,36 +99,53 @@
 {% block scripts %}
   <script>
     (function bindStatusRefresh() {
-      document.querySelectorAll('[data-status-refresh]').forEach(function(link) {
-        link.addEventListener('click', function(event) {
-          event.preventDefault();
-          if (link.dataset.refreshing) return;
-          link.dataset.refreshing = 'true';
-          link.textContent = '正在刷新...';
+      var timer;
+      var refreshing = false;
 
-          function refresh() {
-            fetch(link.href, {credentials: 'same-origin', cache: 'no-store'})
-              .then(function(response) {
-                if (!response.ok) throw new Error('status request failed');
-                return response.text();
-              })
-              .then(function(html) {
-                var next = new DOMParser().parseFromString(html, 'text/html');
-                document.querySelector('main').innerHTML = next.querySelector('main').innerHTML;
-                bindStatusRefresh();
-              })
-              .catch(function() {
-                link.textContent = '连接中，自动重试...';
-                window.setTimeout(refresh, 1000);
-              });
+      function scheduleRefresh(delay) {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(refresh, delay);
+      }
+
+      function refresh() {
+        var link = document.querySelector('[data-status-refresh]');
+        if (!link || refreshing) return;
+        refreshing = true;
+        link.textContent = '正在刷新...';
+        var controller = new AbortController();
+        var timeout = window.setTimeout(function() { controller.abort(); }, 5000);
+
+        fetch(link.href, {
+          credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+        }).then(function(response) {
+          if (!response.ok) throw new Error('status request failed');
+          return response.text();
+        }).then(function(html) {
+          var next = new DOMParser().parseFromString(html, 'text/html');
+          document.querySelector('main').innerHTML = next.querySelector('main').innerHTML;
+          var nextLink = document.querySelector('[data-status-refresh]');
+          if (nextLink && nextLink.dataset.autoRefresh === 'true') {
+            scheduleRefresh(2000);
           }
-
-          refresh();
+        }).catch(function() {
+          link.textContent = '连接中，自动重试...';
+          scheduleRefresh(1000);
+        }).finally(function() {
+          window.clearTimeout(timeout);
+          refreshing = false;
         });
-        if (link.dataset.autoRefresh === 'true') {
-          window.setTimeout(function() { link.click(); }, 2000);
-        }
+      }
+
+      document.addEventListener('click', function(event) {
+        var link = event.target.closest('[data-status-refresh]');
+        if (!link) return;
+        event.preventDefault();
+        refresh();
       });
+
+      if (document.querySelector('[data-auto-refresh="true"]')) {
+        scheduleRefresh(2000);
+      }
     })();
   </script>
 {% endblock %}

@@ -958,6 +958,10 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 encoding="utf-8",
             )
             (data_path / ".env").chmod(0o600)
+            (data_path / "config.yaml").write_text(
+                "security:\n  allow_lazy_installs: false\n",
+                encoding="utf-8",
+            )
             network_existed = self.run_command(
                 ["docker", "network", "inspect", network], timeout=10
             )[0] == 0

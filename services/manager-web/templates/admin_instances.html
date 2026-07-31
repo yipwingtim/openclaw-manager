@@ -19,16 +19,21 @@
         <div class="muted-small">默认显示运行中的实例，可按状态、名称、ID、UUID 或产品筛选。</div>
       </div>
       <div class="d-flex gap-2 flex-wrap align-items-center">
+        {% for value, label in [("all", "全部产品"), ("openclaw", "OpenClaw"), ("hermes", "Hermes")] %}
+          <a class="btn btn-sm {% if product_filter == value %}btn-oc{% else %}btn-oc-outline{% endif %}"
+             href="/admin/instances?product={{ value }}&status={{ status_filter }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">{{ label }}</a>
+        {% endfor %}
         {% for value, label in [("running", "运行中"), ("stopped", "已停止"), ("deleted", "已删除"), ("all", "全部")] %}
           <a class="btn btn-sm {% if status_filter == value %}btn-oc{% else %}btn-oc-outline{% endif %}"
-             href="/admin/instances?status={{ value }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">{{ label }}</a>
+             href="/admin/instances?product={{ product_filter }}&status={{ value }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">{{ label }}</a>
         {% endfor %}
         <form class="d-flex gap-2 align-items-center" method="get" action="/admin/instances">
+          <input type="hidden" name="product" value="{{ product_filter }}">
           <input type="hidden" name="status" value="{{ status_filter }}">
           <input type="hidden" name="per_page" value="{{ pagination.per_page }}">
           <input class="form-control form-control-sm" style="width: 220px;" type="search" name="q" value="{{ query }}" placeholder="实例名称、ID、UUID 或产品">
           <button class="btn btn-sm btn-oc-outline" type="submit">筛选</button>
-          {% if query %}<a class="btn btn-sm btn-outline-secondary" href="/admin/instances?status={{ status_filter }}&per_page={{ pagination.per_page }}">清除</a>{% endif %}
+          {% if query %}<a class="btn btn-sm btn-outline-secondary" href="/admin/instances?product={{ product_filter }}&status={{ status_filter }}&per_page={{ pagination.per_page }}">清除</a>{% endif %}
         </form>
       </div>
     </div>
@@ -169,12 +174,12 @@
       <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap p-3 border-top">
         <div class="muted-small">显示 {{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }} 个实例</div>
         <div class="d-flex align-items-center gap-2 flex-wrap">
-          <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/instances?status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">上一页</a>
+          <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/instances?product={{ product_filter }}&status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">上一页</a>
           <span class="muted-small">第 {{ pagination.page }} / {{ pagination.total_pages }} 页</span>
-          <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/instances?status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">下一页</a>
+          <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/instances?product={{ product_filter }}&status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">下一页</a>
         </div>
         <div class="d-flex align-items-center gap-2 flex-wrap"><span class="muted-small">每页</span>
-          {% for option in page_size_options %}<a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/instances?status={{ status_filter }}&page=1&per_page={{ option }}&q={{ query|urlencode }}">{{ option }}</a>{% endfor %}
+          {% for option in page_size_options %}<a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/instances?product={{ product_filter }}&status={{ status_filter }}&page=1&per_page={{ option }}&q={{ query|urlencode }}">{{ option }}</a>{% endfor %}
         </div>
       </div>
     {% else %}<div class="p-4 muted-small">当前筛选条件下没有实例。</div>{% endif %}

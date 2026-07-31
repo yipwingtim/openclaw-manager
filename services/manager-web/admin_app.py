@@ -43,12 +43,18 @@ def instance_list_context(instances):
     status_filter = request.args.get("status", "running").strip().lower()
     if status_filter not in {"running", "stopped", "deleted", "all"}:
         status_filter = "running"
+    product_filter = request.args.get("product", "all").strip().lower()
+    if product_filter not in {"all", "openclaw", "hermes"}:
+        product_filter = "all"
     query = request.args.get("q", "").strip()
     filtered = [
         instance for instance in instances
-        if (status_filter == "all")
-        or (status_filter == "deleted" and instance["status"] == "deleted")
-        or (instance["status"] != "deleted" and instance["runtime_status"] == status_filter)
+        if (product_filter == "all" or instance.get("product") == product_filter)
+        and (
+            (status_filter == "all")
+            or (status_filter == "deleted" and instance["status"] == "deleted")
+            or (instance["status"] != "deleted" and instance["runtime_status"] == status_filter)
+        )
     ]
     if query:
         needle = query.lower()
@@ -76,6 +82,7 @@ def instance_list_context(instances):
     return {
         "instances": filtered[start:start + per_page],
         "status_filter": status_filter,
+        "product_filter": product_filter,
         "query": query,
         "page_size_options": INSTANCE_PAGE_SIZE_OPTIONS,
         "pagination": {

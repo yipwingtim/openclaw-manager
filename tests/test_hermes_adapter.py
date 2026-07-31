@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -259,6 +260,217 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertNotIn("_created_port", instance)
             self.assertTrue(any(command[:3] == ["docker", "rm", "-f"] for command in calls))
             self.assertTrue(any(command[:3] == ["docker", "network", "rm"] for command in calls))
+
+    def test_set_model_provider_uses_instance_proxy_token(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            (data_path / "config.yaml").write_text("security: {}\n", encoding="utf-8")
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, "manager-net"
+                return 0, "ok"
+
+            token_dir = root / "tokens"
+            with patch.object(adapter, "run_command", side_effect=run), patch.dict(
+                os.environ,
+                {
+                    "MODEL_PROXY_TOKEN_DIR": str(token_dir),
+                    "MODEL_PROXY_PUBLIC_BASE_URL": "http://openclaw-model-proxy:8081/v1",
+                },
+            ):
+                code, output = adapter.set_model_provider(
+                    instance, "gpustack", "gpustack/qwen3.6-35b", "", "Qwen"
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "Hermes model provider updated.")
+            token = (token_dir / "alice.token").read_text(encoding="utf-8").strip()
+            self.assertTrue(token.startswith("ocm_"))
+            self.assertNotIn(token, output)
+            self.assertEqual((token_dir / "alice.token").stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                (token_dir / "alice.models").read_text(encoding="utf-8"),
+                "qwen3.6-35b\n",
+            )
+            self.assertEqual((token_dir / "alice.models").stat().st_mode & 0o777, 0o600)
+            self.assertIn(
+                ["docker", "network", "connect", adapter.tenant_network(instance),
+                 "openclaw-model-proxy"],
+                calls,
+            )
+            config_commands = [
+                command for command in calls
+                if command[:4] == ["docker", "exec", "hermes-alice", "hermes"]
+            ]
+            self.assertEqual(
+                [(command[6], command[7]) for command in config_commands],
+                [
+                    ("model.default", "qwen3.6-35b"),
+                    ("model.provider", "custom"),
+                    ("model.base_url", "http://openclaw-model-proxy:8081/v1"),
+                    ("model.api_key", token),
+                    ("model.api_mode", "chat_completions"),
+                ],
+            )
+
+    def test_set_model_provider_rolls_back_files_and_new_network(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            config = data_path / "config.yaml"
+            config.write_text("original: true\n", encoding="utf-8")
+            token_dir = root / "tokens"
+            token_dir.mkdir()
+            (token_dir / "alice.token").write_text("old-token\n", encoding="utf-8")
+            (token_dir / "alice.models").write_text("old-model\n", encoding="utf-8")
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, "manager-net"
+                if command[:6] == [
+                    "docker", "exec", "hermes-alice", "hermes", "config", "set"
+                ]:
+                    config.write_text("partial: true\n", encoding="utf-8")
+                    if command[6] == "model.provider":
+                        return 1, "failed with old-token"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run), patch.dict(
+                os.environ,
+                {
+                    "MODEL_PROXY_TOKEN_DIR": str(token_dir),
+                    "MODEL_PROXY_PUBLIC_BASE_URL": "http://openclaw-model-proxy:8081/v1",
+                },
+            ):
+                code, output = adapter.set_model_provider(
+                    instance, "gpustack", "qwen3.6-35b", "", "Qwen"
+                )
+
+            self.assertEqual(code, 1)
+            self.assertIn("rolled back", output)
+            self.assertNotIn("old-token", output)
+            self.assertEqual(config.read_text(encoding="utf-8"), "original: true\n")
+            self.assertEqual(
+                (token_dir / "alice.token").read_text(encoding="utf-8"), "old-token\n"
+            )
+            self.assertEqual(
+                (token_dir / "alice.models").read_text(encoding="utf-8"), "old-model\n"
+            )
+            self.assertIn(
+                ["docker", "network", "disconnect", adapter.tenant_network(instance),
+                 "openclaw-model-proxy"],
+                calls,
+            )
+
+    def test_set_model_provider_replaces_empty_token_file(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            (data_path / "config.yaml").write_text("security: {}\n", encoding="utf-8")
+            token_dir = root / "tokens"
+            token_dir.mkdir()
+            (token_dir / "alice.token").write_text("", encoding="utf-8")
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+
+            def run(command, **kwargs):
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, adapter.tenant_network(instance)
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run), patch.dict(
+                os.environ,
+                {"MODEL_PROXY_TOKEN_DIR": str(token_dir)},
+            ):
+                code, _ = adapter.set_model_provider(
+                    instance, "gpustack", "qwen3.6-35b", "", "Qwen"
+                )
+
+            self.assertEqual(code, 0)
+            self.assertTrue(
+                (token_dir / "alice.token").read_text(encoding="utf-8").startswith("ocm_")
+            )
+
+    def test_set_model_provider_stages_old_and_new_models_before_config(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            (data_path / "config.yaml").write_text("security: {}\n", encoding="utf-8")
+            token_dir = root / "tokens"
+            token_dir.mkdir()
+            (token_dir / "alice.token").write_text("old-token\n", encoding="utf-8")
+            models = token_dir / "alice.models"
+            models.write_text("old-model\n", encoding="utf-8")
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            observed_allowlists = []
+
+            def run(command, **kwargs):
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, adapter.tenant_network(instance)
+                if command[:4] == ["docker", "exec", "hermes-alice", "hermes"]:
+                    observed_allowlists.append(models.read_text(encoding="utf-8"))
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run), patch.dict(
+                os.environ,
+                {"MODEL_PROXY_TOKEN_DIR": str(token_dir)},
+            ):
+                code, _ = adapter.set_model_provider(
+                    instance, "gpustack", "new-model", "", "New"
+                )
+
+            self.assertEqual(code, 0)
+            self.assertTrue(observed_allowlists)
+            self.assertTrue(all(value == "new-model\nold-model\n" for value in observed_allowlists))
+            self.assertEqual(models.read_text(encoding="utf-8"), "new-model\n")
+
+    def test_set_model_provider_reports_incomplete_rollback(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            (data_path / "config.yaml").write_text("original: true\n", encoding="utf-8")
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            token_dir = root / "tokens"
+
+            def run(command, **kwargs):
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, "manager-net"
+                if command[:3] == ["docker", "network", "disconnect"]:
+                    return 1, "disconnect failed"
+                if command[:6] == [
+                    "docker", "exec", "hermes-alice", "hermes", "config", "set"
+                ]:
+                    return 1, "config failed"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run), patch.dict(
+                os.environ,
+                {"MODEL_PROXY_TOKEN_DIR": str(token_dir)},
+            ):
+                code, output = adapter.set_model_provider(
+                    instance, "gpustack", "qwen3.6-35b", "", "Qwen"
+                )
+
+            self.assertEqual(code, 1)
+            self.assertIn("manual recovery is required", output)
+            self.assertIn("disconnect failed", output)
 
 if __name__ == "__main__":
     unittest.main()

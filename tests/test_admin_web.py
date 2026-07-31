@@ -279,6 +279,7 @@ class AdminWebTests(unittest.TestCase):
         self.admin.request.files = {"input_csv": upload}
         instances = [{
             "public_id": "instance-1", "legacy_user_id": "alice", "status": "active",
+            "capabilities": ["batch_set_model_provider"],
         }]
         result = {"parent": {"request_id": "batch-1"}, "children": []}
         with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
@@ -300,6 +301,29 @@ class AdminWebTests(unittest.TestCase):
             "model_alias": "GPT-5",
         }])
         self.assertNotIn("legacy-secret", repr(payload))
+
+    def test_admin_model_provider_batch_rejects_instance_without_capability(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        upload = types.SimpleNamespace(read=lambda: (
+            b"user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias\n"
+            b"alice,gpustack,qwen3.6-35b,,,Qwen\n"
+        ))
+        self.admin.request.files = {"input_csv": upload}
+        instances = [{
+            "public_id": "instance-1", "legacy_user_id": "alice", "status": "active",
+            "capabilities": [],
+        }]
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_instances", return_value=instances
+        ), patch.object(
+            self.admin.control_client, "create_model_provider_batch"
+        ) as create_batch, patch.object(
+            self.admin, "url_for", return_value="error-url"
+        ):
+            response = self.admin.create_model_provider_batch()
+
+        self.assertEqual(response, "error-url")
+        create_batch.assert_not_called()
 
     def test_admin_basic_auth_queues_structured_boolean_action(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

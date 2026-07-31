@@ -23,6 +23,10 @@ the legacy two-container topology, restore, or upgrade.
 - Runtime dependency lazy installation is disabled in `config.yaml` so a
   missing optional package cannot block agent initialization. Optional
   dependencies must be included in the image before enabling their features.
+- The existing administrator model-provider batch creates an instance-scoped
+  Model Proxy token and allowlist, joins the proxy to the Hermes tenant
+  network, and writes the proxy URL and token through `hermes config set`.
+  Upstream API keys remain only in the shared Model Proxy service.
 
 Registration writes the instance, endpoint, allocated port, audit record,
 Nginx server configuration, port mapping, and external network attachment. A

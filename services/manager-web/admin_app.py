@@ -397,7 +397,9 @@ def create_model_provider_batch():
         instances = {
             item["legacy_user_id"]: item
             for item in control_client.list_admin_instances()
-            if item.get("legacy_user_id") and item["status"] == "active"
+            if item.get("legacy_user_id")
+            and item["status"] == "active"
+            and "batch_set_model_provider" in item.get("capabilities", ())
         }
     except control_client.ControlError as exc:
         return redirect(url_for("model_provider_batch_page", error=str(exc)))

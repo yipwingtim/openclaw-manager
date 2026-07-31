@@ -1425,10 +1425,13 @@ class ManagerControlApiTests(unittest.TestCase):
         )
         instances = [
             self.control.metadata_store.create_instance(
-                owner_public_id=self.user["public_id"], product="openclaw",
+                owner_public_id=self.user["public_id"], product=product,
                 instance_name=name, runtime_identifier=runtime, db_file=self.db_file,
             )
-            for name, runtime in (("One", "openclaw_one"), ("Two", "openclaw_two"))
+            for product, name, runtime in (
+                ("openclaw", "One", "openclaw_one"),
+                ("hermes", "Two", "hermes_two"),
+            )
         ]
         payload = {
             "request_id": "model-provider-batch-1",
@@ -1480,6 +1483,13 @@ class ManagerControlApiTests(unittest.TestCase):
             )
         self.assertEqual(fetched_status, 200)
         self.assertEqual(fetched.get_json(), body)
+
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ):
+            admin_instances = self.control.admin_instances().get_json()["instances"]
+        hermes = next(item for item in admin_instances if item["product"] == "hermes")
+        self.assertIn("batch_set_model_provider", hermes["capabilities"])
 
     def test_admin_device_batch_creates_idempotent_parent_and_children(self):
         self.control.metadata_store.set_user_role(

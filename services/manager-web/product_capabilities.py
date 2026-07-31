@@ -11,7 +11,10 @@ PRODUCT_CAPABILITIES = {
         {"access", "status", "logs", "start", "stop", "restart"}
     ),
     "hermes": frozenset(
-        {"access", "status", "logs", "start", "stop", "restart", "create"}
+        {
+            "access", "status", "logs", "start", "stop", "restart", "create",
+            "batch_set_model_provider",
+        }
     ),
 }
 

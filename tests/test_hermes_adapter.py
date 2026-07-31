@@ -154,7 +154,7 @@ class HermesAdapterTests(unittest.TestCase):
                 encoding="utf-8",
             )
             inspected = type(
-                "Result", (), {"returncode": 0, "stdout": "hermes-net\n", "stderr": ""}
+                "Result", (), {"returncode": 0, "stdout": "hermes-net\n\n", "stderr": ""}
             )()
             with patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
                 adapter, "run_command", return_value=(0, "applied")

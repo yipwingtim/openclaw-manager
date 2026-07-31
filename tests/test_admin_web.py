@@ -137,6 +137,18 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(context["status_filter"], "running")
         self.assertEqual(context["query"], "instance")
 
+    def test_admin_instances_filters_by_product(self):
+        instances = [
+            {"public_id": "openclaw-1", "instance_name": "OpenClaw", "product": "openclaw", "status": "active", "runtime_status": "running"},
+            {"public_id": "hermes-1", "instance_name": "Hermes", "product": "hermes", "status": "active", "runtime_status": "running"},
+        ]
+        self.admin.request.args = {"status": "all", "product": "hermes"}
+
+        context = self.admin.instance_list_context(instances)
+
+        self.assertEqual(context["product_filter"], "hermes")
+        self.assertEqual([item["public_id"] for item in context["instances"]], ["hermes-1"])
+
     def test_admin_instances_template_preserves_table_and_collapses_extra_actions(self):
         template = (
             ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"
@@ -145,6 +157,8 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn("data-instance-table", template)
         self.assertIn("select-current-page", template)
         self.assertIn("data-instance-actions", template)
+        self.assertIn('[("all", "全部产品"), ("openclaw", "OpenClaw"), ("hermes", "Hermes")]', template)
+        self.assertIn("product={{ product_filter }}", template)
         self.assertIn("显示 {{ pagination.start }}-{{ pagination.end }}", template)
         self.assertIn("<th>访问认证</th><th>操作</th>", template)
 

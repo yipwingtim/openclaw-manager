@@ -75,6 +75,28 @@ class OpenClawDockerAdapter:
 
         return 0, "\n".join(part for part in [test_output, reload_output] if part)
 
+    def apply_nginx_compose(self, compose_file, timeout=120):
+        code, output = self.run_command(
+            ["docker", "compose", "-f", str(compose_file), "up", "-d"],
+            timeout=timeout,
+        )
+        if code != 0:
+            return code, output
+        reconnect_code, reconnect_output = self.run_command(
+            [
+                "bash", "-lc",
+                'source "$1"; connect_shared_services_to_tenant_networks "$2" "$3"',
+                "bash",
+                str(self.manager_dir / "scripts" / "lib_tenant_network.sh"),
+                self.nginx_container_name,
+                os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"),
+            ],
+            timeout=90,
+        )
+        return reconnect_code, "\n".join(
+            part for part in (output, reconnect_output) if part
+        )
+
     def nginx_disabled_conf_dir(self):
         return self.nginx_users_conf_dir / "_disabled"
 
@@ -859,10 +881,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 ),
                 encoding="utf-8",
             )
-            up_code, up_output = self.run_command(
-                ["docker", "compose", "-f", str(compose_file), "up", "-d"],
-                timeout=120,
-            )
+            up_code, up_output = self.apply_nginx_compose(compose_file)
             if up_code != 0:
                 raise RuntimeError(up_output)
             reload_code, reload_output = self.reload_nginx()
@@ -875,10 +894,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 conf.unlink(missing_ok=True)
             else:
                 conf.write_bytes(old_conf)
-            self.run_command(
-                ["docker", "compose", "-f", str(compose_file), "up", "-d"],
-                timeout=120,
-            )
+            self.apply_nginx_compose(compose_file)
             rollback_code, rollback_output = self.reload_nginx()
             if rollback_code != 0:
                 return 1, (
@@ -1065,9 +1081,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 ),
                 encoding="utf-8",
             )
-            apply_code, apply_output = self.run_command(
-                ["docker", "compose", "-f", str(compose_file), "up", "-d"], timeout=120
-            )
+            apply_code, apply_output = self.apply_nginx_compose(compose_file)
             reload_code, reload_output = self.reload_nginx() if apply_code == 0 else (apply_code, apply_output)
             if reload_code != 0:
                 compose_file.write_bytes(old_compose)
@@ -1076,9 +1090,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 if old_disabled_conf is not None:
                     disabled_conf.parent.mkdir(parents=True, exist_ok=True)
                     disabled_conf.write_bytes(old_disabled_conf)
-                self.run_command(
-                    ["docker", "compose", "-f", str(compose_file), "up", "-d"], timeout=120
-                )
+                self.apply_nginx_compose(compose_file)
                 self.reload_nginx()
                 return reload_code, f"Hermes ingress cleanup failed: {reload_output}"
         code, output = self.run_command(["docker", "rm", "-f", runtime_target], timeout=60)
@@ -1090,9 +1102,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             if old_disabled_conf is not None:
                 disabled_conf.parent.mkdir(parents=True, exist_ok=True)
                 disabled_conf.write_bytes(old_disabled_conf)
-            self.run_command(
-                ["docker", "compose", "-f", str(compose_file), "up", "-d"], timeout=120
-            )
+            self.apply_nginx_compose(compose_file)
             self.reload_nginx()
             return code, output
         shutil.rmtree(data_path, ignore_errors=True)

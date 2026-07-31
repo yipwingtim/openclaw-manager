@@ -166,14 +166,19 @@ class HermesAdapterTests(unittest.TestCase):
                     {**self.INSTANCE, "port": 39119}
                 )
 
-            self.assertEqual((code, output), (0, "applied\nreloaded"))
+            self.assertEqual((code, output), (0, "applied\napplied\nreloaded"))
             nginx = adapter.ingress_conf(self.INSTANCE).read_text(encoding="utf-8")
             self.assertIn("server hermes-alice:9119 resolve;", nginx)
             self.assertIn("listen 39119 ssl;", nginx)
             compose_text = compose.read_text(encoding="utf-8")
             self.assertIn('      - "39119:39119"', compose_text)
             self.assertIn("      - hermes-net", compose_text)
-            self.assertEqual(run_command.call_count, 1)
+            self.assertEqual(run_command.call_count, 2)
+            reconnect = run_command.call_args_list[1].args[0]
+            self.assertIn("connect_shared_services_to_tenant_networks", reconnect[2])
+            self.assertEqual(
+                reconnect[-2:], ["openclaw-nginx", "openclaw-model-proxy"]
+            )
 
     def test_stop_disables_ingress_and_start_restores_it(self):
         with TemporaryDirectory() as temp_dir:

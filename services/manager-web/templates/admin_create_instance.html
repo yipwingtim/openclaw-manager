@@ -27,7 +27,7 @@
         </tr>{% endfor %}</tbody>
       </table>
       <div class="p-3">
-        <a class="btn btn-oc" href="/admin/create-instance/batch/{{ batch.parent.request_id }}">刷新状态</a>
+        <a class="btn btn-oc" data-status-refresh href="/admin/create-instance/batch/{{ batch.parent.request_id }}">刷新状态</a>
         <a class="btn btn-oc-outline" href="/admin/create-instance">继续创建</a>
       </div>
     </div>
@@ -42,7 +42,7 @@
         <dt class="col-sm-3">结果</dt><dd class="col-sm-9"><pre class="mb-0">{{ job.output or job.error_summary or "等待 Executor 处理" }}</pre></dd>
       </dl>
       {% if job.status in ["queued", "running"] %}
-        <a class="btn btn-oc" href="/admin/create-instance/{{ job.request_id }}">刷新状态</a>
+        <a class="btn btn-oc" data-status-refresh href="/admin/create-instance/{{ job.request_id }}">刷新状态</a>
       {% else %}
         <a class="btn btn-oc-outline" href="/admin/create-instance">继续创建</a>
       {% endif %}
@@ -94,4 +94,37 @@
       <button class="btn btn-oc-outline" type="submit">提交批量创建</button>
     </form>
   {% endif %}
+{% endblock %}
+{% block scripts %}
+  <script>
+    (function bindStatusRefresh() {
+      document.querySelectorAll('[data-status-refresh]').forEach(function(link) {
+        link.addEventListener('click', function(event) {
+          event.preventDefault();
+          if (link.dataset.refreshing) return;
+          link.dataset.refreshing = 'true';
+          link.textContent = '正在刷新...';
+
+          function refresh() {
+            fetch(link.href, {credentials: 'same-origin', cache: 'no-store'})
+              .then(function(response) {
+                if (!response.ok) throw new Error('status request failed');
+                return response.text();
+              })
+              .then(function(html) {
+                var next = new DOMParser().parseFromString(html, 'text/html');
+                document.querySelector('main').innerHTML = next.querySelector('main').innerHTML;
+                bindStatusRefresh();
+              })
+              .catch(function() {
+                link.textContent = '连接中，自动重试...';
+                window.setTimeout(refresh, 1000);
+              });
+          }
+
+          refresh();
+        });
+      });
+    })();
+  </script>
 {% endblock %}

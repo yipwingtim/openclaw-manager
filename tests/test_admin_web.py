@@ -199,6 +199,19 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(template, "admin_create_instance.html")
         self.assertEqual(context["users"], [users[0]])
 
+    def test_create_status_refresh_stays_on_page_during_proxy_restart(self):
+        template = (
+            ROOT_DIR
+            / "services"
+            / "manager-web"
+            / "templates"
+            / "admin_create_instance.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(template.count("data-status-refresh href="), 2)
+        self.assertIn("event.preventDefault()", template)
+        self.assertIn("fetch(link.href", template)
+
     def test_admin_create_instance_submits_structured_payload(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         self.admin.request.form = {

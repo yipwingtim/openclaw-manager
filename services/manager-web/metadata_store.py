@@ -622,8 +622,8 @@ def list_instances_for_user(user_public_id, *, db_file=None, conn=None):
             LEFT JOIN instance_members m
                 ON m.instance_id = i.id
                AND m.user_id = current_user.id
-            WHERE i.owner_user_id = current_user.id
-               OR m.user_id IS NOT NULL
+            WHERE (i.owner_user_id = current_user.id OR m.user_id IS NOT NULL)
+              AND i.status IN ('active', 'stopped')
             ORDER BY i.id
             """,
             (user_public_id,),

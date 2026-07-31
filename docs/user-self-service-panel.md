@@ -9,14 +9,15 @@
 当前 MVP 重点解决三个问题：
 
 - 用户首次登录 OpenClaw Control UI 时，如果出现 Device Pairing，可通过管理面板触发审批流程，而不必让管理员手工进入服务器执行脚本。
-- 用户可从统一入口 `/me` 查看自己拥有或被授权访问的全部实例。
+- 用户可从统一入口 `/me` 查看自己拥有或被授权访问的 `active`、`stopped` 实例。
 - 用户可以通过受控页面上传文件，并下载工作区中生成的常见导出文件。
 
 ## 2. 当前 MVP 能力
 
 当前版本提供以下能力：
 
-- 通过 `/me` 展示当前用户拥有和被授权访问的实例
+- 通过 `/me` 展示当前用户拥有和被授权访问的 `active`、`stopped` 实例；
+  `provisioning`、`failed`、`deleted` 记录仍保留供管理员审计，但不在用户门户显示
 - 使用实例 UUID 路由 `/instances/<instance_public_id>` 执行用户操作
 - 按 owner、manager、operator、viewer 角色和产品能力共同裁剪操作
 - owner 和 manager 管理实例成员；manager 不能管理 manager 成员

@@ -29,11 +29,14 @@ class ManagerWebImageTests(unittest.TestCase):
         )
 
         self.assertIn("COPY static ./static", dockerfile)
-        for product in ("openclaw", "hermes"):
-            logo = manager_web / "static" / "products" / f"{product}.svg"
+        for product, filename in (
+            ("openclaw", "openclaw.svg"),
+            ("hermes", "hermes.png"),
+        ):
             with self.subTest(product=product):
+                logo = manager_web / "static" / "products" / filename
                 self.assertTrue(logo.is_file())
-                self.assertIn(product, template)
+                self.assertIn(f"products/{filename}", template)
         self.assertIn("instance-product-logo-fallback", template)
 
 

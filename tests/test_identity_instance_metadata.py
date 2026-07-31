@@ -137,6 +137,34 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
             [(owned["public_id"], "owner"), (shared["public_id"], "operator")],
         )
 
+    def test_user_list_excludes_instances_that_are_not_accessible(self):
+        owner = self.store.create_user("owner", db_file=self.db_file)
+        visible = self.store.create_instance(
+            owner_public_id=owner["public_id"],
+            product="openclaw",
+            instance_name="Visible",
+            runtime_identifier="openclaw_visible",
+            db_file=self.db_file,
+        )
+        for status in ("provisioning", "failed", "deleted"):
+            self.store.create_instance(
+                owner_public_id=owner["public_id"],
+                product="openclaw",
+                instance_name=status,
+                runtime_identifier=f"openclaw_{status}",
+                status=status,
+                db_file=self.db_file,
+            )
+
+        instances = self.store.list_instances_for_user(
+            owner["public_id"], db_file=self.db_file
+        )
+
+        self.assertEqual(
+            [row["public_id"] for row in instances],
+            [visible["public_id"]],
+        )
+
     def test_owner_cannot_be_duplicated_as_instance_member(self):
         owner = self.store.create_user("owner", db_file=self.db_file)
         member = self.store.create_user("member", db_file=self.db_file)

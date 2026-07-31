@@ -20,6 +20,9 @@ the legacy two-container topology, restore, or upgrade.
 - Dashboard Basic Auth is mandatory for creation. Only the official Hermes
   scrypt password hash and a random session secret are persisted in `.env`;
   the plaintext password is consumed from the one-shot provisioning secret.
+- Runtime dependency lazy installation is disabled in `config.yaml` so a
+  missing optional package cannot block agent initialization. Optional
+  dependencies must be included in the image before enabling their features.
 
 Registration writes the instance, endpoint, allocated port, audit record,
 Nginx server configuration, port mapping, and external network attachment. A

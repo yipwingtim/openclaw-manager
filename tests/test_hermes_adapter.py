@@ -225,6 +225,10 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertIn("HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH=scrypt$", env_text)
             self.assertNotIn("line1", env_text)
             self.assertNotIn("INJECTED", env_text)
+            self.assertEqual(
+                (Path(instance["data_path"]) / "config.yaml").read_text(encoding="utf-8"),
+                "security:\n  allow_lazy_installs: false\n",
+            )
 
     def test_create_failure_removes_container_data_and_new_network(self):
         with TemporaryDirectory() as temp_dir:

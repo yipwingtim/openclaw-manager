@@ -778,7 +778,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         inspected = subprocess.run(
             [
                 "docker", "inspect", "--format",
-                "{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}",
+                '{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s\\n" $name}}{{end}}',
                 runtime_target,
             ],
             cwd=str(self.manager_dir),
@@ -791,7 +791,8 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             return inspected.returncode, inspected.stderr.strip() or "Hermes container not found."
         networks = [
             line.strip() for line in inspected.stdout.splitlines()
-            if line.strip() not in {"manager-net", "bridge", "host", "none"}
+            if line.strip()
+            and line.strip() not in {"manager-net", "bridge", "host", "none"}
         ]
         if len(networks) != 1 or not self._SAFE_DOCKER_NAME.fullmatch(networks[0]):
             return 1, "Hermes container must have exactly one safe tenant network."
@@ -1025,7 +1026,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         networks = subprocess.run(
             [
                 "docker", "inspect", "--format",
-                "{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}",
+                '{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s\\n" $name}}{{end}}',
                 runtime_target,
             ],
             text=True, capture_output=True, timeout=10, check=False,

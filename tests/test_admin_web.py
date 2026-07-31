@@ -225,8 +225,10 @@ class AdminWebTests(unittest.TestCase):
 
         self.assertIn('data-auto-refresh="true"', template)
         self.assertIn('selectattr("status", "in", ["queued", "running"])', template)
-        self.assertIn("window.setTimeout(function()", template)
-        self.assertIn("}, 2000)", template)
+        self.assertIn("scheduleRefresh(2000)", template)
+        self.assertIn("new AbortController()", template)
+        self.assertIn("controller.abort()", template)
+        self.assertIn("bindStatusRefresh()", template)
 
     def test_admin_create_instance_submits_structured_payload(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

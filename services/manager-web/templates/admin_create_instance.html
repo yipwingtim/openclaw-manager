@@ -12,6 +12,7 @@
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
 
   {% if batch %}
+    {% set batch_running = batch.children|selectattr("status", "in", ["queued", "running"])|list|length > 0 %}
     <div class="surface table-responsive">
       <div class="p-3 border-bottom">
         <div class="section-title">批量创建任务 {{ batch.parent.request_id }}</div>
@@ -27,7 +28,7 @@
         </tr>{% endfor %}</tbody>
       </table>
       <div class="p-3">
-        <a class="btn btn-oc" data-status-refresh href="/admin/create-instance/batch/{{ batch.parent.request_id }}">刷新状态</a>
+        <a class="btn btn-oc" data-status-refresh{% if batch_running %} data-auto-refresh="true"{% endif %} href="/admin/create-instance/batch/{{ batch.parent.request_id }}">刷新状态</a>
         <a class="btn btn-oc-outline" href="/admin/create-instance">继续创建</a>
       </div>
     </div>
@@ -42,7 +43,7 @@
         <dt class="col-sm-3">结果</dt><dd class="col-sm-9"><pre class="mb-0">{{ job.output or job.error_summary or "等待 Executor 处理" }}</pre></dd>
       </dl>
       {% if job.status in ["queued", "running"] %}
-        <a class="btn btn-oc" data-status-refresh href="/admin/create-instance/{{ job.request_id }}">刷新状态</a>
+        <a class="btn btn-oc" data-status-refresh data-auto-refresh="true" href="/admin/create-instance/{{ job.request_id }}">刷新状态</a>
       {% else %}
         <a class="btn btn-oc-outline" href="/admin/create-instance">继续创建</a>
       {% endif %}
@@ -124,6 +125,9 @@
 
           refresh();
         });
+        if (link.dataset.autoRefresh === 'true') {
+          window.setTimeout(function() { link.click(); }, 2000);
+        }
       });
     })();
   </script>

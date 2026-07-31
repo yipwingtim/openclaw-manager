@@ -21,6 +21,21 @@ class ManagerWebImageTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, dockerfile)
 
+    def test_product_logos_are_packaged_and_used_by_instance_list(self):
+        manager_web = ROOT_DIR / "services" / "manager-web"
+        dockerfile = (manager_web / "Dockerfile").read_text(encoding="utf-8")
+        template = (manager_web / "templates" / "my_instances.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("COPY static ./static", dockerfile)
+        for product in ("openclaw", "hermes"):
+            logo = manager_web / "static" / "products" / f"{product}.svg"
+            with self.subTest(product=product):
+                self.assertTrue(logo.is_file())
+                self.assertIn(product, template)
+        self.assertIn("instance-product-logo-fallback", template)
+
 
 if __name__ == "__main__":
     unittest.main()

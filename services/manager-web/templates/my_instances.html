@@ -20,10 +20,24 @@
         <div class="col-12 col-lg-6">
           <article class="surface h-100 p-3 p-lg-4">
             <div class="d-flex justify-content-between align-items-start gap-3 mb-4">
-              <div>
-                <div class="page-kicker">{{ instance.product }}</div>
-                <h2 class="section-title mb-2">{{ instance.instance_name }}</h2>
-                <span class="badge-status badge-neutral">{{ instance.access_role }}</span>
+              <div class="d-flex align-items-start gap-3">
+                {% if instance.product in ("openclaw", "hermes") %}
+                  <img
+                    class="instance-product-logo"
+                    src="{{ url_for('static', filename='products/' ~ instance.product ~ '.svg') }}"
+                    alt=""
+                    aria-hidden="true"
+                  >
+                {% else %}
+                  <span class="instance-product-logo instance-product-logo-fallback" aria-hidden="true">
+                    {{ instance.product[:1]|upper }}
+                  </span>
+                {% endif %}
+                <div>
+                  <div class="page-kicker">{{ instance.product }}</div>
+                  <h2 class="section-title mb-2">{{ instance.instance_name }}</h2>
+                  <span class="badge-status badge-neutral">{{ instance.access_role }}</span>
+                </div>
               </div>
               {% if instance.status == "active" %}
                 <span class="badge-status badge-running">运行中</span>

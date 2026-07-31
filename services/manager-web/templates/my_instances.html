@@ -21,10 +21,17 @@
           <article class="surface h-100 p-3 p-lg-4">
             <div class="d-flex justify-content-between align-items-start gap-3 mb-4">
               <div class="d-flex align-items-start gap-3">
-                {% if instance.product in ("openclaw", "hermes") %}
+                {% if instance.product == "openclaw" %}
                   <img
                     class="instance-product-logo"
-                    src="{{ url_for('static', filename='products/' ~ instance.product ~ '.svg') }}"
+                    src="{{ url_for('static', filename='products/openclaw.svg') }}"
+                    alt=""
+                    aria-hidden="true"
+                  >
+                {% elif instance.product == "hermes" %}
+                  <img
+                    class="instance-product-logo"
+                    src="{{ url_for('static', filename='products/hermes.png') }}"
                     alt=""
                     aria-hidden="true"
                   >

@@ -13,6 +13,7 @@ COPY product_capabilities.py .
 COPY control_client.py .
 COPY executor_client.py .
 COPY templates ./templates
+COPY static ./static
 
 ENV FLASK_HOST=0.0.0.0
 ENV FLASK_PORT=8080

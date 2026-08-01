@@ -216,7 +216,7 @@ def reload_nginx_after_create(adapter):
             adapter.nginx_container_name,
             os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"),
         ],
-        timeout=90,
+        timeout=300,
     )
     if connect_code != 0:
         return connect_code, connect_output

@@ -158,38 +158,85 @@ ensure_tenant_compose_network() {
 connect_shared_services_to_tenant_networks() {
   local nginx_container="$1"
   local model_proxy_container="$2"
-  local user_container_prefix="${USER_CONTAINER_PREFIX:-openclaw_}"
-  local network_prefix="${OPENCLAW_TENANT_NETWORK_PREFIX:-openclaw-user}"
-  local containers
-  local container
-  local networks
-  local network
+  python3 - "$nginx_container" "$model_proxy_container" <<'PY'
+import concurrent.futures
+import json
+import os
+import subprocess
+import sys
 
-  containers="$(docker ps --format '{{.Names}}' 2>/dev/null || true)"
-  if [ -z "$containers" ]; then
-    return 0
-  fi
+nginx, model_proxy = sys.argv[1:]
+network_prefix = os.environ.get("OPENCLAW_TENANT_NETWORK_PREFIX", "openclaw-user") + "-"
 
-  while IFS= read -r container; do
-    case "$container" in
-      "$user_container_prefix"*) ;;
-      *) continue ;;
-    esac
 
-    networks="$(
-      docker inspect "$container" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s\n" $name}}{{end}}' 2>/dev/null || true
-    )"
-    while IFS= read -r network; do
-      case "$network" in
-        "$network_prefix"-*)
-          connect_container_to_network "$nginx_container" "$network"
-          connect_container_to_network "$model_proxy_container" "$network"
-          ;;
-      esac
-    done <<EOF
-$networks
-EOF
-  done <<EOF
-$containers
-EOF
+def inspect(names):
+    if not names:
+        return {}
+    result = subprocess.run(
+        ["docker", "inspect", *names], capture_output=True, text=True, check=False
+    )
+    if not result.stdout.strip():
+        return {}
+    try:
+        items = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    return {
+        item["Name"].lstrip("/"): set(item["NetworkSettings"]["Networks"])
+        for item in items
+    }
+
+
+result = subprocess.run(
+    ["docker", "ps", "--format", "{{.Names}}"],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+if result.returncode != 0:
+    raise SystemExit(result.returncode)
+
+containers = result.stdout.splitlines()
+container_networks = inspect(containers)
+desired = set()
+for container, networks in container_networks.items():
+    tenant_networks = {name for name in networks if name.startswith(network_prefix)}
+    if container.startswith(os.environ.get("USER_CONTAINER_PREFIX", "openclaw_")):
+        desired.update((service, network) for service in (nginx, model_proxy) for network in tenant_networks)
+    elif container.startswith("hermes_"):
+        desired.update((model_proxy, network) for network in tenant_networks)
+    elif container.startswith("evoscientist_") and not container.endswith(("-proxy", "-ingress")):
+        desired.update((model_proxy, network) for network in tenant_networks)
+
+existing_services = inspect([nginx, model_proxy])
+desired = {(service, network) for service, network in desired if service in existing_services}
+missing = desired
+for _ in range(3):
+    actual = inspect(sorted({service for service, _ in missing}))
+    missing = {
+        (service, network)
+        for service, network in missing
+        if network not in actual.get(service, set())
+    }
+    if not missing:
+        break
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda pair: subprocess.run(
+            ["docker", "network", "connect", pair[1], pair[0]],
+            capture_output=True,
+            text=True,
+            check=False,
+        ), missing))
+
+actual = inspect(sorted({service for service, _ in missing}))
+missing = {
+    (service, network)
+    for service, network in missing
+    if network not in actual.get(service, set())
+}
+if missing:
+    for service, network in sorted(missing):
+        print(f"[ERROR] Failed to connect {service} to {network}", file=sys.stderr)
+    raise SystemExit(1)
+PY
 }

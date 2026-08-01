@@ -334,5 +334,91 @@ class TenantNetworkIsolationTests(unittest.TestCase):
     def test_shared_network_reconnect_scans_only_running_containers(self):
         script = NETWORK_HELPER.read_text(encoding="utf-8")
 
-        self.assertIn("docker ps --format '{{.Names}}'", script)
-        self.assertNotIn("docker ps -a --format '{{.Names}}'", script)
+        self.assertIn('["docker", "ps", "--format", "{{.Names}}"]', script)
+        self.assertNotIn('["docker", "ps", "-a", "--format", "{{.Names}}"]', script)
+
+    def test_shared_network_reconnect_restores_each_products_shared_services(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fake_docker = root / "docker"
+            state_dir = root / "state"
+            state_dir.mkdir()
+            fake_docker.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env python3
+                    import json
+                    import os
+                    import sys
+                    from pathlib import Path
+
+                    state = Path(os.environ["FAKE_DOCKER_STATE"])
+                    containers = {
+                        "openclaw_alice": ["openclaw-user-a"],
+                        "hermes_bob": ["openclaw-user-b"],
+                        "evoscientist_cara": ["openclaw-user-c"],
+                        "evoscientist_cara-proxy": ["openclaw-user-c"],
+                        "evoscientist_cara-ingress": ["openclaw-user-c"],
+                        "nginx": [],
+                        "proxy": [],
+                    }
+                    if sys.argv[1:3] == ["ps", "--format"]:
+                        print("\\n".join(containers))
+                        raise SystemExit(0)
+                    if sys.argv[1] == "inspect":
+                        result = []
+                        for name in sys.argv[2:]:
+                            networks = set(containers.get(name, []))
+                            networks.update(
+                                path.name[len(name) + 1:]
+                                for path in state.glob(f"{name}_*")
+                            )
+                            result.append({
+                                "Name": "/" + name,
+                                "NetworkSettings": {"Networks": {
+                                    network: {} for network in networks
+                                }},
+                            })
+                        print(json.dumps(result))
+                        raise SystemExit(0)
+                    if sys.argv[1:3] == ["network", "connect"]:
+                        network, container = sys.argv[3:5]
+                        failed = state / f"failed_{container}_{network}"
+                        if container == "proxy" and network == "openclaw-user-c" and not failed.exists():
+                            failed.touch()
+                            raise SystemExit(1)
+                        (state / f"{container}_{network}").touch()
+                        raise SystemExit(0)
+                    raise SystemExit(1)
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_docker.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{root}:{env['PATH']}"
+            env["FAKE_DOCKER_STATE"] = str(state_dir)
+
+            result = subprocess.run(
+                [
+                    "bash", "-c",
+                    'source "$1"; connect_shared_services_to_tenant_networks nginx proxy',
+                    "bash", str(NETWORK_HELPER),
+                ],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                {path.name for path in state_dir.iterdir() if not path.name.startswith("failed_")},
+                {
+                    "nginx_openclaw-user-a",
+                    "proxy_openclaw-user-a",
+                    "proxy_openclaw-user-b",
+                    "proxy_openclaw-user-c",
+                },
+            )
+            self.assertTrue((state_dir / "failed_proxy_openclaw-user-c").exists())

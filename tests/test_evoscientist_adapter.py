@@ -272,6 +272,14 @@ class EvoScientistAdapterTests(unittest.TestCase):
             self.assertIn(f"custom_openai_base_url: {proxy_url}", config)
             self.assertNotIn(upstream_url, config)
             self.assertIn("custom_openai_api_key: secret-token", config)
+            self.assertIn(
+                [
+                    "docker", "exec", "-u", "0", "evoscientist_alice",
+                    "chown", "-R", "evosci:evosci",
+                    "/home/evosci/.evoscientist/.config",
+                ],
+                [call.args[0] for call in run.call_args_list],
+            )
             self.assertEqual(
                 [call.args[0] for call in run.call_args_list[-2:]],
                 [

@@ -32,7 +32,7 @@ TOKEN_ENV = {
 }
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
-VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-fA-F]{64})$")
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -541,12 +541,12 @@ def create_admin_instance():
         return jsonify({"error": "invalid legacy_user_id"}), 400
     if not isinstance(instance_name, str) or not instance_name.strip() or len(instance_name) > 128:
         return jsonify({"error": "invalid instance_name"}), 400
-    if product not in {"openclaw", "hermes"} or not product_supports(product, "create"):
+    if product not in {"openclaw", "hermes", "evoscientist"} or not product_supports(product, "create"):
         return jsonify({"error": "instance product does not support create"}), 400
     if not isinstance(basic_auth_enabled, bool):
         return jsonify({"error": "basic_auth_enabled must be a boolean"}), 400
-    if product == "hermes" and not basic_auth_enabled:
-        return jsonify({"error": "Hermes Dashboard requires Basic Auth"}), 400
+    if product in {"hermes", "evoscientist"} and not basic_auth_enabled:
+        return jsonify({"error": f"{product} requires Basic Auth"}), 400
     if not isinstance(password, str) or not password:
         return jsonify({"error": "basic_auth_password is required"}), 400
 

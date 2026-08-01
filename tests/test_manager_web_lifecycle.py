@@ -313,7 +313,7 @@ class LifecycleActionTests(unittest.TestCase):
 
         self.assertIsInstance(adapter, self.app_module.HermesDockerAdapter)
         self.assertTrue(adapter.supports("restart"))
-        self.assertFalse(adapter.supports("delete"))
+        self.assertTrue(adapter.supports("delete"))
 
     def test_registry_returns_evoscientist_adapter(self):
         adapter = self.app_module.get_instance_adapter("evoscientist")
@@ -323,7 +323,7 @@ class LifecycleActionTests(unittest.TestCase):
             self.app_module.EvoScientistDockerAdapter,
         )
         self.assertTrue(adapter.supports("restart"))
-        self.assertFalse(adapter.supports("delete"))
+        self.assertTrue(adapter.supports("delete"))
 
     def test_parse_bulk_user_ids_accepts_whitespace_commas_and_dedupes(self):
         user_ids = self.app_module.parse_bulk_user_ids(["alice bob", "alice,bad/user,carol"])

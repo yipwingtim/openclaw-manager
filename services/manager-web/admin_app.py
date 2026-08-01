@@ -44,7 +44,7 @@ def instance_list_context(instances):
     if status_filter not in {"running", "stopped", "deleted", "all"}:
         status_filter = "running"
     product_filter = request.args.get("product", "all").strip().lower()
-    if product_filter not in {"all", "openclaw", "hermes"}:
+    if product_filter not in {"all", "openclaw", "hermes", "evoscientist"}:
         product_filter = "all"
     query = request.args.get("q", "").strip()
     filtered = [
@@ -226,7 +226,7 @@ def create_instance():
     basic_auth_enabled = request.form.get("basic_auth_enabled") == "true"
     if not owner_public_id or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
         return redirect(url_for("create_instance_page", error="请选择 Owner 并填写有效的实例 ID。"))
-    if product not in {"openclaw", "hermes"}:
+    if product not in {"openclaw", "hermes", "evoscientist"}:
         return redirect(url_for("create_instance_page", error="不支持该实例产品。"))
     if not instance_name or len(instance_name) > 128 or not password:
         return redirect(url_for("create_instance_page", error="实例名称和 Basic Auth 密码不能为空。"))

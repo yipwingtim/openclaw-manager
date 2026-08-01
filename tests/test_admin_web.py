@@ -157,7 +157,7 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn("data-instance-table", template)
         self.assertIn("select-current-page", template)
         self.assertIn("data-instance-actions", template)
-        self.assertIn('[("all", "全部产品"), ("openclaw", "OpenClaw"), ("hermes", "Hermes")]', template)
+        self.assertIn('(\"hermes\", \"Hermes\"), (\"evoscientist\", \"EvoScientist\")', template)
         self.assertIn("product={{ product_filter }}", template)
         self.assertIn("显示 {{ pagination.start }}-{{ pagination.end }}", template)
         self.assertIn("<th>访问认证</th><th>操作</th>", template)

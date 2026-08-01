@@ -751,6 +751,22 @@ while True:
                 return 1, output or f"{name} is not running"
         return 0, "EvoScientist services are running"
 
+    def _apply_ingress_compose(self, compose, network=None):
+        code, output = self.run_command(
+            ["docker", "compose", "-f", str(compose), "up", "-d"], timeout=120
+        )
+        if code != 0:
+            return code, output
+        if network is None:
+            return 0, output
+        connect_code, connect_output = self.run_command(
+            ["docker", "network", "connect", network, self.nginx_container_name],
+            timeout=30,
+        )
+        if connect_code != 0 and "already exists" not in connect_output.lower():
+            return connect_code, connect_output
+        return 0, "\n".join(part for part in (output, connect_output) if part)
+
     def configure_ingress(self, instance):
         port = instance.get("_created_port", instance.get("port"))
         if not isinstance(port, int) or not 1 <= port <= 65535:
@@ -783,13 +799,13 @@ while True:
             network = self.tenant_network(instance)
             updated = HermesDockerAdapter._add_ingress_to_nginx_compose(old, port, network)
             compose.write_text(updated, encoding="utf-8")
-            code, output = self.apply_nginx_compose(compose)
+            code, output = self._apply_ingress_compose(compose, network)
             if code == 0:
                 code, output = self.reload_nginx()
             if code != 0:
                 compose.write_text(old, encoding="utf-8")
                 conf.unlink(missing_ok=True)
-                self.apply_nginx_compose(compose)
+                self._apply_ingress_compose(compose)
                 self.reload_nginx()
             return code, output
         except Exception as exc:
@@ -984,7 +1000,7 @@ while True:
                         compose.read_text(encoding="utf-8"), instance["port"], [self.tenant_network(instance)]
                     ), encoding="utf-8"
                 )
-                code, output = self.apply_nginx_compose(compose)
+                code, output = self._apply_ingress_compose(compose)
                 if code != 0:
                     raise RuntimeError(output)
             self._existing_ingress_conf(instance).unlink(missing_ok=True)
@@ -1017,7 +1033,7 @@ while True:
                     elif not was_running:
                         self.stop(instance)
                 if 'old_compose' in locals() and old_compose:
-                    code, output = self.apply_nginx_compose(compose)
+                    code, output = self._apply_ingress_compose(compose, network)
                     if code != 0:
                         rollback_errors.append(output)
                     else:

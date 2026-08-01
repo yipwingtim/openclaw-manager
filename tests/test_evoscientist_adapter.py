@@ -235,6 +235,33 @@ class EvoScientistAdapterTests(unittest.TestCase):
             self.assertIn("listen 443 ssl;", config_text)
             self.assertNotIn("listen 40062 ssl;", config_text)
 
+    def test_set_model_provider_persists_config_and_restarts_instance(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            instance = dict(self.INSTANCE, data_path=str(root / "public" / "users" / "alice"))
+            config_dir = root / "public" / "users" / "alice" / "evoscientist-data" / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "config.yaml").write_text("model: old\nprovider: anthropic\n", encoding="utf-8")
+            token_dir = root / "tokens"
+            token_dir.mkdir()
+            (token_dir / "alice.token").write_text("secret-token\n", encoding="utf-8")
+            network = adapter.tenant_network(instance)
+            def run_command(command, **kwargs):
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, network + "\n"
+                return 0, "restarted"
+            with patch.dict(os.environ, {"MODEL_PROXY_TOKEN_DIR": str(token_dir)}), patch.object(
+                adapter, "run_command", side_effect=run_command
+            ) as run:
+                code, output = adapter.set_model_provider(instance, "openai", "gpt-5.4")
+            self.assertEqual((code, output), (0, "EvoScientist model provider updated."))
+            config = (config_dir / "config.yaml").read_text(encoding="utf-8")
+            self.assertIn("model: gpt-5.4", config)
+            self.assertIn("provider: custom-openai", config)
+            self.assertIn("custom_openai_api_key: secret-token", config)
+            self.assertEqual(run.call_args_list[-1].args[0], ["docker", "restart", "evoscientist_alice"])
+
     def test_create_prepares_data_permissions_before_starting_containers(self):
         digest = "sha256:" + "a" * 64
         with TemporaryDirectory() as temp_dir:

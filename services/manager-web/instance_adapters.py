@@ -11,6 +11,7 @@ import tempfile
 import threading
 from pathlib import Path
 
+
 from product_capabilities import product_capabilities
 
 
@@ -37,6 +38,14 @@ class OpenClawDockerAdapter:
                 return None
             raise ValueError("instance legacy_user_id is required")
         return user_id.strip()
+
+    @staticmethod
+    def _write_private_file(path, content):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.tmp")
+        temporary.write_bytes(content)
+        temporary.chmod(0o600)
+        temporary.replace(path)
 
     def __init__(self, manager_dir, public_dir, nginx_users_conf_dir, nginx_compose_dir, nginx_container_name):
         self.manager_dir = Path(manager_dir)
@@ -666,6 +675,9 @@ while True:
             raise ValueError("EvoScientist data path is invalid")
         return user_dir, user_dir / "workspace", user_dir / "evoscientist-data", user_dir / "tcp_proxy.py"
 
+    def _config_dir(self, instance):
+        return self._data_paths(instance)[2] / "config"
+
     def recycle_dir(self, instance):
         public_id = instance.get("public_id")
         if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
@@ -722,12 +734,14 @@ while True:
     def _run_containers(self, instance, image, network, timeout=420):
         runtime_target = self.get_runtime_target(instance)
         _, workspace, data_dir, proxy_script = self._data_paths(instance)
+        config_dir = data_dir / "config"
         code, output = self.run_command(
             [
                 "docker", "run", "-d", "--name", runtime_target,
                 "--restart", "unless-stopped", "--network", network,
                 "-v", f"{workspace}:/workspace",
                 "-v", f"{data_dir}:/home/evosci/.evoscientist",
+                "-v", f"{config_dir}:/home/evosci/.config/evoscientist",
                 "-e", "EVOSCIENTIST_WORKSPACE_DIR=/workspace",
                 "-e", "EVOSCIENTIST_DATA_DIR=/home/evosci/.evoscientist",
                 image, "--ui", "webui",
@@ -751,14 +765,16 @@ while True:
 
     def _fix_data_permissions(self, instance, image):
         _, workspace, data_dir, _ = self._data_paths(instance)
+        config_dir = data_dir / "config"
         return self.run_command(
             [
                 "docker", "run", "--rm", "--user", "0", "--entrypoint", "sh",
                 "-v", f"{workspace}:/workspace",
                 "-v", f"{data_dir}:/home/evosci/.evoscientist",
+                "-v", f"{config_dir}:/home/evosci/.config/evoscientist",
                 image, "-c",
-                "mkdir -p /workspace /home/evosci/.evoscientist && "
-                "chown -R evosci:evosci /workspace /home/evosci/.evoscientist",
+                "mkdir -p /workspace /home/evosci/.evoscientist /home/evosci/.config/evoscientist && "
+                "chown -R evosci:evosci /workspace /home/evosci/.evoscientist /home/evosci/.config/evoscientist",
             ],
             timeout=60,
         )
@@ -823,6 +839,89 @@ while True:
             return code, output
         except Exception as exc:
             return 1, f"EvoScientist ingress configuration failed: {exc}"
+
+    def set_model_provider(
+        self, instance, provider_id, model_id, base_url="", alias="", timeout=180,
+    ):
+        del alias
+        if provider_id not in {"openai", "custom-openai"}:
+            return 1, "EvoScientist model provider uses the shared OpenAI-compatible proxy."
+        if not isinstance(model_id, str) or not model_id.strip():
+            return 1, "EvoScientist model id is required."
+        config_dir = self._config_dir(instance)
+        config_file = config_dir / "config.yaml"
+        token_dir = Path(os.environ.get(
+            "MODEL_PROXY_TOKEN_DIR", str(self.public_dir / "model-proxy-tokens")
+        ))
+        user_id = self.get_legacy_user_id(instance)
+        token_file = token_dir / f"{user_id}.token"
+        models_file = token_dir / f"{user_id}.models"
+        proxy_base_url = base_url or os.environ.get(
+            "MODEL_PROXY_PUBLIC_BASE_URL", "http://openclaw-model-proxy:8081/v1"
+        )
+        proxy_container = os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy")
+        network = self.tenant_network(instance)
+        old_config = config_file.read_bytes() if config_file.is_file() else None
+        old_token = token_file.read_bytes() if token_file.is_file() else None
+        old_models = models_file.read_bytes() if models_file.is_file() else None
+        connected = False
+        try:
+            token = old_token.decode("utf-8").strip() if old_token else ""
+            token = token or "ocm_" + secrets.token_urlsafe(32)
+            self._write_private_file(token_file, (token + "\n").encode())
+            allowed_models = {
+                line.strip() for line in (old_models or b"").decode("utf-8").splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            }
+            self._write_private_file(
+                models_file, ("\n".join(sorted(allowed_models | {model_id})) + "\n").encode()
+            )
+            config_dir.mkdir(parents=True, exist_ok=True)
+            lines = old_config.decode("utf-8").splitlines() if old_config else []
+            updates = {
+                "model": model_id,
+                "provider": "custom-openai",
+                "custom_openai_base_url": proxy_base_url,
+                "custom_openai_api_key": token,
+            }
+            for key, value in updates.items():
+                replacement = f"{key}: {value}\n"
+                for index, line in enumerate(lines):
+                    if re.match(rf"^{re.escape(key)}\s*:", line):
+                        lines[index] = replacement.rstrip("\n")
+                        break
+                else:
+                    lines.append(replacement.rstrip("\n"))
+            config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            config_file.chmod(0o600)
+            inspect_code, inspect_output = self.run_command(
+                ["docker", "inspect", "--format", "{{range $name, $_ := .NetworkSettings.Networks}}{{printf \"%s\\n\" $name}}{{end}}", proxy_container],
+                timeout=10,
+            )
+            if inspect_code != 0:
+                raise RuntimeError(inspect_output or "Model Proxy container not found")
+            if network not in inspect_output.splitlines():
+                code, output = self.run_command(["docker", "network", "connect", network, proxy_container], timeout=30)
+                if code != 0:
+                    raise RuntimeError(output or "Could not connect Model Proxy network")
+                connected = True
+            code, output = self.run_command(["docker", "restart", self.get_runtime_target(instance)], timeout=90)
+            if code != 0:
+                raise RuntimeError(output or "Could not restart EvoScientist instance")
+            return 0, "EvoScientist model provider updated."
+        except Exception as exc:
+            if old_config is None:
+                config_file.unlink(missing_ok=True)
+            else:
+                config_file.write_bytes(old_config)
+            for path, content in ((token_file, old_token), (models_file, old_models)):
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    self._write_private_file(path, content)
+            if connected:
+                self.run_command(["docker", "network", "disconnect", network, proxy_container], timeout=30)
+            return 1, f"EvoScientist model provider update failed and was rolled back: {exc}"
 
     def _inspect_deployment(self, instance):
         code, output = self.run_command(

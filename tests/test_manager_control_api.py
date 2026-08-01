@@ -1928,6 +1928,7 @@ class ManagerControlApiTests(unittest.TestCase):
             product="openclaw",
             instance_name="Primary",
             runtime_identifier="openclaw_alice",
+            port=39119,
             db_file=self.db_file,
         )
         self.control.metadata_store.create_execution_job(
@@ -1961,6 +1962,7 @@ class ManagerControlApiTests(unittest.TestCase):
                 "product": "openclaw",
                 "runtime_identifier": "openclaw_alice",
                 "data_path": None,
+                "port": 39119,
                 "basic_auth_enabled": True,
                 "status": "active",
                 "restore_state": "not_applicable",

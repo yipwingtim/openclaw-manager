@@ -165,7 +165,7 @@ connect_shared_services_to_tenant_networks() {
   local networks
   local network
 
-  containers="$(docker ps -a --format '{{.Names}}' 2>/dev/null || true)"
+  containers="$(docker ps --format '{{.Names}}' 2>/dev/null || true)"
   if [ -z "$containers" ]; then
     return 0
   fi

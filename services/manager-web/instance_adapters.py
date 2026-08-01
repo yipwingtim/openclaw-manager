@@ -691,7 +691,7 @@ while True:
         return user_dir, user_dir / "workspace", user_dir / "evoscientist-data", user_dir / "tcp_proxy.py"
 
     def _config_dir(self, instance):
-        return self._data_paths(instance)[2] / "config"
+        return self._data_paths(instance)[2] / ".config" / "evoscientist"
 
     def recycle_dir(self, instance):
         public_id = instance.get("public_id")
@@ -749,14 +749,12 @@ while True:
     def _run_containers(self, instance, image, network, timeout=420):
         runtime_target = self.get_runtime_target(instance)
         _, workspace, data_dir, proxy_script = self._data_paths(instance)
-        config_dir = data_dir / "config"
         code, output = self.run_command(
             [
                 "docker", "run", "-d", "--name", runtime_target,
                 "--restart", "unless-stopped", "--network", network,
                 "-v", f"{workspace}:/workspace",
                 "-v", f"{data_dir}:/home/evosci/.evoscientist",
-                "-v", f"{config_dir}:/home/evosci/.config/evoscientist",
                 "-e", "EVOSCIENTIST_WORKSPACE_DIR=/workspace",
                 "-e", "EVOSCIENTIST_DATA_DIR=/home/evosci/.evoscientist",
                 image, "--ui", "webui",
@@ -780,16 +778,14 @@ while True:
 
     def _fix_data_permissions(self, instance, image):
         _, workspace, data_dir, _ = self._data_paths(instance)
-        config_dir = data_dir / "config"
         return self.run_command(
             [
                 "docker", "run", "--rm", "--user", "0", "--entrypoint", "sh",
                 "-v", f"{workspace}:/workspace",
                 "-v", f"{data_dir}:/home/evosci/.evoscientist",
-                "-v", f"{config_dir}:/home/evosci/.config/evoscientist",
                 image, "-c",
-                "mkdir -p /workspace /home/evosci/.evoscientist /home/evosci/.config/evoscientist && "
-                "chown -R evosci:evosci /workspace /home/evosci/.evoscientist /home/evosci/.config/evoscientist",
+                "mkdir -p /workspace /home/evosci/.evoscientist/.config/evoscientist && "
+                "chown -R evosci:evosci /workspace /home/evosci/.evoscientist",
             ],
             timeout=60,
         )
@@ -920,9 +916,9 @@ while True:
                 if code != 0:
                     raise RuntimeError(output or "Could not connect Model Proxy network")
                 connected = True
-            code, output = self.run_command(["docker", "restart", self.get_runtime_target(instance)], timeout=90)
+            code, output = self.restart(instance)
             if code != 0:
-                raise RuntimeError(output or "Could not restart EvoScientist instance")
+                raise RuntimeError(output or "Could not restart EvoScientist services")
             return 0, "EvoScientist model provider updated."
         except Exception as exc:
             if old_config is None:

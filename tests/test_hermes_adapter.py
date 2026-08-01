@@ -54,14 +54,97 @@ class HermesAdapterTests(unittest.TestCase):
             enable_nginx.assert_not_called()
             disable_nginx.assert_not_called()
 
-    def test_openclaw_only_actions_are_unsupported(self):
+    def test_update_version_requires_target_image_to_be_pulled(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
+            instance = {**self.INSTANCE, "data_path": str(Path(temp_dir) / "public" / "hermes" / "alice")}
+            with patch.object(
+                adapter, "run_command",
+                side_effect=[
+                    (0, f"nousresearch/hermes-agent:v2026.7.20|true|{adapter.tenant_network(instance)}"),
+                    (1, "missing"),
+                ],
+            ) as run_command:
+                code, output = adapter.update_version(instance, "v2026.8.1")
 
-            code, output = adapter.update_version(self.INSTANCE, "v0.20.0")
+            self.assertEqual(code, 1)
+            self.assertIn("docker pull", output)
+            self.assertEqual(run_command.call_count, 2)
 
-            self.assertNotEqual(code, 0)
-            self.assertIn("not supported", output)
+    def test_delete_moves_data_to_recycle_and_restore_recreates_container(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            (data_path / "config.yaml").write_text("security: {}\n", encoding="utf-8")
+            instance = {**self.INSTANCE, "data_path": str(data_path), "port": 39119}
+            compose = root / "nginx" / "compose" / "docker-compose.yml"
+            compose.parent.mkdir(parents=True)
+            compose.write_text(
+                "services:\n  nginx:\n    ports:\n      - \"443:443\"\n      - \"39119:39119\"\n"
+                "    networks:\n      - manager-net\n      - hermes-net\n"
+                "networks:\n  manager-net:\n    external: true\n  hermes-net:\n    external: true\n",
+                encoding="utf-8",
+            )
+            conf = adapter.ingress_conf(instance)
+            conf.parent.mkdir(parents=True)
+            conf.write_text("server {}\n", encoding="utf-8")
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, f"nousresearch/hermes-agent:v2026.7.20|true|{adapter.tenant_network(instance)}"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run), patch.object(
+                adapter, "apply_nginx_compose", return_value=(0, "applied")
+            ), patch.object(adapter, "reload_nginx", return_value=(0, "reloaded")), patch.object(
+                adapter, "configure_ingress", return_value=(0, "published")
+            ):
+                self.assertEqual(adapter.delete(instance)[0], 0)
+                self.assertFalse(data_path.exists())
+                self.assertTrue((adapter.hermes_recycle_dir(instance) / "data" / "config.yaml").is_file())
+                self.assertEqual(adapter.restore(instance)[0], 0)
+
+            self.assertTrue((data_path / "config.yaml").is_file())
+            self.assertFalse(adapter.hermes_recycle_dir(instance).exists())
+            self.assertIn(
+                ["docker", "network", "connect", adapter.tenant_network(instance),
+                 "openclaw-model-proxy"],
+                calls,
+            )
+
+    def test_update_version_recreates_with_local_target_and_rolls_back_on_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append(command)
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, "nousresearch/hermes-agent:v2026.7.20|true|hermes-net"
+                if command[:3] == ["docker", "image", "inspect"]:
+                    return 0, "present"
+                if command[:2] == ["docker", "run"] and any(
+                    value.endswith(":v2026.8.1") for value in command
+                ):
+                    return 1, "new image failed"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run):
+                code, output = adapter.update_version(instance, "v2026.8.1")
+
+            self.assertEqual(code, 1)
+            self.assertIn("rolled back", output)
+            runs = [command for command in calls if command[:2] == ["docker", "run"]]
+            self.assertTrue(any(any(value.endswith(":v2026.8.1") for value in command) for command in runs))
+            self.assertTrue(any(any(value.endswith(":v2026.7.20") for value in command) for command in runs))
 
     def test_compose_ingress_is_persistent_and_idempotent(self):
         text = (

@@ -1285,6 +1285,43 @@ def set_instance_version(instance_public_id, version, *, db_file=None, conn=None
             raise ValueError("instance not found")
 
 
+def set_instance_retention_state(instance_public_id, action, *, db_file=None, conn=None):
+    if action not in {"delete", "restore"}:
+        raise ValueError("invalid instance retention action")
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        now = utc_now()
+        deleting = action == "delete"
+        result = active_conn.execute(
+            """
+            UPDATE instances
+            SET status = ?, restore_state = ?, deleted_at = ?, updated_at = ?
+            WHERE public_id = ?
+            """,
+            (
+                "deleted" if deleting else "active",
+                "restorable" if deleting else "not_applicable",
+                now if deleting else None,
+                now,
+                instance_public_id,
+            ),
+        )
+        if result.rowcount != 1:
+            raise ValueError("instance not found")
+        instance = get_instance_by_public_id(instance_public_id, conn=active_conn)
+        endpoint_status = "inactive" if deleting else "active"
+        active_conn.execute(
+            "UPDATE instance_endpoints SET status = ?, updated_at = ? WHERE instance_id = ?",
+            (endpoint_status, now, instance["id"]),
+        )
+        if instance.get("port") is not None:
+            record_port(
+                instance["port"], instance_id=instance["id"],
+                status="allocated", conn=active_conn,
+            )
+
+
 def upsert_credentials(
     *,
     user_id,

@@ -1755,6 +1755,14 @@ def update_execution_job(request_id):
                     json.loads(job["params_json"])["version"],
                     conn=conn,
                 )
+            if status == "succeeded" and job["action"] in {
+                "instance.delete", "instance.restore",
+            }:
+                metadata_store.set_instance_retention_state(
+                    job["instance_public_id"],
+                    job["action"].removeprefix("instance."),
+                    conn=conn,
+                )
             if (
                 status in {"succeeded", "failed"}
                 and job["action"]

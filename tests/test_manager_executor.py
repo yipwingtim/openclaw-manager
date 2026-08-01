@@ -61,7 +61,9 @@ class ManagerExecutorTests(unittest.TestCase):
 
         self.assertIsInstance(adapter, self.executor.HermesDockerAdapter)
         self.assertTrue(adapter.supports("restart"))
-        self.assertFalse(adapter.supports("delete"))
+        self.assertTrue(adapter.supports("delete"))
+        self.assertTrue(adapter.supports("restore"))
+        self.assertTrue(adapter.supports("update_version"))
 
     def test_run_once_creates_instance_once_and_consumes_secret(self):
         control = Mock()

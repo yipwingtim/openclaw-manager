@@ -905,6 +905,16 @@ while True:
                     lines.append(replacement.rstrip("\n"))
             config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
             config_file.chmod(0o600)
+            code, output = self.run_command(
+                [
+                    "docker", "exec", "-u", "0", self.get_runtime_target(instance),
+                    "chown", "-R", "evosci:evosci",
+                    "/home/evosci/.evoscientist/.config",
+                ],
+                timeout=30,
+            )
+            if code != 0:
+                raise RuntimeError(output or "Could not set EvoScientist config ownership")
             inspect_code, inspect_output = self.run_command(
                 ["docker", "inspect", "--format", "{{range $name, $_ := .NetworkSettings.Networks}}{{printf \"%s\\n\" $name}}{{end}}", proxy_container],
                 timeout=10,

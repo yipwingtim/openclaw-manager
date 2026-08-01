@@ -240,7 +240,10 @@ class EvoScientistAdapterTests(unittest.TestCase):
             root = Path(temp_dir)
             adapter = self.make_adapter(root)
             instance = dict(self.INSTANCE, data_path=str(root / "public" / "users" / "alice"))
-            config_dir = root / "public" / "users" / "alice" / "evoscientist-data" / "config"
+            config_dir = (
+                root / "public" / "users" / "alice" / "evoscientist-data"
+                / ".config" / "evoscientist"
+            )
             config_dir.mkdir(parents=True)
             (config_dir / "config.yaml").write_text("model: old\nprovider: anthropic\n", encoding="utf-8")
             token_dir = root / "tokens"
@@ -269,7 +272,13 @@ class EvoScientistAdapterTests(unittest.TestCase):
             self.assertIn(f"custom_openai_base_url: {proxy_url}", config)
             self.assertNotIn(upstream_url, config)
             self.assertIn("custom_openai_api_key: secret-token", config)
-            self.assertEqual(run.call_args_list[-1].args[0], ["docker", "restart", "evoscientist_alice"])
+            self.assertEqual(
+                [call.args[0] for call in run.call_args_list[-2:]],
+                [
+                    ["docker", "restart", "evoscientist_alice"],
+                    ["docker", "restart", "evoscientist_alice-proxy"],
+                ],
+            )
 
     def test_create_prepares_data_permissions_before_starting_containers(self):
         digest = "sha256:" + "a" * 64

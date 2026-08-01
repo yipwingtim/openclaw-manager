@@ -1,8 +1,9 @@
 # Hermes Instance Adapter
 
-The Hermes MVP manages and creates deployments using the official
-`v2026.7.20` (Hermes Agent v0.19.0) single-container image. It does not support
-the legacy two-container topology, restore, or upgrade.
+The Hermes MVP creates deployments using the official `v2026.7.20` (Hermes
+Agent v0.19.0) single-container image. Managed instances can later be upgraded
+to another explicitly selected `nousresearch/hermes-agent` tag. It does not
+support the legacy two-container topology.
 
 ## Runtime and ingress contract
 
@@ -27,6 +28,12 @@ the legacy two-container topology, restore, or upgrade.
   Model Proxy token and allowlist, joins the proxy to the Hermes tenant
   network, and writes the proxy URL and token through `hermes config set`.
   Upstream API keys remain only in the shared Model Proxy service.
+- Delete moves `/opt/data` into `deleted/hermes/<instance UUID>` together with
+  a private manifest containing the image, tenant network, and previous running
+  state. Restore recreates the same deployment, port, ingress, and state.
+- Version updates follow the OpenClaw pre-pull rule: the target image must
+  already exist locally (`docker pull nousresearch/hermes-agent:<version>`).
+  A failed recreate automatically restores the previous image and state.
 
 Registration writes the instance, endpoint, allocated port, audit record,
 Nginx server configuration, port mapping, and external network attachment. A

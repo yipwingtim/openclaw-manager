@@ -408,7 +408,9 @@ class AdapterInstanceModelTests(unittest.TestCase):
         self.assertTrue(product_supports("openclaw", "restart"))
         self.assertTrue(product_supports("hermes", "restart"))
         self.assertTrue(product_supports("hermes", "batch_set_model_provider"))
-        self.assertFalse(product_supports("hermes", "delete"))
+        self.assertTrue(product_supports("hermes", "delete"))
+        self.assertTrue(product_supports("hermes", "restore"))
+        self.assertTrue(product_supports("hermes", "update_version"))
         self.assertFalse(product_supports("evoscientist", "file_upload"))
         self.assertFalse(product_supports("unknown", "restart"))
         self.assertEqual(

@@ -724,6 +724,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
     IMAGE = "nousresearch/hermes-agent:v2026.7.20"
 
     _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    _SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
     @staticmethod
     def _password_hash(password):
@@ -748,6 +749,91 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
     def tenant_network(self, instance):
         user_id = self.get_legacy_user_id(instance)
         return "openclaw-user-" + hashlib.sha256(user_id.encode()).hexdigest()
+
+    def hermes_recycle_dir(self, instance):
+        public_id = instance.get("public_id")
+        if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
+            raise ValueError("Hermes instance public_id is not safe for retention")
+        return self.public_dir / "deleted" / "hermes" / public_id
+
+    def _hermes_data_path(self, instance):
+        data_path = Path(instance.get("data_path") or "")
+        if data_path.parent != self.public_dir / "hermes":
+            raise ValueError("Hermes data path is invalid")
+        return data_path
+
+    def _inspect_hermes_container(self, instance):
+        code, output = self.run_command(
+            [
+                "docker", "inspect", "--format",
+                '{{.Config.Image}}|{{.State.Running}}|{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}',
+                self.get_runtime_target(instance),
+            ],
+            timeout=10,
+        )
+        if code != 0:
+            raise RuntimeError(output or "Hermes container not found.")
+        parts = output.strip().split("|", 2)
+        if len(parts) != 3 or parts[1] not in {"true", "false"}:
+            raise RuntimeError("Could not inspect Hermes container deployment.")
+        networks = [value for value in parts[2].split() if value]
+        if len(networks) != 1:
+            raise RuntimeError("Hermes container must have exactly one tenant network.")
+        tenant_network = networks[0]
+        if not self._SAFE_DOCKER_NAME.fullmatch(tenant_network):
+            raise RuntimeError("Hermes tenant network is invalid.")
+        return parts[0], parts[1] == "true", tenant_network
+
+    def _run_hermes_container(self, instance, image, network, timeout=420):
+        return self.run_command(
+            [
+                "docker", "run", "-d", "--name", self.get_runtime_target(instance),
+                "--restart", "unless-stopped", "--network", network,
+                "--shm-size", "1g", "-v", f"{self._hermes_data_path(instance)}:/opt/data",
+                "-e", "HERMES_DASHBOARD=1", image, "gateway", "run",
+            ],
+            timeout=timeout,
+        )
+
+    def _wait_for_dashboard(self, instance):
+        return self.run_command(
+            [
+                "docker", "exec", self.get_runtime_target(instance), "sh", "-lc",
+                "i=0; while [ $i -lt 30 ]; do "
+                "curl -fsS --max-time 2 http://127.0.0.1:9119/ >/dev/null && exit 0; "
+                "i=$((i+1)); sleep 2; done; exit 1",
+            ],
+            timeout=70,
+        )
+
+    def _restore_hermes_runtime(self, instance, image, was_running, network):
+        code, output = self.run_command(
+            [
+                "bash", "-lc", 'source "$1"; prepare_tenant_networks "$2"', "bash",
+                str(self.manager_dir / "scripts" / "lib_tenant_network.sh"), network,
+            ],
+            timeout=60,
+        )
+        if code != 0:
+            return code, output
+        code, output = self._run_hermes_container(instance, image, network)
+        if code != 0:
+            return code, output
+        code, output = self._wait_for_dashboard(instance)
+        if code != 0:
+            return code, output or "Hermes Dashboard did not become ready"
+        proxy = os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy")
+        code, output = self.run_command(
+            ["docker", "network", "connect", network, proxy], timeout=30
+        )
+        if code != 0 and "already exists" not in output.lower():
+            return code, output
+        code, output = self.configure_ingress(instance)
+        if code != 0:
+            return code, output
+        if not was_running:
+            return self.stop(instance)
+        return 0, output
 
     @staticmethod
     def _write_private_file(path, content):
@@ -965,7 +1051,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
     ):
         del skip_nginx_reload, skip_metadata_write
         runtime_target = self.get_runtime_target(instance)
-        data_path = Path(instance["data_path"])
+        data_path = self._hermes_data_path(instance)
         user_id = self.get_legacy_user_id(instance)
         if (
             basic_auth_enabled != "true"
@@ -1023,26 +1109,10 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             if code != 0 or len(allocated_ports) != 1:
                 raise RuntimeError(output or "Hermes ingress port allocation failed")
             instance["_created_port"] = int(allocated_ports[0])
-            code, output = self.run_command(
-                [
-                    "docker", "run", "-d", "--name", runtime_target,
-                    "--restart", "unless-stopped", "--network", network,
-                    "--shm-size", "1g", "-v", f"{data_path}:/opt/data",
-                    "-e", "HERMES_DASHBOARD=1", self.IMAGE, "gateway", "run",
-                ],
-                timeout=timeout,
-            )
+            code, output = self._run_hermes_container(instance, self.IMAGE, network, timeout)
             if code != 0:
                 raise RuntimeError(output)
-            code, readiness = self.run_command(
-                [
-                    "docker", "exec", runtime_target, "sh", "-lc",
-                    "i=0; while [ $i -lt 30 ]; do "
-                    "curl -fsS --max-time 2 http://127.0.0.1:9119/ >/dev/null && exit 0; "
-                    "i=$((i+1)); sleep 2; done; exit 1",
-                ],
-                timeout=70,
-            )
+            code, readiness = self._wait_for_dashboard(instance)
             if code != 0:
                 raise RuntimeError(readiness or "Hermes Dashboard did not become ready")
             return 0, output
@@ -1056,47 +1126,54 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
 
     def delete(self, instance):
         runtime_target = self.get_runtime_target(instance)
-        data_path = Path(instance["data_path"])
+        try:
+            data_path = self._hermes_data_path(instance)
+        except ValueError as exc:
+            return 1, str(exc)
+        recycle_dir = self.hermes_recycle_dir(instance)
+        if data_path.parent != self.public_dir / "hermes" or not data_path.is_dir():
+            return 1, f"Hermes data path not found or invalid: {data_path}"
+        if recycle_dir.exists():
+            return 1, f"Hermes recycle path already exists: {recycle_dir}"
+        try:
+            image, was_running, network = self._inspect_hermes_container(instance)
+        except RuntimeError as exc:
+            return 1, str(exc)
         port = instance.get("_created_port", instance.get("port"))
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            return 1, "Hermes ingress port is required for deletion."
         conf = self.ingress_conf(instance)
         disabled_conf = self.ingress_conf(instance, disabled=True)
         compose_file = self.nginx_compose_dir / "docker-compose.yml"
-        networks = subprocess.run(
-            [
-                "docker", "inspect", "--format",
-                '{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s\\n" $name}}{{end}}',
-                runtime_target,
-            ],
-            text=True, capture_output=True, timeout=10, check=False,
-        ).stdout.splitlines()
-        old_compose = compose_file.read_bytes() if compose_file.is_file() else None
+        if not compose_file.is_file():
+            return 1, f"Nginx compose file not found: {compose_file}"
+        networks = [network]
+        old_compose = compose_file.read_bytes()
         old_conf = conf.read_bytes() if conf.is_file() else None
         old_disabled_conf = disabled_conf.read_bytes() if disabled_conf.is_file() else None
-        if isinstance(port, int) and compose_file.is_file():
-            conf.unlink(missing_ok=True)
-            disabled_conf.unlink(missing_ok=True)
-            compose_file.write_text(
-                self._remove_ingress_from_nginx_compose(
-                    compose_file.read_text(encoding="utf-8"), port, networks
-                ),
-                encoding="utf-8",
-            )
-            apply_code, apply_output = self.apply_nginx_compose(compose_file)
-            reload_code, reload_output = self.reload_nginx() if apply_code == 0 else (apply_code, apply_output)
-            if reload_code != 0:
-                compose_file.write_bytes(old_compose)
-                if old_conf is not None:
-                    conf.write_bytes(old_conf)
-                if old_disabled_conf is not None:
-                    disabled_conf.parent.mkdir(parents=True, exist_ok=True)
-                    disabled_conf.write_bytes(old_disabled_conf)
-                self.apply_nginx_compose(compose_file)
-                self.reload_nginx()
-                return reload_code, f"Hermes ingress cleanup failed: {reload_output}"
+        conf.unlink(missing_ok=True)
+        disabled_conf.unlink(missing_ok=True)
+        compose_file.write_text(
+            self._remove_ingress_from_nginx_compose(
+                compose_file.read_text(encoding="utf-8"), port, networks
+            ),
+            encoding="utf-8",
+        )
+        apply_code, apply_output = self.apply_nginx_compose(compose_file)
+        reload_code, reload_output = self.reload_nginx() if apply_code == 0 else (apply_code, apply_output)
+        if reload_code != 0:
+            compose_file.write_bytes(old_compose)
+            if old_conf is not None:
+                conf.write_bytes(old_conf)
+            if old_disabled_conf is not None:
+                disabled_conf.parent.mkdir(parents=True, exist_ok=True)
+                disabled_conf.write_bytes(old_disabled_conf)
+            self.apply_nginx_compose(compose_file)
+            self.reload_nginx()
+            return reload_code, f"Hermes ingress cleanup failed: {reload_output}"
         code, output = self.run_command(["docker", "rm", "-f", runtime_target], timeout=60)
         if code != 0:
-            if old_compose is not None:
-                compose_file.write_bytes(old_compose)
+            compose_file.write_bytes(old_compose)
             if old_conf is not None:
                 conf.write_bytes(old_conf)
             if old_disabled_conf is not None:
@@ -1105,18 +1182,58 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             self.apply_nginx_compose(compose_file)
             self.reload_nginx()
             return code, output
-        shutil.rmtree(data_path, ignore_errors=True)
+        try:
+            recycle_dir.mkdir(parents=True)
+            shutil.move(str(data_path), str(recycle_dir / "data"))
+            self._write_private_file(
+                recycle_dir / "manifest.json",
+                json.dumps({"image": image, "was_running": was_running, "network": network}).encode(),
+            )
+        except Exception as exc:
+            if (recycle_dir / "data").is_dir() and not data_path.exists():
+                data_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(recycle_dir / "data"), str(data_path))
+            shutil.rmtree(recycle_dir, ignore_errors=True)
+            rollback_code, rollback_output = self._restore_hermes_runtime(
+                instance, image, was_running, network
+            )
+            if rollback_code != 0:
+                return 1, (
+                    "Hermes data retention failed and automatic rollback failed; "
+                    f"manual recovery is required: {exc}; {rollback_output}"
+                )
+            return 1, f"Hermes data retention failed and was rolled back: {exc}"
+        cleanup_errors = []
         for network in networks:
             if network.startswith("openclaw-user-"):
                 for shared in (
                     self.nginx_container_name,
                     os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"),
                 ):
-                    self.run_command(
+                    cleanup_code, cleanup_output = self.run_command(
                         ["docker", "network", "disconnect", network, shared], timeout=30
                     )
-                self.run_command(["docker", "network", "rm", network], timeout=30)
-        return 0, output
+                    if cleanup_code != 0 and "not connected" not in cleanup_output.lower():
+                        cleanup_errors.append(cleanup_output)
+                cleanup_code, cleanup_output = self.run_command(
+                    ["docker", "network", "rm", network], timeout=30
+                )
+                if cleanup_code != 0 and "not found" not in cleanup_output.lower():
+                    cleanup_errors.append(cleanup_output)
+        if cleanup_errors:
+            shutil.move(str(recycle_dir / "data"), str(data_path))
+            shutil.rmtree(recycle_dir, ignore_errors=True)
+            rollback_code, rollback_output = self._restore_hermes_runtime(
+                instance, image, was_running, network
+            )
+            detail = "; ".join(error for error in cleanup_errors if error)
+            if rollback_code != 0:
+                return 1, (
+                    "Hermes network cleanup failed and automatic rollback failed; "
+                    f"manual recovery is required: {detail}; {rollback_output}"
+                )
+            return 1, f"Hermes network cleanup failed and was rolled back: {detail}"
+        return 0, "Hermes resources moved to recycle bin."
 
     @staticmethod
     def _remove_ingress_from_nginx_compose(text, port, networks):
@@ -1134,10 +1251,164 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         return "".join(lines)
 
     def restore(self, instance):
-        return 1, "Hermes restore is not supported yet."
+        try:
+            data_path = self._hermes_data_path(instance)
+        except ValueError as exc:
+            return 1, str(exc)
+        recycle_dir = self.hermes_recycle_dir(instance)
+        recycled_data = recycle_dir / "data"
+        manifest_file = recycle_dir / "manifest.json"
+        if data_path.exists():
+            return 1, f"Hermes data path already exists: {data_path}"
+        if not recycled_data.is_dir() or not manifest_file.is_file():
+            return 1, f"Hermes recycle data is incomplete: {recycle_dir}"
+        try:
+            manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            image = manifest["image"]
+            network = manifest["network"]
+            was_running = manifest["was_running"]
+            if (
+                not isinstance(image, str) or not image.startswith("nousresearch/hermes-agent:")
+                or not isinstance(network, str) or not self._SAFE_DOCKER_NAME.fullmatch(network)
+                or not isinstance(was_running, bool)
+            ):
+                raise ValueError("invalid manifest")
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            return 1, f"Hermes recycle manifest is invalid: {exc}"
+        code, output = self.run_command(["docker", "image", "inspect", image], timeout=30)
+        if code != 0:
+            return 1, f"Hermes restore image is not available locally: {image}"
+        moved = False
+        compose_file = self.nginx_compose_dir / "docker-compose.yml"
+        if not compose_file.is_file():
+            return 1, f"Nginx compose file not found: {compose_file}"
+        old_compose = compose_file.read_bytes()
+        active_conf = self.ingress_conf(instance)
+        disabled_conf = self.ingress_conf(instance, disabled=True)
+        old_active_conf = active_conf.read_bytes() if active_conf.is_file() else None
+        old_disabled_conf = disabled_conf.read_bytes() if disabled_conf.is_file() else None
+        network_existed = self.run_command(
+            ["docker", "network", "inspect", network], timeout=10
+        )[0] == 0
+        proxy = os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy")
+        proxy_code, proxy_networks = self.run_command(
+            [
+                "docker", "inspect", "--format",
+                '{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}',
+                proxy,
+            ],
+            timeout=10,
+        )
+        proxy_was_connected = proxy_code == 0 and network in proxy_networks.split()
+        try:
+            data_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(recycled_data), str(data_path))
+            moved = True
+            code, output = self._restore_hermes_runtime(
+                instance, image, was_running, network
+            )
+            if code != 0:
+                raise RuntimeError(output)
+            shutil.rmtree(recycle_dir)
+            return 0, "Hermes instance restored."
+        except Exception as exc:
+            rollback_errors = []
+            cleanup_code, cleanup_output = self.run_command(
+                ["docker", "rm", "-f", self.get_runtime_target(instance)], timeout=60
+            )
+            if cleanup_code != 0 and "no such container" not in cleanup_output.lower():
+                rollback_errors.append(cleanup_output)
+            compose_file.write_bytes(old_compose)
+            active_conf.unlink(missing_ok=True)
+            disabled_conf.unlink(missing_ok=True)
+            if old_active_conf is not None:
+                active_conf.write_bytes(old_active_conf)
+            if old_disabled_conf is not None:
+                disabled_conf.parent.mkdir(parents=True, exist_ok=True)
+                disabled_conf.write_bytes(old_disabled_conf)
+            ingress_code, ingress_output = self.apply_nginx_compose(compose_file)
+            if ingress_code == 0:
+                ingress_code, ingress_output = self.reload_nginx()
+            if not proxy_was_connected:
+                cleanup_code, cleanup_output = self.run_command(
+                    ["docker", "network", "disconnect", network, proxy], timeout=30
+                )
+                if cleanup_code != 0 and "not connected" not in cleanup_output.lower():
+                    rollback_errors.append(cleanup_output)
+            if not network_existed:
+                cleanup_code, cleanup_output = self.run_command(
+                    ["docker", "network", "rm", network], timeout=30
+                )
+                if cleanup_code != 0 and "not found" not in cleanup_output.lower():
+                    rollback_errors.append(cleanup_output)
+            if moved and data_path.is_dir() and not recycled_data.exists():
+                try:
+                    recycle_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(data_path), str(recycled_data))
+                except OSError as move_exc:
+                    rollback_errors.append(str(move_exc))
+            if ingress_code != 0:
+                rollback_errors.append(ingress_output)
+            if rollback_errors:
+                return 1, (
+                    "Hermes restore failed and automatic rollback failed; manual recovery "
+                    f"is required: {exc}; {'; '.join(error for error in rollback_errors if error)}"
+                )
+            return 1, f"Hermes restore failed and was rolled back: {exc}"
 
-    def update_version(self, *args, **kwargs):
-        return 1, "Hermes version update is not supported yet."
+    def update_version(self, instance, version, restore_model_provider=False, timeout=600):
+        del restore_model_provider
+        if not isinstance(version, str) or not self._SAFE_VERSION.fullmatch(version):
+            return 1, "Invalid Hermes version."
+        try:
+            self._hermes_data_path(instance)
+        except ValueError as exc:
+            return 1, str(exc)
+        target_image = f"nousresearch/hermes-agent:{version}"
+        try:
+            current_image, was_running, network = self._inspect_hermes_container(instance)
+        except RuntimeError as exc:
+            return 1, str(exc)
+        if current_image == target_image:
+            return 0, f"Hermes instance already uses target image: {target_image}"
+        code, _ = self.run_command(["docker", "image", "inspect", target_image], timeout=30)
+        if code != 0:
+            return 1, (
+                f"Target image is not available locally: {target_image}. "
+                f"Run: docker pull '{target_image}'"
+            )
+        code, output = self.run_command(
+            ["docker", "rm", "-f", self.get_runtime_target(instance)], timeout=60
+        )
+        if code != 0:
+            return code, output
+        try:
+            code, output = self._run_hermes_container(instance, target_image, network, timeout)
+            if code != 0:
+                raise RuntimeError(output)
+            code, output = self._wait_for_dashboard(instance)
+            if code != 0:
+                raise RuntimeError(output or "Hermes Dashboard did not become ready")
+            if not was_running:
+                code, output = self.stop(instance)
+                if code != 0:
+                    raise RuntimeError(output)
+            return 0, f"Hermes version updated to {version}."
+        except Exception as exc:
+            self.run_command(["docker", "rm", "-f", self.get_runtime_target(instance)], timeout=60)
+            rollback_code, rollback_output = self._run_hermes_container(
+                instance, current_image, network, timeout
+            )
+            if rollback_code == 0:
+                rollback_code, rollback_output = self._wait_for_dashboard(instance)
+            if rollback_code == 0 and not was_running:
+                rollback_code, rollback_output = self.stop(instance)
+            if rollback_code != 0:
+                return 1, (
+                    f"Hermes version update failed and automatic rollback failed: "
+                    f"{exc}; {rollback_output}"
+                )
+            return 1, f"Hermes version update failed and was rolled back: {exc}"
 
     def set_model_provider(
         self, instance, provider_id, model_id, base_url="", alias="", timeout=180,

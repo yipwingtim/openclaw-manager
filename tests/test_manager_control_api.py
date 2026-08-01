@@ -1703,7 +1703,8 @@ class ManagerControlApiTests(unittest.TestCase):
         )
         instance = self.control.metadata_store.create_instance(
             owner_public_id=self.user["public_id"], product="openclaw",
-            instance_name="Primary", runtime_identifier="openclaw_alice", db_file=self.db_file,
+            instance_name="Primary", runtime_identifier="openclaw_alice", port=39119,
+            db_file=self.db_file,
         )
         self.control.metadata_store.create_execution_job(
             request_id="delete-success", actor_user_id=self.user["id"],
@@ -1728,6 +1729,44 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(operation["request_id"], "delete-success")
         self.assertEqual(operation["action"], "instance.delete")
         self.assertEqual(operation["message"], "instance deleted")
+
+        deleted = self.control.metadata_store.get_instance_by_public_id(
+            instance["public_id"], db_file=self.db_file
+        )
+        self.assertEqual(deleted["status"], "deleted")
+        self.assertEqual(deleted["restore_state"], "restorable")
+        self.assertIsNotNone(deleted["deleted_at"])
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            port_status = conn.execute(
+                "SELECT status FROM ports WHERE instance_id = ?", (deleted["id"],)
+            ).fetchone()
+        self.assertEqual(port_status["status"], "allocated")
+
+        self.control.metadata_store.create_execution_job(
+            request_id="restore-success", actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"], action="instance.restore",
+            params={}, db_file=self.db_file,
+        )
+        self.control.metadata_store.update_execution_job(
+            "restore-success", "running", db_file=self.db_file
+        )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(
+            self.control.request, "get_json",
+            return_value={"status": "succeeded", "output": "restored"},
+        ):
+            _, restore_status = response_parts(
+                self.control.update_execution_job("restore-success")
+            )
+
+        restored = self.control.metadata_store.get_instance_by_public_id(
+            instance["public_id"], db_file=self.db_file
+        )
+        self.assertEqual(restore_status, 200)
+        self.assertEqual(restored["status"], "active")
+        self.assertEqual(restored["restore_state"], "not_applicable")
+        self.assertIsNone(restored["deleted_at"])
 
     def test_latest_device_approval_rejects_an_active_job(self):
         self.control.metadata_store.set_user_role(

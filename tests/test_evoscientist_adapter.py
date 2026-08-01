@@ -251,14 +251,23 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 if command[:3] == ["docker", "inspect", "--format"]:
                     return 0, network + "\n"
                 return 0, "restarted"
-            with patch.dict(os.environ, {"MODEL_PROXY_TOKEN_DIR": str(token_dir)}), patch.object(
+            proxy_url = "http://openclaw-model-proxy:8081/v1"
+            upstream_url = "http://10.185.104.163:18080/v1"
+            with patch.dict(os.environ, {
+                "MODEL_PROXY_TOKEN_DIR": str(token_dir),
+                "MODEL_PROXY_PUBLIC_BASE_URL": proxy_url,
+            }), patch.object(
                 adapter, "run_command", side_effect=run_command
             ) as run:
-                code, output = adapter.set_model_provider(instance, "openai", "gpt-5.4")
+                code, output = adapter.set_model_provider(
+                    instance, "openai", "gpt-5.4", upstream_url
+                )
             self.assertEqual((code, output), (0, "EvoScientist model provider updated."))
             config = (config_dir / "config.yaml").read_text(encoding="utf-8")
             self.assertIn("model: gpt-5.4", config)
             self.assertIn("provider: custom-openai", config)
+            self.assertIn(f"custom_openai_base_url: {proxy_url}", config)
+            self.assertNotIn(upstream_url, config)
             self.assertIn("custom_openai_api_key: secret-token", config)
             self.assertEqual(run.call_args_list[-1].args[0], ["docker", "restart", "evoscientist_alice"])
 

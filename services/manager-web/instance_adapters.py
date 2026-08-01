@@ -100,7 +100,7 @@ class OpenClawDockerAdapter:
                 self.nginx_container_name,
                 os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"),
             ],
-            timeout=90,
+            timeout=300,
         )
         return reconnect_code, "\n".join(
             part for part in (output, reconnect_output) if part

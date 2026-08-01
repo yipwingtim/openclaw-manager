@@ -219,22 +219,15 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 commands.append(command)
                 return 0, "ok"
 
-            with patch.object(adapter, "run_command", side_effect=run_command), patch.object(
-                adapter, "reload_nginx", return_value=(0, "reloaded")
-            ), patch.object(
-                adapter,
-                "apply_nginx_compose",
-                side_effect=subprocess.TimeoutExpired("global tenant scan", 90),
-            ):
+            with patch.object(adapter, "run_command", side_effect=run_command):
                 code, output = adapter.configure_ingress(self.INSTANCE)
 
             network = adapter.tenant_network(self.INSTANCE)
-            self.assertEqual((code, output), (0, "reloaded"))
-            self.assertIn(
-                ["docker", "network", "connect", network, "openclaw-nginx"],
-                commands,
-            )
-            self.assertFalse(any("connect_shared_services_to_tenant_networks" in command for command in commands))
+            self.assertEqual((code, output), (0, "ok"))
+            ingress_run = next(command for command in commands if command[:4] == ["docker", "run", "-d", "--name"])
+            self.assertIn(network, ingress_run)
+            self.assertIn("40062:443", ingress_run)
+            self.assertFalse(any("docker compose" in " ".join(command) for command in commands))
 
 
 class EvoScientistRegistrationTests(unittest.TestCase):

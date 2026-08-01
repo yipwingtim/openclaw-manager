@@ -612,6 +612,7 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
     DEFAULT_DIGEST = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
     _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     _SAFE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+    INGRESS_IMAGE = "nginx:alpine"
     _PROXY_SCRIPT = """import socket
 import threading
 
@@ -646,6 +647,12 @@ while True:
     def container_names(self, instance):
         runtime_target = self.get_runtime_target(instance)
         return [runtime_target, f"{runtime_target}-proxy"]
+
+    def ingress_container_name(self, instance):
+        public_id = instance.get("public_id")
+        if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
+            raise ValueError("EvoScientist instance public_id is invalid")
+        return f"{self.get_runtime_target(instance)}-ingress"
 
     def tenant_network(self, instance):
         return "openclaw-user-" + hashlib.sha256(
@@ -751,33 +758,18 @@ while True:
                 return 1, output or f"{name} is not running"
         return 0, "EvoScientist services are running"
 
-    def _apply_ingress_compose(self, compose, network=None):
-        code, output = self.run_command(
-            ["docker", "compose", "-f", str(compose), "up", "-d"], timeout=120
-        )
-        if code != 0:
-            return code, output
-        if network is None:
-            return 0, output
-        connect_code, connect_output = self.run_command(
-            ["docker", "network", "connect", network, self.nginx_container_name],
-            timeout=30,
-        )
-        if connect_code != 0 and "already exists" not in connect_output.lower():
-            return connect_code, connect_output
-        return 0, "\n".join(part for part in (output, connect_output) if part)
-
     def configure_ingress(self, instance):
         port = instance.get("_created_port", instance.get("port"))
         if not isinstance(port, int) or not 1 <= port <= 65535:
             return 1, "EvoScientist ingress port is required"
         runtime_target = self.get_runtime_target(instance)
         conf = self.ingress_conf(instance)
+        ingress_container = self.ingress_container_name(instance)
         cert = os.environ.get("NGINX_SSL_CERT", "/etc/nginx/certs/fullchain.pem")
         key = os.environ.get("NGINX_SSL_KEY", "/etc/nginx/certs/privkey.pem")
         try:
             conf.parent.mkdir(parents=True, exist_ok=True)
-            conf.write_text(
+            config_text = (
                 f"upstream evosci_ui_{port} {{\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
                 f"    server {runtime_target}:4716 resolve;\n}}\n\n"
                 f"upstream evosci_api_{port} {{\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
@@ -790,23 +782,30 @@ while True:
                 f"{port}; proxy_set_header Host $host:$server_port; proxy_set_header Origin \"\"; }}\n"
                 f"    location /api/ {{ proxy_pass http://evosci_api_{port}/; proxy_http_version 1.1; proxy_buffering off; }}\n"
                 f"    location / {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }}\n"
-                "}\n", encoding="utf-8"
+                "}\n"
             )
-            compose = self.nginx_compose_dir / "docker-compose.yml"
-            if not compose.is_file():
-                return 1, f"Nginx compose file not found: {compose}"
-            old = compose.read_text(encoding="utf-8")
+            config_file = self.public_dir / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(config_text, encoding="utf-8")
             network = self.tenant_network(instance)
-            updated = HermesDockerAdapter._add_ingress_to_nginx_compose(old, port, network)
-            compose.write_text(updated, encoding="utf-8")
-            code, output = self._apply_ingress_compose(compose, network)
-            if code == 0:
-                code, output = self.reload_nginx()
+            auth_dir = Path(os.environ.get("NGINX_AUTH_DIR", "/data/docker/nginx/auth"))
+            cert_dir = Path(os.environ.get("NGINX_CERTS_DIR", "/data/docker/nginx/certs"))
+            code, output = self.run_command(
+                ["docker", "rm", "-f", ingress_container], timeout=60
+            )
+            code, output = self.run_command(
+                [
+                    "docker", "run", "-d", "--name", ingress_container,
+                    "--restart", "unless-stopped", "--network", network,
+                    "-p", f"{port}:443",
+                    "-v", f"{config_file}:/etc/nginx/conf.d/default.conf:ro",
+                    "-v", f"{cert_dir}:/etc/nginx/certs:ro",
+                    "-v", f"{auth_dir}:/etc/nginx/auth:ro",
+                    self.INGRESS_IMAGE,
+                ], timeout=120,
+            )
             if code != 0:
-                compose.write_text(old, encoding="utf-8")
-                conf.unlink(missing_ok=True)
-                self._apply_ingress_compose(compose)
-                self.reload_nginx()
+                config_file.unlink(missing_ok=True)
             return code, output
         except Exception as exc:
             return 1, f"EvoScientist ingress configuration failed: {exc}"
@@ -877,7 +876,10 @@ while True:
 
     def start(self, instance):
         started = []
-        for container_name in self.container_names(instance):
+        names = self.container_names(instance)
+        if instance.get("public_id") and self._container_status(self.ingress_container_name(instance)) != "MISSING":
+            names.append(self.ingress_container_name(instance))
+        for container_name in names:
             code, output = self.run_command(["docker", "start", container_name], timeout=90)
             if code != 0:
                 for started_name in reversed(started):
@@ -885,42 +887,30 @@ while True:
                 return code, output
             started.append(container_name)
 
-        legacy_user_id = self.get_legacy_user_id(instance, required=False)
-        if not legacy_user_id:
-            return 0, ""
-        nginx_code, nginx_output = self.enable_nginx_user_conf(legacy_user_id)
-        if nginx_code == 0:
-            return 0, nginx_output
-
-        for container_name in reversed(started):
-            self.run_command(["docker", "stop", container_name], timeout=60)
-        return nginx_code, nginx_output
+        return 0, ""
 
     def stop(self, instance):
-        legacy_user_id = self.get_legacy_user_id(instance, required=False)
-        nginx_code, nginx_output = (0, "")
-        if legacy_user_id:
-            nginx_code, nginx_output = self.disable_nginx_user_conf(legacy_user_id)
-            if nginx_code != 0:
-                return nginx_code, nginx_output
-
-        outputs = [nginx_output]
+        outputs = []
         stopped = []
-        for container_name in reversed(self.container_names(instance)):
+        names = list(self.container_names(instance))
+        if instance.get("public_id") and self._container_status(self.ingress_container_name(instance)) != "MISSING":
+            names.append(self.ingress_container_name(instance))
+        for container_name in reversed(names):
             code, output = self.run_command(["docker", "stop", container_name], timeout=60)
             outputs.append(output)
             if code != 0:
                 for stopped_name in reversed(stopped):
                     self.run_command(["docker", "start", stopped_name], timeout=90)
-                if legacy_user_id:
-                    self.enable_nginx_user_conf(legacy_user_id)
                 return code, "\n".join(part for part in outputs if part)
             stopped.append(container_name)
         return 0, "\n".join(part for part in outputs if part)
 
     def restart(self, instance):
         outputs = []
-        for container_name in self.container_names(instance):
+        names = list(self.container_names(instance))
+        if instance.get("public_id") and self._container_status(self.ingress_container_name(instance)) != "MISSING":
+            names.append(self.ingress_container_name(instance))
+        for container_name in names:
             code, output = self.run_command(["docker", "restart", container_name], timeout=90)
             outputs.append(output)
             if code != 0:
@@ -985,8 +975,6 @@ while True:
             image, was_running, network = self._inspect_deployment(instance)
             conf = self._existing_ingress_conf(instance)
             old_conf = conf.read_text(encoding="utf-8") if conf.is_file() else ""
-            compose = self.nginx_compose_dir / "docker-compose.yml"
-            old_compose = compose.read_text(encoding="utf-8") if compose.is_file() else ""
             code, output = self._remove_containers(instance)
             if code != 0:
                 return code, output
@@ -994,30 +982,19 @@ while True:
             for path in (workspace, data_dir, proxy_script):
                 if path.exists():
                     shutil.move(str(path), str(recycle / path.name))
-            if compose.is_file() and isinstance(instance.get("port"), int):
-                compose.write_text(
-                    HermesDockerAdapter._remove_ingress_from_nginx_compose(
-                        compose.read_text(encoding="utf-8"), instance["port"], [self.tenant_network(instance)]
-                    ), encoding="utf-8"
-                )
-                code, output = self._apply_ingress_compose(compose)
-                if code != 0:
-                    raise RuntimeError(output)
+            self.run_command(["docker", "rm", "-f", self.ingress_container_name(instance)], timeout=60)
             self._existing_ingress_conf(instance).unlink(missing_ok=True)
-            code, output = self.reload_nginx()
-            if code != 0:
-                raise RuntimeError(output)
+            config_file = self.public_dir / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
+            config_file.unlink(missing_ok=True)
             (recycle / "manifest.json").write_text(json.dumps({
                 "image": image, "network": network, "was_running": was_running,
-                "port": instance.get("port"), "compose": old_compose,
+                "port": instance.get("port"),
                 "ingress": old_conf,
             }), encoding="utf-8")
             return 0, "EvoScientist resources moved to recycle bin."
         except Exception as exc:
             rollback_errors = []
             try:
-                if 'old_compose' in locals() and old_compose and compose.is_file():
-                    compose.write_text(old_compose, encoding="utf-8")
                 if 'old_conf' in locals() and old_conf:
                     conf.write_text(old_conf, encoding="utf-8")
                 if 'recycle' in locals() and recycle.is_dir():
@@ -1032,14 +1009,9 @@ while True:
                         rollback_errors.append(output)
                     elif not was_running:
                         self.stop(instance)
-                if 'old_compose' in locals() and old_compose:
-                    code, output = self._apply_ingress_compose(compose, network)
-                    if code != 0:
-                        rollback_errors.append(output)
-                    else:
-                        code, output = self.reload_nginx()
-                        if code != 0:
-                            rollback_errors.append(output)
+                code, output = self.configure_ingress(instance)
+                if code != 0:
+                    rollback_errors.append(output)
             except Exception as rollback_exc:
                 rollback_errors.append(str(rollback_exc))
             if rollback_errors:

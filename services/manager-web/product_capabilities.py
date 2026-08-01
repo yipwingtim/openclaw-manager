@@ -9,7 +9,7 @@ PRODUCT_CAPABILITIES = {
     ),
     "evoscientist": frozenset(
         {"access", "status", "logs", "start", "stop", "restart", "create",
-         "delete", "restore", "update_version"}
+         "delete", "restore", "update_version", "cleanup_failed"}
     ),
     "hermes": frozenset(
         {
@@ -32,6 +32,7 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.approve_latest_device": "device_pairing",
     "instance.delete": "delete",
     "instance.restore": "restore",
+    "instance.cleanup_failed": "cleanup_failed",
     "instance.wechat_bind": "device_pairing",
 }
 

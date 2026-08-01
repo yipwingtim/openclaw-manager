@@ -660,7 +660,7 @@ def lifecycle(instance_public_id):
 def retention(instance_public_id):
     current = web_common.actor()
     action = request.form.get("action", "")
-    if not current or current["role"] != "admin" or action not in {"delete", "restore"}:
+    if not current or current["role"] != "admin" or action not in {"delete", "restore", "cleanup_failed"}:
         return render_template("error.html", message="Forbidden"), 403
     try:
         control_client.create_execution_job(

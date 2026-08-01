@@ -174,8 +174,30 @@ def hermes_creation_result(instance):
     }
 
 
+def evoscientist_creation_result(instance):
+    port = instance.get("_created_port")
+    public_host = os.environ.get("PUBLIC_HOST", "").strip()
+    if not public_host or not isinstance(port, int):
+        raise ValueError("created EvoScientist metadata is incomplete")
+    image = os.environ.get(
+        "EVOSCIENTIST_IMAGE",
+        "ghcr.io/evoscientist/evoscientist@sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47",
+    ).strip()
+    return {
+        "port": port, "version": image.removeprefix("ghcr.io/evoscientist/evoscientist@"),
+        "access_url": f"https://{public_host}:{port}",
+        "admin_url": f"https://{public_host}:{port}",
+        "basic_auth_password_ref": f"nginx-auth:/etc/nginx/auth/users/{instance['legacy_user_id']}/.htpasswd",
+        "openclaw_token": "",
+    }
+
+
 def creation_result(instance):
-    return hermes_creation_result(instance) if instance["product"] == "hermes" else openclaw_creation_result(instance)
+    if instance["product"] == "hermes":
+        return hermes_creation_result(instance)
+    if instance["product"] == "evoscientist":
+        return evoscientist_creation_result(instance)
+    return openclaw_creation_result(instance)
 
 
 def reload_nginx_after_create(adapter):
@@ -205,7 +227,7 @@ def reload_nginx_after_create(adapter):
 
 
 def rollback_created_instance(adapter, instance):
-    if instance["product"] == "hermes":
+    if instance["product"] in {"hermes", "evoscientist"}:
         return adapter.delete(instance)
     return adapter.run_command(
         [str(adapter.manager_dir / "scripts" / "delete_user.sh"), instance["legacy_user_id"]],
@@ -267,7 +289,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             )
             created = code == 0
             if created:
-                if instance["product"] == "hermes":
+                if instance["product"] in {"hermes", "evoscientist"}:
                     code, failure_output = adapter.configure_ingress(instance)
                 else:
                     code, failure_output = reload_nginx_after_create(adapter)
@@ -284,7 +306,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             rollback_code = rollback_created_instance(adapter, instance)[0] if created else 0
             rollback_note = (
                 "resources removed"
-                if instance["product"] == "hermes" and created and rollback_code == 0
+                if instance["product"] in {"hermes", "evoscientist"} and created and rollback_code == 0
                 else "resources moved to recycle bin"
                 if created and rollback_code == 0
                 else "create script rolled back resources"

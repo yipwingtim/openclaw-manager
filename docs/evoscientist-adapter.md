@@ -1,6 +1,8 @@
-# EvoScientist Existing Instance Adapter
+# EvoScientist Adapter
 
-The first EvoScientist adapter phase manages existing two-container instances. It does not create, delete, restore, or update EvoScientist versions.
+The adapter manages both newly provisioned and registered two-container instances.
+It supports create, start, stop, restart, logs, retained deletion, restore, and
+digest-pinned image updates.
 
 Runtime lifecycle methods receive the instance metadata record rather than a
 platform user id. The adapter uses `instances.runtime_identifier` as the main
@@ -39,3 +41,16 @@ sudo -E python3 scripts/metadata_cli.py register-instance \
 The command detects the external port and Basic Auth state from the user Nginx configuration, records the port allocation, and creates an auditable `register_instance` operation.
 
 After registration, restart manager-web and verify the instance list. The Web UI exposes status, start, stop, and restart actions. OpenClaw-only actions remain hidden.
+
+## Images and updates
+
+EvoScientist currently publishes `latest` from its main branch rather than a
+stable release tag. Configure and record an immutable image digest:
+
+```bash
+EVOSCIENTIST_IMAGE=ghcr.io/evoscientist/evoscientist@sha256:<digest>
+```
+
+Before an update, pull the image on the host. The Web UI accepts the
+`sha256:<digest>` value and refuses mutable tags. Failed updates recreate both
+containers with the previous local image.

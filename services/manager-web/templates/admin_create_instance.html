@@ -56,6 +56,7 @@
         <select class="form-select" id="product" name="product" required>
           <option value="openclaw">OpenClaw</option>
           <option value="hermes">Hermes</option>
+          <option value="evoscientist">EvoScientist</option>
         </select>
       </div>
       <div class="mb-3">
@@ -82,7 +83,7 @@
       </div>
       <div class="form-check mb-3">
         <input class="form-check-input" id="basic_auth_enabled" name="basic_auth_enabled" type="checkbox" value="true" checked>
-        <label class="form-check-label" for="basic_auth_enabled">启用访问认证（Hermes 必须启用）</label>
+        <label class="form-check-label" for="basic_auth_enabled">启用访问认证（Hermes 和 EvoScientist 必须启用）</label>
       </div>
       <button class="btn btn-oc" type="submit" {% if not users %}disabled{% endif %}>创建实例</button>
     </form>

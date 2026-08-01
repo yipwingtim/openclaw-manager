@@ -608,6 +608,37 @@ class OpenClawDockerAdapter:
 
 class EvoScientistDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities("evoscientist")
+    IMAGE_REPOSITORY = "ghcr.io/evoscientist/evoscientist"
+    DEFAULT_DIGEST = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
+    _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    _SAFE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+    _PROXY_SCRIPT = """import socket
+import threading
+
+LISTEN = (\"0.0.0.0\", 6175)
+TARGET = (\"127.0.0.1\", 6174)
+
+def pipe(src, dst):
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+    finally:
+        src.close()
+        dst.close()
+
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(LISTEN)
+server.listen(64)
+while True:
+    client, _ = server.accept()
+    upstream = socket.create_connection(TARGET)
+    threading.Thread(target=pipe, args=(client, upstream), daemon=True).start()
+    threading.Thread(target=pipe, args=(upstream, client), daemon=True).start()
+"""
 
     def supports(self, action):
         return action in self.CAPABILITIES
@@ -615,6 +646,180 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
     def container_names(self, instance):
         runtime_target = self.get_runtime_target(instance)
         return [runtime_target, f"{runtime_target}-proxy"]
+
+    def tenant_network(self, instance):
+        return "openclaw-user-" + hashlib.sha256(
+            self.get_legacy_user_id(instance).encode()
+        ).hexdigest()
+
+    def _data_paths(self, instance):
+        user_dir = Path(instance.get("data_path") or "")
+        expected = self.user_dir(self.get_legacy_user_id(instance))
+        if user_dir != expected:
+            raise ValueError("EvoScientist data path is invalid")
+        return user_dir, user_dir / "workspace", user_dir / "evoscientist-data", user_dir / "tcp_proxy.py"
+
+    def recycle_dir(self, instance):
+        public_id = instance.get("public_id")
+        if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
+            raise ValueError("EvoScientist instance public_id is invalid")
+        return self.public_dir / "deleted" / "evoscientist" / public_id
+
+    def ingress_conf(self, instance, disabled=False):
+        user_id = self.get_legacy_user_id(instance)
+        return self.nginx_disabled_user_conf(user_id) if disabled else self.nginx_active_user_conf(user_id)
+
+    def _existing_ingress_conf(self, instance, disabled=False):
+        return self.ingress_conf(instance, disabled=disabled)
+
+    def _allocate_port(self):
+        port_file = os.environ.get("PORT_FILE", str(self.public_dir / "ports.txt"))
+        code, output = self.run_command(
+            ["bash", "-lc", 'source "$1"; allocate_port "$2" "$3" "$4"', "bash",
+             str(self.manager_dir / "scripts" / "lib_port_allocator.sh"), port_file,
+             os.environ.get("PORT_START", "40001"), os.environ.get("PORT_END", "49999")],
+            timeout=30,
+        )
+        ports = [line for line in output.splitlines() if line.isdigit()]
+        if code != 0 or len(ports) != 1:
+            raise RuntimeError(output or "EvoScientist ingress port allocation failed")
+        return int(ports[0])
+
+    def _image_ref(self, digest):
+        if not isinstance(digest, str) or not self._SAFE_DIGEST.fullmatch(digest.lower()):
+            raise ValueError("EvoScientist version must be a sha256 image digest")
+        return f"{self.IMAGE_REPOSITORY}@{digest.lower()}"
+
+    def _configured_image(self):
+        image = os.environ.get(
+            "EVOSCIENTIST_IMAGE", f"{self.IMAGE_REPOSITORY}@{self.DEFAULT_DIGEST}"
+        ).strip()
+        prefix = self.IMAGE_REPOSITORY + "@"
+        if not image.startswith(prefix):
+            raise ValueError("EVOSCIENTIST_IMAGE must use the official repository and a sha256 digest")
+        self._image_ref(image.removeprefix(prefix))
+        return image
+
+    def _write_htpasswd(self, user_id, password):
+        base = Path(os.environ.get("NGINX_HTPASSWD_FILE", "/data/docker/nginx/auth/.htpasswd"))
+        target = base.parent / "users" / user_id / ".htpasswd"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["htpasswd", "-ci", str(target), user_id], input=password + "\n",
+            text=True, capture_output=True, timeout=30, check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stdout + "\n" + result.stderr).strip())
+        target.chmod(0o644)
+
+    def _run_containers(self, instance, image, network, timeout=420):
+        runtime_target = self.get_runtime_target(instance)
+        _, workspace, data_dir, proxy_script = self._data_paths(instance)
+        code, output = self.run_command(
+            [
+                "docker", "run", "-d", "--name", runtime_target,
+                "--restart", "unless-stopped", "--network", network,
+                "-v", f"{workspace}:/workspace",
+                "-v", f"{data_dir}:/home/evosci/.evoscientist",
+                "-e", "EVOSCIENTIST_WORKSPACE_DIR=/workspace",
+                "-e", "EVOSCIENTIST_DATA_DIR=/home/evosci/.evoscientist",
+                image, "--ui", "webui",
+            ],
+            timeout=timeout,
+        )
+        if code != 0:
+            return code, output
+        code, proxy_output = self.run_command(
+            [
+                "docker", "run", "-d", "--name", f"{runtime_target}-proxy",
+                "--restart", "unless-stopped", "--network", f"container:{runtime_target}",
+                "--entrypoint", "python", "-v", f"{proxy_script}:/tmp/tcp_proxy.py:ro",
+                image, "/tmp/tcp_proxy.py",
+            ],
+            timeout=timeout,
+        )
+        if code != 0:
+            self.run_command(["docker", "rm", "-f", runtime_target], timeout=60)
+        return code, "\n".join(part for part in (output, proxy_output) if part)
+
+    def _wait_for_services(self, instance):
+        for name in self.container_names(instance):
+            code, output = self.run_command(
+                ["docker", "inspect", "--format", "{{.State.Running}}", name], timeout=10
+            )
+            if code != 0 or output.strip() != "true":
+                return 1, output or f"{name} is not running"
+        return 0, "EvoScientist services are running"
+
+    def configure_ingress(self, instance):
+        port = instance.get("_created_port", instance.get("port"))
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            return 1, "EvoScientist ingress port is required"
+        runtime_target = self.get_runtime_target(instance)
+        conf = self.ingress_conf(instance)
+        cert = os.environ.get("NGINX_SSL_CERT", "/etc/nginx/certs/fullchain.pem")
+        key = os.environ.get("NGINX_SSL_KEY", "/etc/nginx/certs/privkey.pem")
+        try:
+            conf.parent.mkdir(parents=True, exist_ok=True)
+            conf.write_text(
+                f"upstream evosci_ui_{port} {{\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+                f"    server {runtime_target}:4716 resolve;\n}}\n\n"
+                f"upstream evosci_api_{port} {{\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+                f"    server {runtime_target}:6175 resolve;\n}}\n\n"
+                "server {\n"
+                f"    listen {port} ssl;\n    server_name _;\n"
+                f"    ssl_certificate {cert};\n    ssl_certificate_key {key};\n"
+                f'    auth_basic "OpenClaw Login";\n    auth_basic_user_file /etc/nginx/auth/users/{self.get_legacy_user_id(instance)}/.htpasswd;\n'
+                "    location = /api/workspace/upload { proxy_pass http://evosci_ui_"
+                f"{port}; proxy_set_header Host $host:$server_port; proxy_set_header Origin \"\"; }}\n"
+                f"    location /api/ {{ proxy_pass http://evosci_api_{port}/; proxy_http_version 1.1; proxy_buffering off; }}\n"
+                f"    location / {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }}\n"
+                "}\n", encoding="utf-8"
+            )
+            compose = self.nginx_compose_dir / "docker-compose.yml"
+            if not compose.is_file():
+                return 1, f"Nginx compose file not found: {compose}"
+            old = compose.read_text(encoding="utf-8")
+            network = self.tenant_network(instance)
+            updated = HermesDockerAdapter._add_ingress_to_nginx_compose(old, port, network)
+            compose.write_text(updated, encoding="utf-8")
+            code, output = self.apply_nginx_compose(compose)
+            if code == 0:
+                code, output = self.reload_nginx()
+            if code != 0:
+                compose.write_text(old, encoding="utf-8")
+                conf.unlink(missing_ok=True)
+                self.apply_nginx_compose(compose)
+                self.reload_nginx()
+            return code, output
+        except Exception as exc:
+            return 1, f"EvoScientist ingress configuration failed: {exc}"
+
+    def _inspect_deployment(self, instance):
+        code, output = self.run_command(
+            [
+                "docker", "inspect", "--format",
+                '{{.Image}}|{{.State.Running}}|{{range $name, $_ := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}',
+                self.get_runtime_target(instance),
+            ],
+            timeout=10,
+        )
+        if code != 0:
+            raise RuntimeError(output or "EvoScientist container not found")
+        parts = output.strip().split("|", 2)
+        networks = parts[2].split() if len(parts) == 3 else []
+        if len(parts) != 3 or parts[1] not in {"true", "false"} or len(networks) != 1:
+            raise RuntimeError("Could not inspect EvoScientist deployment")
+        return parts[0], parts[1] == "true", networks[0]
+
+    def _remove_containers(self, instance):
+        outputs = []
+        for name in reversed(self.container_names(instance)):
+            code, output = self.run_command(["docker", "rm", "-f", name], timeout=60)
+            outputs.append(output)
+            if code != 0 and "no such container" not in output.lower():
+                return code, "\n".join(part for part in outputs if part)
+        return 0, "\n".join(part for part in outputs if part)
 
     def _container_status(self, container_name):
         result = subprocess.run(
@@ -706,17 +911,204 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
                 return code, "\n".join(part for part in outputs if part)
         return 0, "\n".join(part for part in outputs if part)
 
-    def create(self, *args, **kwargs):
-        return 1, "EvoScientist create is not supported yet."
+    def create(self, instance, basic_auth_enabled, basic_auth_password="", **kwargs):
+        del kwargs
+        if basic_auth_enabled != "true" or not basic_auth_password:
+            return 1, "Invalid EvoScientist creation parameters."
+        try:
+            image = self._configured_image()
+            user_id = self.get_legacy_user_id(instance)
+            if not self._SAFE_DOCKER_NAME.fullmatch(self.get_runtime_target(instance)):
+                raise ValueError("Invalid EvoScientist runtime identifier")
+            user_dir, workspace, data_dir, proxy_script = self._data_paths(instance)
+            if user_dir.exists() and any(path.exists() for path in (workspace, data_dir, proxy_script)):
+                raise ValueError(f"EvoScientist data path already exists: {user_dir}")
+            network = self.tenant_network(instance)
+            network_exists = self.run_command(["docker", "network", "inspect", network], timeout=10)[0] == 0
+            code, output = self.run_command(
+                ["bash", "-lc", 'source "$1"; prepare_tenant_networks "$2"', "bash",
+                 str(self.manager_dir / "scripts" / "lib_tenant_network.sh"), network], timeout=60)
+            if code != 0:
+                return code, output
+            user_dir.mkdir(parents=True, exist_ok=True)
+            workspace.mkdir(parents=True, exist_ok=True)
+            data_dir.mkdir(parents=True, exist_ok=True)
+            proxy_script.write_text(self._PROXY_SCRIPT, encoding="utf-8")
+            proxy_script.chmod(0o644)
+            if basic_auth_enabled == "true":
+                self._write_htpasswd(user_id, basic_auth_password)
+            code, output = self._run_containers(instance, image, network)
+            if code != 0:
+                raise RuntimeError(output)
+            code, output = self._wait_for_services(instance)
+            if code != 0:
+                raise RuntimeError(output)
+            instance["_created_port"] = int(instance.get("port") or 0) or self._allocate_port()
+            return 0, output
+        except Exception as exc:
+            self._remove_containers(instance)
+            user_dir = locals().get("user_dir")
+            if user_dir is not None and user_dir.is_dir():
+                for path in (locals().get("workspace"), locals().get("data_dir"), locals().get("proxy_script")):
+                    if path is not None:
+                        Path(path).unlink(missing_ok=True) if Path(path).is_file() else shutil.rmtree(path, ignore_errors=True)
+                try:
+                    user_dir.rmdir()
+                except OSError:
+                    pass
+            if not locals().get("network_exists", True):
+                self.run_command(["docker", "network", "rm", self.tenant_network(instance)], timeout=30)
+            return 1, f"EvoScientist creation failed and was rolled back: {exc}"
 
     def delete(self, instance):
-        return 1, "EvoScientist delete is not supported yet."
+        try:
+            _, workspace, data_dir, proxy_script = self._data_paths(instance)
+            recycle = self.recycle_dir(instance)
+            if recycle.exists():
+                return 1, f"Recycle path already exists: {recycle}"
+            image, was_running, network = self._inspect_deployment(instance)
+            conf = self._existing_ingress_conf(instance)
+            old_conf = conf.read_text(encoding="utf-8") if conf.is_file() else ""
+            compose = self.nginx_compose_dir / "docker-compose.yml"
+            old_compose = compose.read_text(encoding="utf-8") if compose.is_file() else ""
+            code, output = self._remove_containers(instance)
+            if code != 0:
+                return code, output
+            recycle.mkdir(parents=True)
+            for path in (workspace, data_dir, proxy_script):
+                if path.exists():
+                    shutil.move(str(path), str(recycle / path.name))
+            if compose.is_file() and isinstance(instance.get("port"), int):
+                compose.write_text(
+                    HermesDockerAdapter._remove_ingress_from_nginx_compose(
+                        compose.read_text(encoding="utf-8"), instance["port"], [self.tenant_network(instance)]
+                    ), encoding="utf-8"
+                )
+                code, output = self.apply_nginx_compose(compose)
+                if code != 0:
+                    raise RuntimeError(output)
+            self._existing_ingress_conf(instance).unlink(missing_ok=True)
+            code, output = self.reload_nginx()
+            if code != 0:
+                raise RuntimeError(output)
+            (recycle / "manifest.json").write_text(json.dumps({
+                "image": image, "network": network, "was_running": was_running,
+                "port": instance.get("port"), "compose": old_compose,
+                "ingress": old_conf,
+            }), encoding="utf-8")
+            return 0, "EvoScientist resources moved to recycle bin."
+        except Exception as exc:
+            rollback_errors = []
+            try:
+                if 'old_compose' in locals() and old_compose and compose.is_file():
+                    compose.write_text(old_compose, encoding="utf-8")
+                if 'old_conf' in locals() and old_conf:
+                    conf.write_text(old_conf, encoding="utf-8")
+                if 'recycle' in locals() and recycle.is_dir():
+                    for name, target in (("workspace", workspace), ("evoscientist-data", data_dir), ("tcp_proxy.py", proxy_script)):
+                        source = recycle / name
+                        if source.exists() and not target.exists():
+                            shutil.move(str(source), str(target))
+                    shutil.rmtree(recycle, ignore_errors=True)
+                if 'image' in locals():
+                    code, output = self._run_containers(instance, image, network)
+                    if code != 0:
+                        rollback_errors.append(output)
+                    elif not was_running:
+                        self.stop(instance)
+                if 'old_compose' in locals() and old_compose:
+                    code, output = self.apply_nginx_compose(compose)
+                    if code != 0:
+                        rollback_errors.append(output)
+                    else:
+                        code, output = self.reload_nginx()
+                        if code != 0:
+                            rollback_errors.append(output)
+            except Exception as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+            if rollback_errors:
+                return 1, f"EvoScientist deletion failed; manual recovery is required: {exc}; {'; '.join(rollback_errors)}"
+            return 1, f"EvoScientist deletion failed and was rolled back: {exc}"
 
     def restore(self, instance):
-        return 1, "EvoScientist restore is not supported yet."
+        try:
+            user_dir, workspace, data_dir, proxy_script = self._data_paths(instance)
+            recycle = self.recycle_dir(instance)
+            if not recycle.is_dir():
+                return 1, f"Recycle path not found: {recycle}"
+            manifest = recycle / "manifest.json"
+            saved = json.loads(manifest.read_text(encoding="utf-8"))
+            image = saved["image"]
+            network = saved["network"]
+            was_running = bool(saved["was_running"])
+            if not isinstance(image, str) or not (
+                image.startswith(self.IMAGE_REPOSITORY + "@") or self._SAFE_DIGEST.fullmatch(image)
+            ):
+                raise ValueError("invalid EvoScientist recycle image")
+            code, output = self.run_command(
+                ["bash", "-lc", 'source "$1"; prepare_tenant_networks "$2"', "bash",
+                 str(self.manager_dir / "scripts" / "lib_tenant_network.sh"), network], timeout=60)
+            if code != 0:
+                return code, output
+            for name, target in (("workspace", workspace), ("evoscientist-data", data_dir), ("tcp_proxy.py", proxy_script)):
+                source = recycle / name
+                if source.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(source), str(target))
+            code, output = self._run_containers(instance, image, network)
+            if code != 0:
+                raise RuntimeError(output)
+            instance["_created_port"] = saved.get("port", instance.get("port"))
+            code, output = self.configure_ingress(instance)
+            if code != 0:
+                raise RuntimeError(output)
+            shutil.rmtree(recycle)
+            if not was_running:
+                self.stop(instance)
+            return 0, "EvoScientist instance restored."
+        except Exception as exc:
+            self._remove_containers(instance)
+            for name, target in (("workspace", workspace), ("evoscientist-data", data_dir), ("tcp_proxy.py", proxy_script)):
+                source = recycle / name
+                if source.exists() and not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(source), str(target))
+            return 1, f"EvoScientist restore failed: {exc}"
 
-    def update_version(self, *args, **kwargs):
-        return 1, "EvoScientist version update is not supported yet."
+    def update_version(self, instance, version, **kwargs):
+        del kwargs
+        try:
+            target_image = self._image_ref(version)
+            current_image, was_running, network = self._inspect_deployment(instance)
+            code, output = self.run_command(["docker", "image", "inspect", target_image], timeout=30)
+            if code != 0:
+                return 1, f"Target image is not available locally: {target_image}. Run: docker pull '{target_image}'"
+            code, output = self._remove_containers(instance)
+            if code != 0:
+                return code, output
+            code, output = self._run_containers(instance, target_image, network)
+            if code != 0:
+                raise RuntimeError(output)
+            code, output = self._wait_for_services(instance)
+            if code != 0:
+                raise RuntimeError(output)
+            if not was_running:
+                self.stop(instance)
+            return 0, f"EvoScientist image updated to {target_image}."
+        except Exception as exc:
+            self._remove_containers(instance)
+            try:
+                code, output = self._run_containers(instance, current_image, network)
+                if code != 0:
+                    raise RuntimeError(output)
+                code, output = self._wait_for_services(instance)
+                if code != 0:
+                    raise RuntimeError(output)
+                if not was_running:
+                    self.stop(instance)
+            except Exception as rollback:
+                return 1, f"EvoScientist update failed; rollback failed: {exc}; {rollback}"
+            return 1, f"EvoScientist update failed and was rolled back: {exc}"
 
 
 class HermesDockerAdapter(OpenClawDockerAdapter):

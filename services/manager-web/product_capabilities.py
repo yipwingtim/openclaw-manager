@@ -8,7 +8,8 @@ PRODUCT_CAPABILITIES = {
         }
     ),
     "evoscientist": frozenset(
-        {"access", "status", "logs", "start", "stop", "restart"}
+        {"access", "status", "logs", "start", "stop", "restart", "create",
+         "delete", "restore", "update_version"}
     ),
     "hermes": frozenset(
         {

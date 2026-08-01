@@ -19,7 +19,7 @@
         <div class="muted-small">默认显示运行中的实例，可按状态、名称、ID、UUID 或产品筛选。</div>
       </div>
       <div class="d-flex gap-2 flex-wrap align-items-center">
-        {% for value, label in [("all", "全部产品"), ("openclaw", "OpenClaw"), ("hermes", "Hermes")] %}
+        {% for value, label in [("all", "全部产品"), ("openclaw", "OpenClaw"), ("hermes", "Hermes"), ("evoscientist", "EvoScientist")] %}
           <a class="btn btn-sm {% if product_filter == value %}btn-oc{% else %}btn-oc-outline{% endif %}"
              href="/admin/instances?product={{ value }}&status={{ status_filter }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">{{ label }}</a>
         {% endfor %}
@@ -142,8 +142,8 @@
                         {% if "update_version" in instance.capabilities %}
                           <form method="post" action="/admin/instances/{{ instance.public_id }}/version" class="d-flex gap-2 flex-wrap align-items-center" onsubmit="return confirm('确认升级实例版本？');">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <input class="form-control form-control-sm" style="width: 120px;" name="version" value="{{ instance.version or '' }}" placeholder="目标版本" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}">
-                            <label class="muted-small"><input type="checkbox" name="restore_model_provider" value="true"> 恢复模型</label>
+                            <input class="form-control form-control-sm" style="width: 240px;" name="version" value="{{ instance.version or '' }}" placeholder="版本或 sha256 摘要" required pattern="(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-fA-F]{64})">
+                            {% if instance.product == "openclaw" %}<label class="muted-small"><input type="checkbox" name="restore_model_provider" value="true"> 恢复模型</label>{% endif %}
                             <button class="btn btn-sm btn-oc-outline" type="submit">升级</button>
                           </form>
                         {% endif %}

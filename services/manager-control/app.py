@@ -242,6 +242,7 @@ def executor_instance_payload(instance):
         "product": instance["product"],
         "runtime_identifier": instance["runtime_identifier"],
         "data_path": instance.get("data_path"),
+        "port": instance.get("port"),
         "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
         "status": instance["status"],
         "restore_state": instance.get("restore_state"),

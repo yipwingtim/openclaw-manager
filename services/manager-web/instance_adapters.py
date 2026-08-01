@@ -210,6 +210,21 @@ class OpenClawDockerAdapter:
         if start_code != 0 or not legacy_user_id:
             return start_code, start_output
 
+        network = "openclaw-user-" + hashlib.sha256(legacy_user_id.encode()).hexdigest()
+        code, output = self.run_command(
+            [
+                "bash", "-lc",
+                'source "$1"; connect_container_to_network "$2" "$4"; connect_container_to_network "$3" "$4"',
+                "bash", str(self.manager_dir / "scripts" / "lib_tenant_network.sh"),
+                self.nginx_container_name,
+                os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy"),
+                network,
+            ], timeout=60,
+        )
+        if code != 0:
+            self.run_command(["docker", "stop", runtime_target], timeout=60)
+            return code, output
+
         nginx_code, nginx_output = self.enable_nginx_user_conf(legacy_user_id)
         combined_output = "\n".join(part for part in [start_output, nginx_output] if part)
         if nginx_code == 0:

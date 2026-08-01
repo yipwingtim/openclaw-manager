@@ -246,7 +246,8 @@ class TenantNetworkIsolationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             docker_log = (root / "docker.log").read_text(encoding="utf-8")
-            self.assertEqual(docker_log.count("|ps -a --format {{.Names}}"), 3)
+            self.assertEqual(docker_log.count("|ps -a --format {{.Names}}"), 2)
+            self.assertEqual(docker_log.count("|ps --format {{.Names}}"), 1)
             self.assertIn("/users/alice|compose up -d --force-recreate", docker_log)
             self.assertIn("/users/bob|compose create --force-recreate", docker_log)
             self.assertNotIn("/users/bob|compose up", docker_log)
@@ -329,3 +330,9 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_shared_network_reconnect_scans_only_running_containers(self):
+        script = NETWORK_HELPER.read_text(encoding="utf-8")
+
+        self.assertIn("docker ps --format '{{.Names}}'", script)
+        self.assertNotIn("docker ps -a --format '{{.Names}}'", script)

@@ -195,6 +195,47 @@ class EvoScientistAdapterTests(unittest.TestCase):
             self.assertIn("remove failed", output)
             run.assert_not_called()
 
+    def test_configure_ingress_connects_only_current_tenant_network(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            compose = root / "nginx" / "compose" / "docker-compose.yml"
+            compose.parent.mkdir(parents=True)
+            compose.write_text(
+                "services:\n"
+                "  nginx:\n"
+                "    ports:\n"
+                "      - \"443:443\"\n"
+                "    networks:\n"
+                "      - manager-net\n"
+                "networks:\n"
+                "  manager-net:\n"
+                "    external: true\n",
+                encoding="utf-8",
+            )
+            commands = []
+
+            def run_command(command, **kwargs):
+                commands.append(command)
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run_command), patch.object(
+                adapter, "reload_nginx", return_value=(0, "reloaded")
+            ), patch.object(
+                adapter,
+                "apply_nginx_compose",
+                side_effect=subprocess.TimeoutExpired("global tenant scan", 90),
+            ):
+                code, output = adapter.configure_ingress(self.INSTANCE)
+
+            network = adapter.tenant_network(self.INSTANCE)
+            self.assertEqual((code, output), (0, "reloaded"))
+            self.assertIn(
+                ["docker", "network", "connect", network, "openclaw-nginx"],
+                commands,
+            )
+            self.assertFalse(any("connect_shared_services_to_tenant_networks" in command for command in commands))
+
 
 class EvoScientistRegistrationTests(unittest.TestCase):
     def test_register_instance_persists_product_container_and_detected_port(self):

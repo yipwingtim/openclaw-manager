@@ -277,6 +277,14 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             )
         if instance.get("status") == "deleted" and action != "restore":
             raise ValueError("deleted instance only supports restore")
+        if action == "cleanup_failed":
+            control.update(request_id, "running", current_step="cleaning failed instance")
+            code, output = adapter.cleanup_failed(instance)
+            if code == 0:
+                control.update(request_id, "succeeded", output="failed instance resources cleaned")
+            else:
+                control.update(request_id, "failed", error_summary="failed instance cleanup failed", output=output)
+            return True
         if action == "create":
             control.update(request_id, "running", current_step="creating instance")
             password = consume_provisioning_secret(job["params"]["secret_path"])

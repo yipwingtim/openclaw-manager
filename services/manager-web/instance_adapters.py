@@ -1035,6 +1035,25 @@ while True:
                 return 1, f"EvoScientist deletion failed; manual recovery is required: {exc}; {'; '.join(rollback_errors)}"
             return 1, f"EvoScientist deletion failed and was rolled back: {exc}"
 
+    def cleanup_failed(self, instance):
+        outputs = []
+        for name in (*self.container_names(instance), self.ingress_container_name(instance)):
+            code, output = self.run_command(["docker", "rm", "-f", name], timeout=60)
+            if code != 0 and "no such container" not in output.lower():
+                return code, output
+            outputs.append(output)
+        for path in (self.ingress_conf(instance), self.ingress_conf(instance, disabled=True)):
+            path.unlink(missing_ok=True)
+        network = self.tenant_network(instance)
+        for shared in (self.nginx_container_name, os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy")):
+            code, output = self.run_command(["docker", "network", "disconnect", network, shared], timeout=30)
+            if code != 0 and "not connected" not in output.lower():
+                return code, output
+        code, output = self.run_command(["docker", "network", "rm", network], timeout=30)
+        if code != 0 and "not found" not in output.lower():
+            return code, output
+        return 0, " ".join(part for part in outputs if part)
+
     def restore(self, instance):
         try:
             user_dir, workspace, data_dir, proxy_script = self._data_paths(instance)

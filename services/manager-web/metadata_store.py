@@ -1322,6 +1322,25 @@ def set_instance_retention_state(instance_public_id, action, *, db_file=None, co
             )
 
 
+def purge_failed_instance(instance_public_id, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        row = active_conn.execute(
+            "SELECT id, status FROM instances WHERE public_id = ?", (instance_public_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError("instance not found")
+        if row["status"] != "failed":
+            raise ValueError("only failed instances can be cleaned up")
+        now = utc_now()
+        active_conn.execute(
+            "UPDATE ports SET instance_id = NULL, status = 'released', released_at = ? WHERE instance_id = ?",
+            (now, row["id"]),
+        )
+        active_conn.execute("DELETE FROM instances WHERE id = ?", (row["id"],))
+
+
 def upsert_credentials(
     *,
     user_id,

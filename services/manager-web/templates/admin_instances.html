@@ -115,7 +115,12 @@
                 {% endif %}
               </td>
               <td style="min-width: 280px;">
-                {% if instance.status == "deleted" %}
+                {% if instance.status == "failed" and instance.product == "evoscientist" %}
+                  <form method="post" action="/admin/instances/{{ instance.public_id }}/retention" onsubmit="return confirm('确认清理失败实例元数据及残留资源？');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="btn btn-sm btn-outline-danger" name="action" value="cleanup_failed">清理失败实例</button>
+                  </form>
+                {% elif instance.status == "deleted" %}
                   {% if instance.restore_state == "restorable" and "restore" in instance.capabilities %}
                     <form method="post" action="/admin/instances/{{ instance.public_id }}/retention" onsubmit="return confirm('确认恢复该实例？');">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

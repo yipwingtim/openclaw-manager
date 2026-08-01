@@ -858,7 +858,7 @@ while True:
     def set_model_provider(
         self, instance, provider_id, model_id, base_url="", alias="", timeout=180,
     ):
-        del alias
+        del base_url, alias
         if provider_id not in {"openai", "custom-openai"}:
             return 1, "EvoScientist model provider uses the shared OpenAI-compatible proxy."
         if not isinstance(model_id, str) or not model_id.strip():
@@ -871,7 +871,7 @@ while True:
         user_id = self.get_legacy_user_id(instance)
         token_file = token_dir / f"{user_id}.token"
         models_file = token_dir / f"{user_id}.models"
-        proxy_base_url = base_url or os.environ.get(
+        proxy_base_url = os.environ.get(
             "MODEL_PROXY_PUBLIC_BASE_URL", "http://openclaw-model-proxy:8081/v1"
         )
         proxy_container = os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy")

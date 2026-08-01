@@ -749,6 +749,20 @@ while True:
             self.run_command(["docker", "rm", "-f", runtime_target], timeout=60)
         return code, "\n".join(part for part in (output, proxy_output) if part)
 
+    def _fix_data_permissions(self, instance, image):
+        _, workspace, data_dir, _ = self._data_paths(instance)
+        return self.run_command(
+            [
+                "docker", "run", "--rm", "--user", "0", "--entrypoint", "sh",
+                "-v", f"{workspace}:/workspace",
+                "-v", f"{data_dir}:/home/evosci/.evoscientist",
+                image, "-c",
+                "mkdir -p /workspace /home/evosci/.evoscientist && "
+                "chown -R evosci:evosci /workspace /home/evosci/.evoscientist",
+            ],
+            timeout=60,
+        )
+
     def _wait_for_services(self, instance):
         for name in self.container_names(instance):
             code, output = self.run_command(
@@ -770,9 +784,9 @@ while True:
         try:
             conf.parent.mkdir(parents=True, exist_ok=True)
             config_text = (
-                f"upstream evosci_ui_{port} {{\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+                f"upstream evosci_ui_{port} {{\n    zone evosci_ui_{port} 64k;\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
                 f"    server {runtime_target}:4716 resolve;\n}}\n\n"
-                f"upstream evosci_api_{port} {{\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+                f"upstream evosci_api_{port} {{\n    zone evosci_api_{port} 64k;\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
                 f"    server {runtime_target}:6175 resolve;\n}}\n\n"
                 "server {\n"
                 f"    listen {port} ssl;\n    server_name _;\n"
@@ -943,6 +957,9 @@ while True:
             proxy_script.chmod(0o644)
             if basic_auth_enabled == "true":
                 self._write_htpasswd(user_id, basic_auth_password)
+            code, output = self._fix_data_permissions(instance, image)
+            if code != 0:
+                raise RuntimeError(output or "Could not prepare EvoScientist data permissions")
             code, output = self._run_containers(instance, image, network)
             if code != 0:
                 raise RuntimeError(output)

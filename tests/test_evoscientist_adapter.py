@@ -140,7 +140,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 code, _ = adapter.create(instance, "true", "secret")
 
             self.assertEqual(code, 0)
-            docker_runs = [command for command in commands if command[:2] == ["docker", "run"]]
+            docker_runs = [command for command in commands if command[:2] == ["docker", "run"] and "--name" in command]
             self.assertEqual(len(docker_runs), 2)
             self.assertIn("--network", docker_runs[0])
             self.assertIn("--network", docker_runs[1])
@@ -228,6 +228,45 @@ class EvoScientistAdapterTests(unittest.TestCase):
             self.assertIn(network, ingress_run)
             self.assertIn("40062:443", ingress_run)
             self.assertFalse(any("docker compose" in " ".join(command) for command in commands))
+            config_file = root / "public" / "deleted" / "evoscientist" / "instance-1.nginx.conf"
+            config_text = config_file.read_text(encoding="utf-8")
+            self.assertIn("zone evosci_ui_40062 64k;", config_text)
+            self.assertIn("zone evosci_api_40062 64k;", config_text)
+
+    def test_create_prepares_data_permissions_before_starting_containers(self):
+        digest = "sha256:" + "a" * 64
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            instance = dict(self.INSTANCE, data_path=str(root / "public" / "users" / "alice"))
+            commands = []
+
+            def run_command(command, **kwargs):
+                commands.append(command)
+                if command[:3] == ["docker", "network", "inspect"]:
+                    return 1, "missing"
+                if "allocate_port" in command:
+                    return 0, "40062"
+                return 0, "ok"
+
+            with patch.dict(os.environ, {"EVOSCIENTIST_IMAGE": f"ghcr.io/evoscientist/evoscientist@{digest}"}), patch.object(
+                adapter, "run_command", side_effect=run_command
+            ), patch.object(adapter, "_write_htpasswd"), patch.object(
+                adapter, "_wait_for_services", return_value=(0, "ready")
+            ):
+                code, _ = adapter.create(instance, "true", "secret")
+
+            self.assertEqual(code, 0)
+            permission_index = next(
+                index for index, command in enumerate(commands)
+                if command[:3] == ["docker", "run", "--rm"]
+            )
+            container_indexes = [
+                index for index, command in enumerate(commands)
+                if command[:2] == ["docker", "run"] and "--name" in command
+            ]
+            self.assertTrue(container_indexes)
+            self.assertLess(permission_index, container_indexes[0])
 
 
 class EvoScientistRegistrationTests(unittest.TestCase):

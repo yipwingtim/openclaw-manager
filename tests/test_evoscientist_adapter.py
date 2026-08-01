@@ -232,6 +232,8 @@ class EvoScientistAdapterTests(unittest.TestCase):
             config_text = config_file.read_text(encoding="utf-8")
             self.assertIn("zone evosci_ui_40062 64k;", config_text)
             self.assertIn("zone evosci_api_40062 64k;", config_text)
+            self.assertIn("listen 443 ssl;", config_text)
+            self.assertNotIn("listen 40062 ssl;", config_text)
 
     def test_create_prepares_data_permissions_before_starting_containers(self):
         digest = "sha256:" + "a" * 64

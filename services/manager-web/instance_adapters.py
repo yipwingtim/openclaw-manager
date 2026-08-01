@@ -789,7 +789,7 @@ while True:
                 f"upstream evosci_api_{port} {{\n    zone evosci_api_{port} 64k;\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
                 f"    server {runtime_target}:6175 resolve;\n}}\n\n"
                 "server {\n"
-                f"    listen {port} ssl;\n    server_name _;\n"
+                "    listen 443 ssl;\n    server_name _;\n"
                 f"    ssl_certificate {cert};\n    ssl_certificate_key {key};\n"
                 f'    auth_basic "OpenClaw Login";\n    auth_basic_user_file /etc/nginx/auth/users/{self.get_legacy_user_id(instance)}/.htpasswd;\n'
                 "    location = /api/workspace/upload { proxy_pass http://evosci_ui_"

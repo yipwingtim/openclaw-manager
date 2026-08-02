@@ -40,6 +40,13 @@ def default_instance_version(product):
     return image.rsplit("@", 1)[-1] if "@" in image else image.rsplit(":", 1)[-1]
 
 
+def load_default_versions():
+    try:
+        return control_client.get_default_versions()
+    except (control_client.ControlError, AttributeError):
+        return {product: default_instance_version(product) for product in ("openclaw", "hermes", "evoscientist")}
+
+
 def configured_skill_presets():
     values = []
     for item in re.split(r"[,\n]", os.environ.get("MANAGER_SKILL_PRESETS", "")):
@@ -220,7 +227,7 @@ def create_instance_page():
     return render_template(
         "admin_create_instance.html", users=users, job=None, instance=None,
         batch=None, error=error,
-        default_versions={product: default_instance_version(product) for product in ("openclaw", "hermes", "evoscientist")},
+        default_versions=load_default_versions(),
     )
 
 
@@ -235,7 +242,8 @@ def create_instance():
     product = request.form.get("product", "openclaw").strip()
     password = request.form.get("basic_auth_password", "")
     basic_auth_enabled = request.form.get("basic_auth_enabled") == "true"
-    version = request.form.get("version", "").strip() or default_instance_version(product)
+    default_versions = load_default_versions()
+    version = request.form.get("version", "").strip() or default_versions.get(product, "")
     confirm_latest = request.form.get("confirm_latest") == "true"
     if not owner_public_id or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
         return redirect(url_for("create_instance_page", error="请选择 Owner 并填写有效的实例 ID。"))
@@ -292,6 +300,33 @@ def create_instance_job(request_id):
         "admin_create_instance.html", users=[], job=job, instance=instance,
         batch=None, error=error, default_versions={},
     )
+
+
+@app.get("/admin/default-versions")
+def default_versions_page():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        versions = control_client.get_default_versions()
+        error = request.args.get("error", "")
+    except control_client.ControlError as exc:
+        versions, error = {}, str(exc)
+    return render_template("admin_default_versions.html", versions=versions, error=error)
+
+
+@app.post("/admin/default-versions")
+def update_default_versions():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    values = {product: request.form.get(product, "").strip() for product in ("openclaw", "hermes", "evoscientist")}
+    payload = {**values, "confirm_latest": request.form.get("confirm_latest") == "true"}
+    try:
+        control_client.update_default_versions(payload)
+    except control_client.ControlError as exc:
+        return redirect(url_for("default_versions_page", error=str(exc)))
+    return redirect(url_for("default_versions_page"))
 
 
 @app.post("/admin/create-instance/batch")

@@ -37,6 +37,12 @@ SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+DEFAULT_VERSION_KEYS = {
+    "openclaw": "default_version.openclaw",
+    "hermes": "default_version.hermes",
+    "evoscientist": "default_version.evoscientist",
+}
+DEFAULT_EVOSCIENTIST_VERSION = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
 PROVISIONING_SECRET_DIR = Path(
     os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public")
 ) / ".manager-secrets"
@@ -100,6 +106,22 @@ def admin_metadata_instance(instance):
         "created_at": instance["created_at"],
         "updated_at": instance["updated_at"],
     }
+
+
+def default_version(product, conn=None):
+    env_defaults = {
+        "openclaw": os.environ.get("OPENCLAW_VERSION", "").strip(),
+        "hermes": os.environ.get("HERMES_VERSION", "v2026.7.20").strip(),
+        "evoscientist": os.environ.get("EVOSCIENTIST_IMAGE", "").strip() or DEFAULT_EVOSCIENTIST_VERSION,
+    }
+    value = metadata_store.get_setting(DEFAULT_VERSION_KEYS[product], None, conn=conn)
+    if product == "evoscientist" and value:
+        value = value.rsplit("@", 1)[-1].rsplit(":", 1)[-1]
+    if not value:
+        value = env_defaults[product]
+        if product == "evoscientist" and value:
+            value = value.rsplit("@", 1)[-1].rsplit(":", 1)[-1]
+    return value
 
 
 def configured_tokens():
@@ -558,6 +580,11 @@ def create_admin_instance():
         return jsonify({"error": "confirm_latest must be a boolean"}), 400
     if product == "evoscientist" and version == "latest" and not confirm_latest:
         return jsonify({"error": "latest requires explicit confirmation"}), 400
+    if version is None:
+        with metadata_store.connect(DB_FILE) as conn:
+            version = default_version(product, conn=conn)
+        if version and product == "evoscientist" and version == "latest" and not confirm_latest:
+            return jsonify({"error": "latest requires explicit confirmation"}), 400
 
     existing_job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
     if existing_job is not None:
@@ -784,6 +811,40 @@ def admin_metadata():
             "operations": operations,
         }
     )
+
+
+@app.get("/internal/v1/admin/default-versions")
+@require_services("manager-admin-web")
+def get_default_versions():
+    with metadata_store.connect(DB_FILE) as conn:
+        return jsonify({"versions": {product: default_version(product, conn=conn) for product in DEFAULT_VERSION_KEYS}})
+
+
+@app.put("/internal/v1/admin/default-versions")
+@require_services("manager-admin-web")
+def update_default_versions():
+    payload = request.get_json(silent=True) or {}
+    if set(payload) - {*DEFAULT_VERSION_KEYS, "confirm_latest"}:
+        return jsonify({"error": "unsupported default version fields"}), 400
+    if not isinstance(payload.get("confirm_latest", False), bool):
+        return jsonify({"error": "confirm_latest must be a boolean"}), 400
+    for product, value in payload.items():
+        if product not in DEFAULT_VERSION_KEYS:
+            continue
+        if not isinstance(value, str) or not VERSION_RE.fullmatch(value.strip()):
+            return jsonify({"error": f"invalid {product} default version"}), 400
+        if product == "evoscientist" and value.strip() == "latest" and not payload.get("confirm_latest"):
+            return jsonify({"error": "latest requires explicit confirmation"}), 400
+    with metadata_store.connect(DB_FILE) as conn:
+        for product, value in payload.items():
+            if product not in DEFAULT_VERSION_KEYS:
+                continue
+            metadata_store.set_setting(DEFAULT_VERSION_KEYS[product], value.strip(), conn=conn)
+        metadata_store.record_operation(
+            action="settings.default_versions.update", status="success",
+            source_service="manager-admin-web", message="default agent versions updated", conn=conn,
+        )
+    return jsonify({"versions": {product: default_version(product, conn=conn) for product in DEFAULT_VERSION_KEYS}})
 
 
 @app.post("/internal/v1/admin/device-batches")

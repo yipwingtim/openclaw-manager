@@ -83,6 +83,70 @@ def require_product_capability(instance, capability):
     return jsonify({"error": f"instance product does not support {label}"}), 400
 
 
+def _atomic_upload(upload, target):
+    if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
+        raise RuntimeError("secure atomic upload is not supported")
+    root_fd = _open_directory_chain(target.parent)
+    fd = None
+    created = False
+    try:
+        fd = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=root_fd)
+        created = True
+        with os.fdopen(fd, "wb") as output:
+            fd = None
+            upload.save(output)
+        return True
+    except Exception:
+        if fd is not None:
+            os.close(fd)
+        if created:
+            try:
+                os.unlink(target.name, dir_fd=root_fd)
+            except OSError:
+                pass
+        raise
+    finally:
+        os.close(root_fd)
+
+
+def _atomic_download(target):
+    if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
+        return None
+    root_fd = _open_directory_chain(target.parent)
+    fd = None
+    try:
+        fd = os.open(target.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+        actual = Path(os.readlink(f"/proc/self/fd/{fd}"))
+        if actual != target:
+            os.close(fd)
+            fd = None
+            return None
+        return os.fdopen(fd, "rb")
+    except (OSError, ValueError):
+        if fd is not None:
+            os.close(fd)
+        return None
+    finally:
+        os.close(root_fd)
+
+
+def _open_directory_chain(path):
+    fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:]:
+            next_fd = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=fd,
+            )
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
 @app.get("/internal/v1/instances/<instance_public_id>/snapshot")
 def snapshot(instance_public_id):
     instance, error = runtime_instance(instance_public_id)
@@ -196,9 +260,14 @@ def upload_file(instance_public_id):
     target = resolve_instance_file(instance, "uploads", filename)
     if target is None or target.exists():
         return jsonify({"error": "file already exists"}), 409
-    target.parent.mkdir(parents=True, exist_ok=True)
-    upload.save(target)
-    os.chmod(target, 0o644)
+    if not target.parent.is_dir():
+        return jsonify({"error": "upload directory not found"}), 409
+    try:
+        _atomic_upload(upload, target)
+    except FileExistsError:
+        return jsonify({"error": "file already exists"}), 409
+    except (OSError, RuntimeError, ValueError):
+        return jsonify({"error": "failed to save file"}), 500
     return jsonify({"name": filename}), 201
 
 
@@ -215,7 +284,10 @@ def download_file(instance_public_id, root_key, relative_path):
     target = resolve_instance_file(instance, root_key, relative_path)
     if target is None or not target.is_file() or target.suffix.lower() not in DOWNLOAD_EXTENSIONS:
         return jsonify({"error": "file not found"}), 404
-    return send_file(target, as_attachment=True, download_name=target.name)
+    opened = _atomic_download(target)
+    if opened is None:
+        return jsonify({"error": "file not found"}), 404
+    return send_file(opened, as_attachment=True, download_name=target.name)
 
 
 @app.delete("/internal/v1/instances/<instance_public_id>/files/<root_key>/<path:relative_path>")

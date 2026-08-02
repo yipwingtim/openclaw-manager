@@ -146,6 +146,27 @@ class ManagerExecutorTests(unittest.TestCase):
 
         self.assertEqual(adapter.create.call_args.kwargs["version"], "2026.7.28")
 
+    def test_openclaw_creation_result_rejects_symlinked_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            public_dir = Path(directory)
+            config_dir = public_dir / "users" / "alice" / "config"
+            config_dir.mkdir(parents=True)
+            outside = public_dir / "outside.json"
+            outside.write_text(json.dumps({"gateway": {"auth": {"token": "outside"}}}))
+            (config_dir / "openclaw.json").symlink_to(outside)
+            nginx_dir = public_dir / "nginx"
+            nginx_dir.mkdir()
+            (nginx_dir / "alice.conf").write_text("listen 41001 ssl;\n")
+            instance = {"legacy_user_id": "alice", "_creation_version": "2026.6.6"}
+
+            with patch.object(self.executor, "PUBLIC_DIR", public_dir), patch.dict(
+                self.executor.os.environ,
+                {"NGINX_USERS_CONF_DIR": str(nginx_dir), "PUBLIC_HOST": "example.test",
+                 "NGINX_HTPASSWD_FILE_IN_CONTAINER": "/etc/nginx/auth/.htpasswd"},
+            ):
+                with self.assertRaises(OSError):
+                    self.executor.openclaw_creation_result(instance)
+
     def test_run_once_creates_hermes_and_configures_ingress(self):
         control = Mock()
         instance = {

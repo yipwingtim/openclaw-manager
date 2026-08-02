@@ -50,6 +50,15 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             script,
         )
 
+    def test_runtime_check_blocks_cloud_metadata_access(self):
+        script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")
+
+        self.assertIn("100.100.100.200/latest/meta-data/", script)
+        self.assertIn("169.254.169.254/latest/meta-data/", script)
+        self.assertIn("metadata_endpoint_reachable", script)
+        self.assertIn('EVOSCIENTIST_CONTAINER_PREFIX="${EVOSCIENTIST_CONTAINER_PREFIX:-evoscientist_}"', script)
+        self.assertIn('"$EVOSCIENTIST_CONTAINER_PREFIX"*-proxy|"$EVOSCIENTIST_CONTAINER_PREFIX"*-ingress)', script)
+
     def test_runtime_check_ignores_nginx_backup_tokens_and_summarizes_active_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

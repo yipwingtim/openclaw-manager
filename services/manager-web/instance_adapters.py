@@ -309,6 +309,7 @@ class OpenClawDockerAdapter:
     def create(
         self, instance, basic_auth_enabled, basic_auth_password="",
         skip_nginx_reload=True, skip_metadata_write=False, timeout=420,
+        version=None,
     ):
         user_id = self.get_legacy_user_id(instance)
         command = [
@@ -320,6 +321,8 @@ class OpenClawDockerAdapter:
         if skip_nginx_reload:
             command.append("--skip-nginx-reload")
         env = {**os.environ, "OPENCLAW_BASIC_AUTH_PASSWORD": basic_auth_password}
+        if version:
+            env["OPENCLAW_VERSION"] = version
         if skip_metadata_write:
             env["OPENCLAW_SKIP_METADATA_WRITE"] = "1"
         return self.run_command(
@@ -724,7 +727,11 @@ while True:
             raise ValueError("EvoScientist version must be a sha256 image digest")
         return f"{self.IMAGE_REPOSITORY}@{digest.lower()}"
 
-    def _configured_image(self):
+    def _configured_image(self, version=None):
+        if version == "latest":
+            return f"{self.IMAGE_REPOSITORY}:latest"
+        if version:
+            return self._image_ref(version)
         image = os.environ.get(
             "EVOSCIENTIST_IMAGE", f"{self.IMAGE_REPOSITORY}@{self.DEFAULT_DIGEST}"
         ).strip()
@@ -1052,11 +1059,11 @@ while True:
         return 0, "\n".join(part for part in outputs if part)
 
     def create(self, instance, basic_auth_enabled, basic_auth_password="", **kwargs):
-        del kwargs
+        version = kwargs.get("version")
         if basic_auth_enabled != "true" or not basic_auth_password:
             return 1, "Invalid EvoScientist creation parameters."
         try:
-            image = self._configured_image()
+            image = self._configured_image(version)
             user_id = self.get_legacy_user_id(instance)
             if not self._SAFE_DOCKER_NAME.fullmatch(self.get_runtime_target(instance)):
                 raise ValueError("Invalid EvoScientist runtime identifier")
@@ -1584,6 +1591,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
     def create(
         self, instance, basic_auth_enabled, basic_auth_password="",
         skip_nginx_reload=True, skip_metadata_write=False, timeout=420,
+        version=None,
     ):
         del skip_nginx_reload, skip_metadata_write
         runtime_target = self.get_runtime_target(instance)
@@ -1645,7 +1653,8 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             if code != 0 or len(allocated_ports) != 1:
                 raise RuntimeError(output or "Hermes ingress port allocation failed")
             instance["_created_port"] = int(allocated_ports[0])
-            code, output = self._run_hermes_container(instance, self.IMAGE, network, timeout)
+            image = f"nousresearch/hermes-agent:{version or self.IMAGE.rsplit(':', 1)[-1]}"
+            code, output = self._run_hermes_container(instance, image, network, timeout)
             if code != 0:
                 raise RuntimeError(output)
             code, readiness = self._wait_for_dashboard(instance)

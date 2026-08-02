@@ -28,6 +28,16 @@ MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 INSTANCE_PAGE_SIZE_OPTIONS = (10, 20, 50, 100)
 DEFAULT_INSTANCE_PAGE_SIZE = 20
+VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}|sha256:[0-9a-fA-F]{64})$")
+
+
+def default_instance_version(product):
+    if product == "openclaw":
+        return os.environ.get("OPENCLAW_VERSION", "").strip()
+    if product == "hermes":
+        return os.environ.get("HERMES_VERSION", "v2026.7.20").strip()
+    image = os.environ.get("EVOSCIENTIST_IMAGE", "").strip()
+    return image.rsplit("@", 1)[-1] if "@" in image else image.rsplit(":", 1)[-1]
 
 
 def configured_skill_presets():
@@ -210,6 +220,7 @@ def create_instance_page():
     return render_template(
         "admin_create_instance.html", users=users, job=None, instance=None,
         batch=None, error=error,
+        default_versions={product: default_instance_version(product) for product in ("openclaw", "hermes", "evoscientist")},
     )
 
 
@@ -224,16 +235,21 @@ def create_instance():
     product = request.form.get("product", "openclaw").strip()
     password = request.form.get("basic_auth_password", "")
     basic_auth_enabled = request.form.get("basic_auth_enabled") == "true"
+    version = request.form.get("version", "").strip() or default_instance_version(product)
+    confirm_latest = request.form.get("confirm_latest") == "true"
     if not owner_public_id or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
         return redirect(url_for("create_instance_page", error="请选择 Owner 并填写有效的实例 ID。"))
     if product not in {"openclaw", "hermes", "evoscientist"}:
         return redirect(url_for("create_instance_page", error="不支持该实例产品。"))
     if not instance_name or len(instance_name) > 128 or not password:
         return redirect(url_for("create_instance_page", error="实例名称和 Basic Auth 密码不能为空。"))
+    if version and not VERSION_RE.fullmatch(version):
+        return redirect(url_for("create_instance_page", error="请填写有效的实例版本。"))
+    if product == "evoscientist" and version == "latest" and not confirm_latest:
+        return redirect(url_for("create_instance_page", error="使用 latest 前必须确认风险。"))
     request_id = "instance-create-" + uuid.uuid4().hex
     try:
-        result = control_client.create_admin_instance(
-            {
+        payload = {
                 "request_id": request_id,
                 "actor_user_public_id": current["public_id"],
                 "owner_user_public_id": owner_public_id,
@@ -242,8 +258,12 @@ def create_instance():
                 "product": product,
                 "basic_auth_enabled": basic_auth_enabled,
                 "basic_auth_password": password,
-            }
-        )
+        }
+        if version:
+            payload["version"] = version
+        if confirm_latest:
+            payload["confirm_latest"] = True
+        result = control_client.create_admin_instance(payload)
     except control_client.ControlError as exc:
         return redirect(url_for("create_instance_page", error=str(exc)))
     return redirect(
@@ -270,7 +290,7 @@ def create_instance_job(request_id):
         job, instance, error = None, None, str(exc)
     return render_template(
         "admin_create_instance.html", users=[], job=job, instance=instance,
-        batch=None, error=error,
+        batch=None, error=error, default_versions={},
     )
 
 
@@ -363,7 +383,7 @@ def create_instance_batch_job(request_id):
         batch, error = None, str(exc)
     return render_template(
         "admin_create_instance.html", users=[], job=None, instance=None,
-        batch=batch, error=error,
+        batch=batch, error=error, default_versions={},
     )
 
 

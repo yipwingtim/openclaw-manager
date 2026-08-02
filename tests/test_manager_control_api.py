@@ -366,6 +366,30 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(repeated.get_json()["job"]["request_id"], "create-1")
         self.assertEqual(len(list(secret_dir.iterdir())), 1)
 
+    def test_admin_updates_default_versions_and_returns_saved_values(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        payload = {
+            "openclaw": "2026.6.6",
+            "hermes": "v2026.7.20",
+            "evoscientist": "sha256:" + "a" * 64,
+            "confirm_latest": False,
+        }
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token", "X-Actor-User-Public-Id": self.user["public_id"]},
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.update_default_versions())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["versions"], {
+            "openclaw": "2026.6.6",
+            "hermes": "v2026.7.20",
+            "evoscientist": "sha256:" + "a" * 64,
+        })
+
     def test_admin_creates_hermes_provisioning_instance(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

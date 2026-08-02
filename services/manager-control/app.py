@@ -116,11 +116,15 @@ def default_version(product, conn=None):
     }
     value = metadata_store.get_setting(DEFAULT_VERSION_KEYS[product], None, conn=conn)
     if product == "evoscientist" and value:
-        value = value.rsplit("@", 1)[-1].rsplit(":", 1)[-1]
+        value = value.rsplit("@", 1)[-1]
+        if not value.startswith("sha256:") and ":" in value:
+            value = value.rsplit(":", 1)[-1]
     if not value:
         value = env_defaults[product]
         if product == "evoscientist" and value:
-            value = value.rsplit("@", 1)[-1].rsplit(":", 1)[-1]
+            value = value.rsplit("@", 1)[-1]
+            if not value.startswith("sha256:") and ":" in value:
+                value = value.rsplit(":", 1)[-1]
     return value
 
 
@@ -844,7 +848,11 @@ def update_default_versions():
             action="settings.default_versions.update", status="success",
             source_service="manager-admin-web", message="default agent versions updated", conn=conn,
         )
-    return jsonify({"versions": {product: default_version(product, conn=conn) for product in DEFAULT_VERSION_KEYS}})
+        versions = {
+            product: default_version(product, conn=conn)
+            for product in DEFAULT_VERSION_KEYS
+        }
+    return jsonify({"versions": versions})
 
 
 @app.post("/internal/v1/admin/device-batches")

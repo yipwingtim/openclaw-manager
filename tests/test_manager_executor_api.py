@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import tempfile
 import sys
 import types
 import unittest
@@ -137,6 +138,139 @@ class ManagerExecutorApiTests(unittest.TestCase):
 
         self.assertEqual(status, 403)
         self.assertEqual(response.get_json(), {"error": "admin service token is required"})
+
+    def test_upload_rejects_target_replacement_before_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            uploads = root / "uploads"
+            uploads.mkdir()
+            escaped = root / "escaped.md"
+            target = uploads / "race.md"
+            instance = {"product": "openclaw", "access_role": "owner", "data_path": str(root)}
+
+            class Upload:
+                filename = "race.md"
+
+                def save(self, destination):
+                    destination.write(b"attacker")
+
+            def resolve_with_swap(*_args):
+                target.symlink_to(escaped)
+                return target
+
+            self.api.request.files = {"file": Upload()}
+            with patch.object(self.api, "runtime_instance", return_value=(instance, None)), patch.object(
+                self.api, "resolve_instance_file", side_effect=resolve_with_swap
+            ):
+                response, status = self.api.upload_file("instance-1")
+
+            self.assertEqual(status, 409)
+            self.assertFalse(escaped.exists())
+
+    def test_download_rejects_target_replacement_before_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            escaped = root / "escaped.md"
+            escaped.write_text("secret", encoding="utf-8")
+            target = workspace / "race.md"
+            target.write_text("safe", encoding="utf-8")
+            instance = {"product": "openclaw", "access_role": "owner", "data_path": str(root)}
+
+            def resolve_with_swap(*_args):
+                target.unlink()
+                target.symlink_to(escaped)
+                return target
+
+            with patch.object(self.api, "runtime_instance", return_value=(instance, None)), patch.object(
+                self.api, "resolve_instance_file", side_effect=resolve_with_swap
+            ), patch.object(self.api, "send_file", side_effect=lambda path, **_: Path(path).read_text()):
+                response = self.api.download_file("instance-1", "workspace", "race.md")
+
+            self.assertEqual(response[1], 404)
+
+    def test_upload_success_writes_supported_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "uploads").mkdir()
+            instance = {"product": "openclaw", "access_role": "owner", "data_path": str(root)}
+
+            class Upload:
+                filename = "notes.md"
+
+                def save(self, destination):
+                    destination.write(b"notes")
+
+            self.api.request.files = {"file": Upload()}
+            with patch.object(self.api, "runtime_instance", return_value=(instance, None)):
+                response, status = self.api.upload_file("instance-1")
+
+            self.assertEqual(status, 201)
+            self.assertEqual((root / "uploads" / "notes.md").read_bytes(), b"notes")
+
+    def test_upload_write_failure_removes_new_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "uploads").mkdir()
+            instance = {"product": "openclaw", "access_role": "owner", "data_path": str(root)}
+
+            class Upload:
+                filename = "broken.md"
+
+                def save(self, destination):
+                    raise RuntimeError("injected write failure")
+
+            self.api.request.files = {"file": Upload()}
+            with patch.object(self.api, "runtime_instance", return_value=(instance, None)):
+                response, status = self.api.upload_file("instance-1")
+
+            self.assertEqual(status, 500)
+            self.assertFalse((root / "uploads" / "broken.md").exists())
+
+    def test_upload_fails_closed_without_atomic_open_support(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "uploads").mkdir()
+            instance = {"product": "openclaw", "access_role": "owner", "data_path": str(root)}
+            upload = types.SimpleNamespace(filename="notes.md", save=lambda _: None)
+            self.api.request.files = {"file": upload}
+            with patch.object(self.api, "runtime_instance", return_value=(instance, None)), patch.object(
+                self.api.os, "supports_dir_fd", set()
+            ):
+                response, status = self.api.upload_file("instance-1")
+
+            self.assertEqual(status, 500)
+
+    def test_download_success_opens_supported_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            target = workspace / "notes.md"
+            target.write_text("notes", encoding="utf-8")
+            instance = {"product": "openclaw", "access_role": "owner", "data_path": str(root)}
+            with patch.object(self.api, "runtime_instance", return_value=(instance, None)), patch.object(
+                self.api, "send_file", side_effect=lambda path, **_: path.read()
+            ):
+                response = self.api.download_file("instance-1", "workspace", "notes.md")
+
+            self.assertEqual(response, b"notes")
+
+    def test_download_fails_closed_when_fd_identity_cannot_be_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            target = workspace / "notes.md"
+            target.write_text("notes", encoding="utf-8")
+            instance = {"product": "openclaw", "access_role": "owner", "data_path": str(root)}
+            with patch.object(self.api, "runtime_instance", return_value=(instance, None)), patch.object(
+                self.api.os, "readlink", side_effect=OSError("identity unavailable")
+            ):
+                response = self.api.download_file("instance-1", "workspace", "notes.md")
+
+            self.assertEqual(response[1], 404)
 
 
 if __name__ == "__main__":

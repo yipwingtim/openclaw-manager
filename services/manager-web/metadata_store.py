@@ -318,6 +318,27 @@ def activate_auth_provider(provider, db_file=None, conn=None):
         return True
 
 
+def get_setting(key, default=None, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        row = active_conn.execute(
+            "SELECT value FROM auth_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row is not None else default
+
+
+def set_setting(key, value, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            "INSERT INTO auth_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (key, value, utc_now()),
+        )
+
+
 def ensure_legacy_user(username, conn):
     normalized = normalize_username(username)
     identity = conn.execute(

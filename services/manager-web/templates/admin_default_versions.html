@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}默认版本设置{% endblock %}
+{% block content %}
+  <div class="page-kicker">管理员控制台</div>
+  <h1 class="page-title">默认版本设置</h1>
+  <div class="page-subtitle mb-3">新建单个实例时使用这些默认值；不会修改已有实例。</div>
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+  <form class="surface p-3 p-lg-4" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="mb-3"><label class="form-label" for="openclaw">OpenClaw</label><input class="form-control" id="openclaw" name="openclaw" value="{{ versions.openclaw or '' }}" required></div>
+    <div class="mb-3"><label class="form-label" for="hermes">Hermes</label><input class="form-control" id="hermes" name="hermes" value="{{ versions.hermes or '' }}" required></div>
+    <div class="mb-3"><label class="form-label" for="evoscientist">EvoScientist</label><input class="form-control" id="evoscientist" name="evoscientist" value="{{ versions.evoscientist or '' }}" required></div>
+    <div class="form-check mb-3"><input class="form-check-input" id="confirm_latest" name="confirm_latest" type="checkbox" value="true"><label class="form-check-label" for="confirm_latest">确认 EvoScientist 使用 latest</label></div>
+    <button class="btn btn-oc" type="submit">保存默认版本</button>
+  </form>
+{% endblock %}

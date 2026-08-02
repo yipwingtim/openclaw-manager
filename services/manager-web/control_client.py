@@ -172,6 +172,14 @@ def get_admin_metadata():
     return request_json("GET", "/internal/v1/admin/metadata")
 
 
+def get_default_versions():
+    return request_json("GET", "/internal/v1/admin/default-versions")["versions"]
+
+
+def update_default_versions(payload):
+    return request_json("PUT", "/internal/v1/admin/default-versions", payload=payload)
+
+
 def create_execution_job(payload):
     return request_json("POST", "/internal/v1/execution-jobs", payload=payload)["job"]
 

@@ -1285,6 +1285,21 @@ def set_instance_version(instance_public_id, version, *, db_file=None, conn=None
             raise ValueError("instance not found")
 
 
+def set_instance_runtime_status(instance_public_id, status, *, db_file=None, conn=None):
+    if status not in {"active", "stopped"}:
+        raise ValueError("invalid instance runtime status")
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        result = active_conn.execute(
+            "UPDATE instances SET status = ?, updated_at = ? "
+            "WHERE public_id = ? AND status IN ('active', 'stopped')",
+            (status, utc_now(), instance_public_id),
+        )
+        if result.rowcount != 1:
+            raise ValueError("instance not found")
+
+
 def set_instance_retention_state(instance_public_id, action, *, db_file=None, conn=None):
     if action not in {"delete", "restore"}:
         raise ValueError("invalid instance retention action")

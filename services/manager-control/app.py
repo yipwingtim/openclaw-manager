@@ -1762,6 +1762,14 @@ def update_execution_job(request_id):
                     conn=conn,
                 )
             if status == "succeeded" and job["action"] in {
+                "instance.start", "instance.restart", "instance.stop",
+            }:
+                metadata_store.set_instance_runtime_status(
+                    job["instance_public_id"],
+                    "stopped" if job["action"] == "instance.stop" else "active",
+                    conn=conn,
+                )
+            if status == "succeeded" and job["action"] in {
                 "instance.delete", "instance.restore",
             }:
                 metadata_store.set_instance_retention_state(

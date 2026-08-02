@@ -1377,6 +1377,26 @@ def purge_failed_instance(instance_public_id, *, db_file=None, conn=None):
         active_conn.execute("DELETE FROM instances WHERE id = ?", (row["id"],))
 
 
+def purge_deleted_instance(instance_public_id, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        row = active_conn.execute(
+            "SELECT id, status, restore_state FROM instances WHERE public_id = ?",
+            (instance_public_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("instance not found")
+        if row["status"] != "deleted" or row["restore_state"] != "restorable":
+            raise ValueError("only restorable deleted instances can be permanently deleted")
+        now = utc_now()
+        active_conn.execute(
+            "UPDATE ports SET instance_id = NULL, status = 'released', released_at = ? WHERE instance_id = ?",
+            (now, row["id"]),
+        )
+        active_conn.execute("DELETE FROM instances WHERE id = ?", (row["id"],))
+
+
 def upsert_credentials(
     *,
     user_id,

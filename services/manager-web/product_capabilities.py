@@ -2,20 +2,20 @@ PRODUCT_CAPABILITIES = {
     "openclaw": frozenset(
         {
             "status", "logs", "start", "stop", "restart", "create",
-            "batch_create", "delete", "restore", "update_version",
+            "batch_create", "delete", "restore", "purge_deleted", "update_version",
             "batch_set_model_provider", "basic_auth", "skill_install", "dashboard", "access",
             "device_pairing", "file_upload", "file_download", "file_delete",
         }
     ),
     "evoscientist": frozenset(
         {"access", "status", "logs", "start", "stop", "restart", "create",
-         "delete", "restore", "update_version", "cleanup_failed",
+         "delete", "restore", "purge_deleted", "update_version", "cleanup_failed",
          "batch_set_model_provider"}
     ),
     "hermes": frozenset(
         {
             "access", "status", "logs", "start", "stop", "restart", "create",
-            "delete", "restore", "update_version", "batch_set_model_provider",
+            "delete", "restore", "purge_deleted", "update_version", "batch_set_model_provider",
         }
     ),
 }
@@ -33,6 +33,7 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.approve_latest_device": "device_pairing",
     "instance.delete": "delete",
     "instance.restore": "restore",
+    "instance.purge_deleted": "purge_deleted",
     "instance.cleanup_failed": "cleanup_failed",
     "instance.wechat_bind": "device_pairing",
 }

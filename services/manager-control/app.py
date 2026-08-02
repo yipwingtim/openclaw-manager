@@ -69,6 +69,7 @@ JOB_ACTION_PARAMS = {
     "instance.approve_latest_device": set(),
     "instance.delete": set(),
     "instance.restore": set(),
+    "instance.purge_deleted": set(),
     "instance.cleanup_failed": set(),
     "instance.wechat_bind": set(),
 }
@@ -1588,8 +1589,12 @@ def create_execution_job():
         instance["status"] != "failed" or instance.get("product") != "evoscientist"
     ):
         return jsonify({"error": "only failed EvoScientist instances can be cleaned up"}), 409
-    if instance["status"] == "deleted" and action != "instance.restore":
-        return jsonify({"error": "deleted instance only supports restore"}), 409
+    if action == "instance.purge_deleted" and (
+        instance["status"] != "deleted" or instance.get("restore_state") != "restorable"
+    ):
+        return jsonify({"error": "only restorable deleted instances can be permanently deleted"}), 409
+    if instance["status"] == "deleted" and action not in {"instance.restore", "instance.purge_deleted"}:
+        return jsonify({"error": "deleted instance only supports restore or permanent deletion"}), 409
     if action == "instance.restore" and (
         instance["status"] != "deleted"
         or instance.get("restore_state") != "restorable"
@@ -1598,7 +1603,7 @@ def create_execution_job():
     try:
         with metadata_store.connect(DB_FILE) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            exclusive_actions = {"instance.delete", "instance.restore", "instance.cleanup_failed"}
+            exclusive_actions = {"instance.delete", "instance.restore", "instance.purge_deleted", "instance.cleanup_failed"}
             active_jobs = metadata_store.list_execution_jobs(
                 limit=1,
                 statuses=("queued", "running"),
@@ -1856,6 +1861,8 @@ def update_execution_job(request_id):
                 )
             if status == "succeeded" and job["action"] == "instance.cleanup_failed":
                 metadata_store.purge_failed_instance(job["instance_public_id"], conn=conn)
+            if status == "succeeded" and job["action"] == "instance.purge_deleted":
+                metadata_store.purge_deleted_instance(job["instance_public_id"], conn=conn)
             if (
                 status in {"succeeded", "failed"}
                 and job["action"]
@@ -1869,6 +1876,7 @@ def update_execution_job(request_id):
                     "instance.delete",
                     "instance.restore",
                     "instance.cleanup_failed",
+                    "instance.purge_deleted",
                 }
             ):
                 params = json.loads(job["params_json"])
@@ -1883,7 +1891,7 @@ def update_execution_job(request_id):
                         f"provider={params['model_provider_id']} "
                         f"model={params['model_id']}"
                     )
-                elif job["action"] in {"instance.delete", "instance.restore", "instance.cleanup_failed"}:
+                elif job["action"] in {"instance.delete", "instance.restore", "instance.cleanup_failed", "instance.purge_deleted"}:
                     message = f"instance {job['action'].removeprefix('instance.')}d"
                 else:
                     message = "device cache refreshed" if job["action"] == "instance.refresh_devices" else "latest device request approved"
@@ -1897,7 +1905,7 @@ def update_execution_job(request_id):
                 metadata_store.record_operation(
                     request_id=request_id,
                     actor_user_id=job["actor_user_id"],
-                    instance_id=None if job["action"] == "instance.cleanup_failed" else job["instance_id"],
+                    instance_id=None if job["action"] in {"instance.cleanup_failed", "instance.purge_deleted"} else job["instance_id"],
                     source_service="manager-executor",
                     action=job["action"],
                     status=operation_status,

@@ -590,7 +590,25 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter, max_attempts=2)
 
         adapter.restore.assert_called_once_with(control.claim.return_value["instance"])
-        self.assertEqual(control.update.call_args.args, ("restore-1", "succeeded"))
+
+    def test_run_once_purges_only_restorable_deleted_instance(self):
+        control = Mock()
+        instance = {
+            "product": "openclaw", "status": "deleted", "restore_state": "restorable",
+            "legacy_user_id": "alice", "runtime_identifier": "openclaw_alice",
+        }
+        control.claim.return_value = {
+            "job": {"request_id": "purge-1", "action": "instance.purge_deleted", "params": {}},
+            "instance": instance,
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.purge_deleted.return_value = (0, "purged")
+
+        self.executor.run_once(control, lambda product: adapter)
+
+        adapter.purge_deleted.assert_called_once_with(instance)
+        self.assertEqual(control.update.call_args.args, ("purge-1", "succeeded"))
 
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()

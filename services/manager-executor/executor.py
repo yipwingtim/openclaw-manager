@@ -301,8 +301,8 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             raise ValueError(
                 f"instance product does not support {capability or job['action']}"
             )
-        if instance.get("status") == "deleted" and action != "restore":
-            raise ValueError("deleted instance only supports restore")
+        if instance.get("status") == "deleted" and action not in {"restore", "purge_deleted"}:
+            raise ValueError("deleted instance only supports restore or permanent deletion")
         if action == "cleanup_failed":
             control.update(request_id, "running", current_step="cleaning failed instance")
             code, output = adapter.cleanup_failed(instance)
@@ -552,7 +552,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     output=output,
                 )
             return True
-        if action in {"delete", "restore"}:
+        if action in {"delete", "restore", "purge_deleted"}:
             control.update(request_id, "running", current_step=f"{action} instance")
             if action == "delete" and instance.get("status") == "deleted":
                 raise ValueError("instance is already deleted")
@@ -561,6 +561,11 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                 or instance.get("restore_state") != "restorable"
             ):
                 raise ValueError("instance is not restorable")
+            if action == "purge_deleted" and (
+                instance.get("status") != "deleted"
+                or instance.get("restore_state") != "restorable"
+            ):
+                raise ValueError("instance is not eligible for permanent deletion")
             code, output = getattr(adapter, action)(instance)
             output = output[-MAX_OUTPUT_LENGTH:]
             if code == 0:

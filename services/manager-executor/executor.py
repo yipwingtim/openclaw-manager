@@ -142,7 +142,7 @@ def openclaw_creation_result(instance):
         raise ValueError("created instance port not found")
     port = int(match.group(1))
     public_host = os.environ.get("PUBLIC_HOST", "").strip()
-    version = os.environ.get("OPENCLAW_VERSION", "").strip()
+    version = instance.get("_creation_version") or os.environ.get("OPENCLAW_VERSION", "").strip()
     token = config.get("gateway", {}).get("auth", {}).get("token", "")
     htpasswd = os.environ.get("NGINX_HTPASSWD_FILE_IN_CONTAINER", "").strip()
     if not public_host or not version or not token or not htpasswd:
@@ -166,7 +166,7 @@ def hermes_creation_result(instance):
     access_url = f"https://{public_host}:{port}"
     return {
         "port": port,
-        "version": os.environ.get("HERMES_VERSION", "v2026.7.20"),
+        "version": instance.get("_creation_version") or os.environ.get("HERMES_VERSION", "v2026.7.20"),
         "access_url": access_url,
         "admin_url": access_url,
         "basic_auth_password_ref": f"hermes-env:{instance['data_path']}/.env",
@@ -179,12 +179,19 @@ def evoscientist_creation_result(instance):
     public_host = os.environ.get("PUBLIC_HOST", "").strip()
     if not public_host or not isinstance(port, int):
         raise ValueError("created EvoScientist metadata is incomplete")
-    image = os.environ.get(
+    configured_version = instance.get("_creation_version")
+    image = (
+        f"ghcr.io/evoscientist/evoscientist:{configured_version}"
+        if configured_version == "latest"
+        else f"ghcr.io/evoscientist/evoscientist@{configured_version}"
+        if configured_version
+        else os.environ.get(
         "EVOSCIENTIST_IMAGE",
         "ghcr.io/evoscientist/evoscientist@sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47",
-    ).strip()
+        ).strip()
+    )
     return {
-        "port": port, "version": image.removeprefix("ghcr.io/evoscientist/evoscientist@"),
+        "port": port, "version": configured_version or image.removeprefix("ghcr.io/evoscientist/evoscientist@"),
         "access_url": f"https://{public_host}:{port}",
         "admin_url": f"https://{public_host}:{port}",
         "basic_auth_password_ref": f"nginx-auth:/etc/nginx/auth/users/{instance['legacy_user_id']}/.htpasswd",
@@ -288,12 +295,18 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
         if action == "create":
             control.update(request_id, "running", current_step="creating instance")
             password = consume_provisioning_secret(job["params"]["secret_path"])
+            instance["_creation_version"] = job["params"].get("version")
+            create_kwargs = {
+                "skip_nginx_reload": True,
+                "skip_metadata_write": True,
+            }
+            if job["params"].get("version"):
+                create_kwargs["version"] = job["params"]["version"]
             code, failure_output = adapter.create(
                 instance,
                 "true" if instance.get("basic_auth_enabled") else "false",
                 password,
-                skip_nginx_reload=True,
-                skip_metadata_write=True,
+                **create_kwargs,
             )
             created = code == 0
             if created:

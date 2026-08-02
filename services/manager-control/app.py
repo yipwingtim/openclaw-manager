@@ -524,7 +524,7 @@ def create_admin_instance():
     allowed = {
         "request_id", "actor_user_public_id", "owner_user_public_id",
         "legacy_user_id", "instance_name", "product",
-        "basic_auth_enabled", "basic_auth_password",
+        "basic_auth_enabled", "basic_auth_password", "version", "confirm_latest",
     }
     if set(payload) - allowed:
         return jsonify({"error": "unsupported instance fields"}), 400
@@ -536,6 +536,8 @@ def create_admin_instance():
     product = payload.get("product")
     basic_auth_enabled = payload.get("basic_auth_enabled")
     password = payload.get("basic_auth_password")
+    version = payload.get("version")
+    confirm_latest = payload.get("confirm_latest", False)
     if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
         return jsonify({"error": "invalid request_id"}), 400
     if not isinstance(legacy_user_id, str) or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
@@ -550,6 +552,12 @@ def create_admin_instance():
         return jsonify({"error": f"{product} requires Basic Auth"}), 400
     if not isinstance(password, str) or not password:
         return jsonify({"error": "basic_auth_password is required"}), 400
+    if version is not None and (not isinstance(version, str) or not VERSION_RE.fullmatch(version)):
+        return jsonify({"error": "version must be valid"}), 400
+    if not isinstance(confirm_latest, bool):
+        return jsonify({"error": "confirm_latest must be a boolean"}), 400
+    if product == "evoscientist" and version == "latest" and not confirm_latest:
+        return jsonify({"error": "latest requires explicit confirmation"}), 400
 
     existing_job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
     if existing_job is not None:
@@ -600,7 +608,7 @@ def create_admin_instance():
                 actor_user_id=actor["id"],
                 instance_public_id=instance["public_id"],
                 action="instance.create",
-                params={"secret_path": str(secret_path)},
+                params={"secret_path": str(secret_path), **({"version": version} if version else {})},
                 conn=conn,
             )
     except ValueError as exc:

@@ -78,6 +78,15 @@
         <input class="form-control" id="instance_name" name="instance_name" required maxlength="128">
       </div>
       <div class="mb-3">
+        <label class="form-label" for="version">实例版本</label>
+        <input class="form-control" id="version" name="version" required>
+        <div class="muted-small mt-1" data-version-hint></div>
+      </div>
+      <div class="form-check mb-3" id="latest-confirm-row" hidden>
+        <input class="form-check-input" id="confirm_latest" name="confirm_latest" type="checkbox" value="true">
+        <label class="form-check-label" for="confirm_latest">确认使用 latest（版本可能随镜像更新而变化）</label>
+      </div>
+      <div class="mb-3">
         <label class="form-label" for="basic_auth_password">访问认证密码</label>
         <input class="form-control" id="basic_auth_password" name="basic_auth_password" type="password" required autocomplete="new-password">
       </div>
@@ -99,6 +108,27 @@
 {% endblock %}
 {% block scripts %}
   <script>
+    (function bindVersionDefaults() {
+      var defaults = {{ default_versions|tojson }};
+      var product = document.getElementById('product');
+      var version = document.getElementById('version');
+      var hint = document.querySelector('[data-version-hint]');
+      var confirmRow = document.getElementById('latest-confirm-row');
+      if (!product || !version) return;
+      function update() {
+        var value = defaults[product.value] || '';
+        version.value = value;
+        hint.textContent = value ? '默认版本：' + value : '请配置该产品的默认版本。';
+        updateConfirmation();
+      }
+      function updateConfirmation() {
+        confirmRow.hidden = product.value !== 'evoscientist' || version.value.trim() !== 'latest';
+      }
+      product.addEventListener('change', update);
+      version.addEventListener('input', updateConfirmation);
+      update();
+    })();
+
     (function bindStatusRefresh() {
       var timer;
       var refreshing = false;

@@ -393,6 +393,40 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(instance["runtime_identifier"], "hermes_alice-hermes")
         self.assertTrue(instance["data_path"].endswith("/hermes/alice-hermes"))
 
+    def test_admin_create_accepts_version_and_requires_latest_confirmation(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        base = {
+            "actor_user_public_id": self.user["public_id"],
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-evo-version",
+            "instance_name": "Alice Evo Version",
+            "product": "evoscientist",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "secret",
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(
+            self.control.request, "get_json", return_value={**base, "request_id": "evo-latest", "version": "latest"}
+        ):
+            response, status = response_parts(self.control.create_admin_instance())
+        self.assertEqual(status, 400)
+        self.assertEqual(response.get_json(), {"error": "latest requires explicit confirmation"})
+
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(
+            self.control.request,
+            "get_json",
+            return_value={**base, "request_id": "evo-digest", "version": "latest", "confirm_latest": True},
+        ):
+            response, status = response_parts(self.control.create_admin_instance())
+        self.assertEqual(status, 202)
+        self.assertEqual(response.get_json()["job"]["params"]["version"], "latest")
+
     def test_admin_batch_creates_provisioning_instances_without_persisting_passwords(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

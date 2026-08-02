@@ -122,6 +122,30 @@ class ManagerExecutorTests(unittest.TestCase):
         self.assertEqual(control.update.call_args.kwargs["output"], "instance created")
         self.assertEqual(control.update.call_args.kwargs["result"]["openclaw_token"], "runtime-token")
 
+    def test_run_once_passes_requested_creation_version(self):
+        control = Mock()
+        instance = {
+            "public_id": "instance-1", "product": "openclaw",
+            "legacy_user_id": "alice", "runtime_identifier": "openclaw_alice",
+            "basic_auth_enabled": True, "status": "provisioning",
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+        adapter.create.return_value = (1, "not used")
+        with tempfile.TemporaryDirectory() as directory:
+            secret_dir = Path(directory)
+            secret_path = secret_dir / "secret"
+            secret_path.write_text("secret-password", encoding="utf-8")
+            control.claim.return_value = {
+                "job": {"request_id": "create-version", "action": "instance.create",
+                        "params": {"secret_path": str(secret_path), "version": "2026.7.28"}},
+                "instance": instance,
+            }
+            with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir):
+                self.executor.run_once(control, lambda product: adapter)
+
+        self.assertEqual(adapter.create.call_args.kwargs["version"], "2026.7.28")
+
     def test_run_once_creates_hermes_and_configures_ingress(self):
         control = Mock()
         instance = {

@@ -222,7 +222,10 @@ def cancel_wechat_bind(instance_public_id, job_id):
 @app.post("/instances/<instance_public_id>/files")
 def upload_file(instance_public_id):
     current = web_common.actor()
-    executor_client.upload(current["public_id"], instance_public_id, request.files.get("file"))
+    try:
+        executor_client.upload(current["public_id"], instance_public_id, request.files.get("file"))
+    except executor_client.ExecutorError as exc:
+        return render_template("error.html", message=str(exc)), exc.status_code or 502
     return redirect(url_for("instance_detail", instance_public_id=instance_public_id, result="File uploaded"))
 
 

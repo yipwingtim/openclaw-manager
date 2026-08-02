@@ -129,13 +129,32 @@ def sanitize_creation_error(output, password=""):
     return "\n".join(lines)[-CREATE_ERROR_OUTPUT_LENGTH:]
 
 
+def _read_openclaw_config(user_id):
+    if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
+        raise RuntimeError("secure config read is not supported")
+    fds = [os.open(PUBLIC_DIR / "users", os.O_RDONLY | os.O_DIRECTORY)]
+    try:
+        for part in (user_id, "config"):
+            fds.append(os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=fds[-1],
+            ))
+        fds.append(os.open(
+            "openclaw.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fds[-1]
+        ))
+        with os.fdopen(fds[-1], "r", encoding="utf-8") as config_file:
+            fds[-1] = None
+            return json.load(config_file)
+    finally:
+        for fd in reversed(fds):
+            if fd is not None:
+                os.close(fd)
+
+
 def openclaw_creation_result(instance):
     user_id = instance["legacy_user_id"]
-    config = json.loads(
-        (PUBLIC_DIR / "users" / user_id / "config" / "openclaw.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    config = _read_openclaw_config(user_id)
     nginx_conf = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf")) / f"{user_id}.conf"
     match = re.search(r"^\s*listen\s+([0-9]+)\b", nginx_conf.read_text(encoding="utf-8"), re.MULTILINE)
     if match is None:

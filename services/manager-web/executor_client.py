@@ -17,7 +17,9 @@ TIMEOUT = int(os.environ.get("MANAGER_EXECUTOR_HTTP_TIMEOUT", "120"))
 
 
 class ExecutorError(Exception):
-    pass
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def request(method, path, actor_public_id, **kwargs):
@@ -36,7 +38,10 @@ def request(method, path, actor_public_id, **kwargs):
             message = response.json().get("error", response.text)
         except ValueError:
             message = response.text
-        raise ExecutorError(message or f"executor returned {response.status_code}")
+        raise ExecutorError(
+            message or f"executor returned {response.status_code}",
+            status_code=response.status_code,
+        )
     return response
 
 

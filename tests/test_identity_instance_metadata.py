@@ -553,6 +553,28 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
 
         self.assertEqual(restore_state, "restorable")
 
+    def test_purge_deleted_instance_releases_port_and_removes_metadata(self):
+        user = self.store.create_user("alice", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            port=39119, db_file=self.db_file,
+        )
+        self.store.set_instance_retention_state(
+            instance["public_id"], "delete", db_file=self.db_file
+        )
+
+        self.store.purge_deleted_instance(instance["public_id"], db_file=self.db_file)
+
+        self.assertIsNone(
+            self.store.get_instance_by_public_id(instance["public_id"], db_file=self.db_file)
+        )
+        with self.store.connect(self.db_file) as conn:
+            port = conn.execute(
+                "SELECT instance_id, status FROM ports WHERE port = 39119"
+            ).fetchone()
+        self.assertEqual(tuple(port), (None, "released"))
+
     def test_legacy_identity_cannot_be_reassigned_by_username(self):
         alice = self.store.create_user("alice", db_file=self.db_file)
         self.store.create_user("bob", db_file=self.db_file)

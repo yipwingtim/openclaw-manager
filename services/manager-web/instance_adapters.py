@@ -352,6 +352,27 @@ class OpenClawDockerAdapter:
             timeout=240,
         )
 
+    def purge_deleted(self, instance):
+        user_id = self.get_legacy_user_id(instance)
+        recycle_dirs = sorted(
+            (
+                path for path in self.public_dir.joinpath("deleted").glob(f"{user_id}_*")
+                if path.is_dir() and path.name.startswith(f"{user_id}_")
+            ),
+            key=lambda path: path.stat().st_mtime,
+        )
+        if not recycle_dirs:
+            return 1, f"OpenClaw recycle data not found: {user_id}"
+        try:
+            shutil.rmtree(recycle_dirs[-1])
+            auth_dir = Path(
+                os.environ.get("NGINX_AUTH_DIR", "/data/docker/nginx/auth")
+            ) / "users" / user_id
+            shutil.rmtree(auth_dir, ignore_errors=True)
+            return 0, "OpenClaw recycle data permanently deleted."
+        except OSError as exc:
+            return 1, f"OpenClaw permanent deletion failed: {exc}"
+
     def update_version(self, instance, version, restore_model_provider=False, timeout=600):
         user_id = self.get_legacy_user_id(instance)
         user_dir = self.user_dir(user_id)
@@ -1181,6 +1202,20 @@ while True:
             return code, output
         return 0, " ".join(part for part in outputs if part)
 
+    def purge_deleted(self, instance):
+        recycle = self.recycle_dir(instance)
+        if not recycle.is_dir():
+            return 1, f"EvoScientist recycle data not found: {recycle}"
+        try:
+            shutil.rmtree(recycle)
+            auth_dir = Path(
+                os.environ.get("NGINX_AUTH_DIR", "/data/docker/nginx/auth")
+            ) / "users" / self.get_legacy_user_id(instance)
+            shutil.rmtree(auth_dir, ignore_errors=True)
+            return 0, "EvoScientist recycle data permanently deleted."
+        except OSError as exc:
+            return 1, f"EvoScientist permanent deletion failed: {exc}"
+
     def restore(self, instance):
         try:
             user_dir, workspace, data_dir, proxy_script = self._data_paths(instance)
@@ -1900,6 +1935,16 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                     f"is required: {exc}; {'; '.join(error for error in rollback_errors if error)}"
                 )
             return 1, f"Hermes restore failed and was rolled back: {exc}"
+
+    def purge_deleted(self, instance):
+        recycle = self.hermes_recycle_dir(instance)
+        if not recycle.is_dir():
+            return 1, f"Hermes recycle data not found: {recycle}"
+        try:
+            shutil.rmtree(recycle)
+            return 0, "Hermes recycle data permanently deleted."
+        except OSError as exc:
+            return 1, f"Hermes permanent deletion failed: {exc}"
 
     def update_version(self, instance, version, restore_model_provider=False, timeout=600):
         del restore_model_provider

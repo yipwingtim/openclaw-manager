@@ -1235,6 +1235,50 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(invalid_status, 400)
         self.assertEqual(invalid.get_json(), {"error": "enabled must be a boolean"})
 
+    def test_runtime_lifecycle_jobs_update_instance_status(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="hermes",
+            instance_name="Hermes Canary",
+            runtime_identifier="hermes_alice",
+            db_file=self.db_file,
+        )
+        for request_id, action, expected in (
+            ("stop-runtime", "instance.stop", "stopped"),
+            ("start-runtime", "instance.start", "active"),
+        ):
+            self.control.metadata_store.create_execution_job(
+                request_id=request_id,
+                actor_user_id=self.user["id"],
+                instance_public_id=instance["public_id"],
+                action=action,
+                params={},
+                db_file=self.db_file,
+            )
+            self.control.metadata_store.update_execution_job(
+                request_id, "running", db_file=self.db_file
+            )
+            with patch.object(
+                self.control.request,
+                "headers",
+                {"Authorization": "Bearer executor-token"},
+            ), patch.object(
+                self.control.request,
+                "get_json",
+                return_value={"status": "succeeded", "output": expected},
+            ):
+                response, status = response_parts(
+                    self.control.update_execution_job(request_id)
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(
+                self.control.metadata_store.get_instance_by_public_id(
+                    instance["public_id"], db_file=self.db_file
+                )["status"],
+                expected,
+            )
+
     def test_version_job_validates_params_and_updates_metadata_on_success(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

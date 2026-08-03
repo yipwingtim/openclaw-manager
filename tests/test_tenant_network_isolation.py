@@ -56,8 +56,8 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         self.assertIn("100.100.100.200/latest/meta-data/", script)
         self.assertIn("169.254.169.254/latest/meta-data/", script)
         self.assertIn("metadata_endpoint_reachable", script)
-        self.assertIn('EVOSCIENTIST_CONTAINER_PREFIX="${EVOSCIENTIST_CONTAINER_PREFIX:-evoscientist_}"', script)
-        self.assertIn('"$EVOSCIENTIST_CONTAINER_PREFIX"*-proxy|"$EVOSCIENTIST_CONTAINER_PREFIX"*-ingress)', script)
+        self.assertIn('docker network ls -q --filter "label=com.openclaw.tenant-network"', script)
+        self.assertIn("--format '{{range .Containers}}{{println .Name}}{{end}}'", script)
 
     def test_runtime_check_ignores_nginx_backup_tokens_and_summarizes_active_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:

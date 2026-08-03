@@ -33,6 +33,7 @@ error() {
     *"attached to shared agent-net"*) type="tenant_attached_to_shared_network" ;;
     *"missing tenant network"*) type="tenant_network_missing" ;;
     *"can reach cloud metadata endpoint"*) type="metadata_endpoint_reachable" ;;
+    *"can reach cloud metadata endpoint"*) type="metadata_endpoint_reachable" ;;
     "docker command not found") type="docker_missing" ;;
     "config missing"*) type="config_missing" ;;
     "Nginx conf dir missing"*) type="nginx_conf_dir_missing" ;;
@@ -56,6 +57,21 @@ container_has_network() {
   local container="$1"
   local network="$2"
   container_networks "$container" | grep -Fxq "$network"
+}
+
+metadata_endpoint_reachable() {
+  local container="$1"
+  local endpoint="$2"
+  docker exec "$container" sh -lc '
+    endpoint="$1"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsS --max-time 2 -o /dev/null "$endpoint"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -T 2 -O /dev/null "$endpoint"
+    else
+      exit 2
+    fi
+  ' sh "$endpoint" >/dev/null 2>&1
 }
 
 metadata_endpoint_reachable() {
@@ -122,9 +138,8 @@ MANAGER_USER_WEB_CONTAINER_NAME="${MANAGER_USER_WEB_CONTAINER_NAME:-openclaw-man
 MANAGER_ADMIN_WEB_CONTAINER_NAME="${MANAGER_ADMIN_WEB_CONTAINER_NAME:-openclaw-manager-admin-web}"
 MODEL_PROXY_CONTAINER_NAME="${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
-USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
-EVOSCIENTIST_CONTAINER_PREFIX="${EVOSCIENTIST_CONTAINER_PREFIX:-evoscientist_}"
 OPENCLAW_TENANT_NETWORK_PREFIX="${OPENCLAW_TENANT_NETWORK_PREFIX:-openclaw-user}"
+USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
 
 if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
   ok "OPENCLAW_INTERNAL_TOKEN is configured"
@@ -267,15 +282,13 @@ EOF
     warn "no user containers found with prefix: $USER_CONTAINER_PREFIX"
   fi
 
-  # Check all supported user runtimes, including EvoScientist, for cloud metadata access.
+  # Discover containers from OpenClaw-owned tenant networks, independent of adapter naming.
   metadata_containers="$({
-    docker ps -a --format '{{.Names}}' 2>/dev/null | while IFS= read -r container; do
-      case "$container" in
-        "$USER_CONTAINER_PREFIX"*) printf '%s\n' "$container" ;;
-        "$EVOSCIENTIST_CONTAINER_PREFIX"*-proxy|"$EVOSCIENTIST_CONTAINER_PREFIX"*-ingress) ;;
-        "$EVOSCIENTIST_CONTAINER_PREFIX"*) printf '%s\n' "$container" ;;
-      esac
-    done
+    docker network ls -q --filter "label=com.openclaw.tenant-network" 2>/dev/null \
+      | while IFS= read -r network; do
+          docker network inspect "$network" \
+            --format '{{range .Containers}}{{println .Name}}{{end}}' 2>/dev/null || true
+        done
   } | sort -u)"
   if [ -n "$metadata_containers" ]; then
     while IFS= read -r container; do

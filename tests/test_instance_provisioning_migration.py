@@ -29,6 +29,7 @@ class InstanceProvisioningMigrationTests(unittest.TestCase):
         )
         with sqlite3.connect(db_file) as conn:
             conn.executescript(schema)
+            conn.execute("DELETE FROM schema_migrations WHERE version > 4")
             conn.execute(
                 """
                 INSERT INTO users (

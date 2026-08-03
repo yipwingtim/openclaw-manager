@@ -27,6 +27,10 @@ def external_auth_config(environ=None):
         "userinfo_endpoint": values.get("MANAGER_OAUTH_USERINFO_URL", "").strip(),
         "subject_claim": values.get("MANAGER_OAUTH_SUBJECT_CLAIM", "sub").strip(),
         "redirect_uri": values.get("MANAGER_OAUTH_REDIRECT_URI", "").strip(),
+        "logout_url": values.get("MANAGER_OAUTH_LOGOUT_URL", "").strip(),
+        "post_logout_redirect_uri": values.get(
+            "MANAGER_OAUTH_POST_LOGOUT_REDIRECT_URI", ""
+        ).strip(),
     }
     if not provider or provider in {"local", "nginx-basic"}:
         raise AuthConfigurationError("external authentication requires a named MANAGER_AUTH_PROVIDER")
@@ -50,6 +54,7 @@ def register_external_client(app, config):
     kwargs = {
         "client_id": config["client_id"],
         "client_secret": config["client_secret"],
+        "token_endpoint_auth_method": "client_secret_basic",
         "client_kwargs": {"scope": config["scope"], "code_challenge_method": "S256"},
     }
     if config["auth_type"] == "oidc":
@@ -73,9 +78,24 @@ def external_identity(client, token, config):
     subject = claims.get(config["subject_claim"])
     if not isinstance(subject, str) or not subject.strip():
         raise ValueError("external identity has no stable subject")
+    profile = claims
+    if config["subject_claim"] == "user_id":
+        profile = {
+            key: claims[key]
+            for key in (
+                "user_id", "user_name", "user_type", "email", "department"
+            )
+            if key in claims
+        }
     return {
         "provider": config["provider"],
         "subject": subject.strip(),
-        "external_username": str(claims.get("preferred_username") or claims.get("username") or "").strip(),
-        "profile": claims,
+        "external_username": str(
+            claims.get("preferred_username")
+            or claims.get("username")
+            or claims.get("user_name")
+            or claims.get("userName")
+            or ""
+        ).strip(),
+        "profile": profile,
     }

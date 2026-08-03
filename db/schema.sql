@@ -67,6 +67,16 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS external_session_tokens (
+    external_token_hash TEXT NOT NULL,
+    session_token_hash TEXT NOT NULL UNIQUE,
+    PRIMARY KEY (external_token_hash, session_token_hash),
+    FOREIGN KEY (session_token_hash) REFERENCES user_sessions(token_hash) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_session_tokens_external_token
+    ON external_session_tokens(external_token_hash);
+
 CREATE TABLE IF NOT EXISTS auth_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -268,5 +278,8 @@ VALUES (4, 'control_plane_model');
 
 INSERT OR IGNORE INTO schema_migrations (version, name)
 VALUES (5, 'instance_provisioning');
+
+INSERT OR IGNORE INTO schema_migrations (version, name)
+VALUES (6, 'external_session_tokens');
 
 COMMIT;

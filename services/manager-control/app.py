@@ -323,7 +323,7 @@ def health():
                 "service_tokens_configured": tokens_valid,
             }
         ), 503
-    ready = version == 5 and tokens_valid
+    ready = version == 6 and tokens_valid
     return jsonify(
         {
             "ok": ready,
@@ -362,6 +362,21 @@ def delete_auth_session():
     return "", 204
 
 
+@app.delete("/internal/v1/auth/external-session")
+@require_services("manager-user-web")
+def delete_external_auth_session():
+    payload = request.get_json(silent=True) or {}
+    external_token_hash = payload.get("external_token_hash")
+    if not isinstance(external_token_hash, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", external_token_hash
+    ):
+        return jsonify({"error": "external_token_hash is required"}), 400
+    metadata_store.delete_session_by_external_token(
+        external_token_hash, db_file=DB_FILE
+    )
+    return "", 204
+
+
 @app.get("/internal/v1/auth/identity")
 @require_services("manager-user-web", "manager-admin-web")
 def resolve_auth_identity():
@@ -386,6 +401,12 @@ def external_auth_login():
     required = {"provider", "subject", "token_hash", "csrf_token", "expires_at"}
     if any(not isinstance(payload.get(field), str) or not payload[field] for field in required):
         return jsonify({"error": "invalid external login payload"}), 400
+    external_token_hash = payload.get("external_token_hash")
+    if external_token_hash is not None and (
+        not isinstance(external_token_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", external_token_hash)
+    ):
+        return jsonify({"error": "invalid external login payload"}), 400
     metadata_store.activate_auth_provider(payload["provider"], db_file=DB_FILE)
     user = metadata_store.get_user_by_identity(
         payload["provider"], payload["subject"], db_file=DB_FILE
@@ -401,6 +422,7 @@ def external_auth_login():
         payload["token_hash"], user["id"], payload["provider"],
         payload["csrf_token"], payload["expires_at"],
         session_kind="admin" if g.source_service == "manager-admin-web" else "user",
+        external_token_hash=external_token_hash,
         db_file=DB_FILE,
     )
     session = metadata_store.get_session(payload["token_hash"], db_file=DB_FILE)

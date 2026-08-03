@@ -49,6 +49,12 @@ with sqlite3.connect(db_file) as conn:
                 "python3 scripts/migrate_instance_provisioning_model.py "
                 "--db <path> --apply"
             )
+        if version < 6:
+            raise SystemExit(
+                "[ERROR] Metadata schema requires: "
+                "python3 scripts/migrate_external_session_tokens.py "
+                "--db <path> --apply"
+            )
     conn.executescript(schema)
     conn.commit()
 

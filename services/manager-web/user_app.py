@@ -32,6 +32,11 @@ def auth_callback():
     return web_common.external_callback(app)
 
 
+@app.get("/auth/uis/logout")
+def uis_logout_callback():
+    return web_common.external_logout_callback()
+
+
 @app.post("/logout")
 def logout():
     return web_common.logout()

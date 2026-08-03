@@ -92,7 +92,105 @@ python3 scripts/metadata_cli.py bind-identity \
 MANAGER_OAUTH_AUTHORIZE_URL=https://sso.example.test/authorize
 MANAGER_OAUTH_TOKEN_URL=https://sso.example.test/token
 MANAGER_OAUTH_USERINFO_URL=https://sso.example.test/userinfo
+MANAGER_OAUTH_LOGOUT_URL=https://sso.example.test/logout
+MANAGER_OAUTH_POST_LOGOUT_REDIRECT_URI=https://manager.example.test/login
 ```
+
+### Campus UIS OAuth2 / 校内 UIS OAuth2
+
+For an OAuth2 authorization-code provider whose UserInfo response uses
+`user_id` as the stable campus identity, configure the production environment
+with the assigned client credentials and registered callback URLs:
+
+对于 UserInfo 使用 `user_id` 作为稳定校内身份的 OAuth2 授权码 Provider，在生产环境
+配置分配的客户端凭据和已登记的回调地址：
+
+```dotenv
+MANAGER_AUTH_PROVIDER=campus-uis
+MANAGER_AUTH_TYPE=oauth2
+MANAGER_SESSION_SECRET=<random-high-entropy-secret>
+MANAGER_OAUTH_CLIENT_ID=<assigned-client-id>
+MANAGER_OAUTH_CLIENT_SECRET=<assigned-client-secret>
+MANAGER_OAUTH_REDIRECT_URI=https://<manager-host>:<port>/auth/callback
+MANAGER_OAUTH_AUTHORIZE_URL=https://<uis-host>/idp/authCenter/authenticate
+MANAGER_OAUTH_TOKEN_URL=https://<uis-host>/idp/api/v3/oauth2/token
+MANAGER_OAUTH_USERINFO_URL=https://<uis-host>/idp/api/v3/oauth2/userInfo
+MANAGER_OAUTH_SCOPES=
+MANAGER_OAUTH_SUBJECT_CLAIM=user_id
+MANAGER_OAUTH_LOGOUT_URL=https://<uis-host>/idp/authCenter/GLO
+MANAGER_OAUTH_POST_LOGOUT_REDIRECT_URI=https://<manager-host>:<port>/login
+```
+
+Register these application callbacks with UIS:
+
+向 UIS 登记以下应用回调：
+
+```text
+Login callback / 登录回调: https://<manager-host>:<port>/auth/callback
+Server logout callback / 服务端登出回调: https://<manager-host>:<port>/auth/uis/logout
+```
+
+The token endpoint uses `client_secret_basic`. The application stores only a
+SHA-256 hash of the UIS access token and links that hash to Manager sessions.
+The server logout callback hashes the received `token` and revokes every linked
+Manager session. The Nginx exact-match location disables access logging, moves
+the query token into an internal header, and removes the query string before
+proxying. It also discards error logs for this exact location so the access
+token does not enter Nginx or application request logs. UIS profiles persist
+only `user_id`, `user_name`, `user_type`, `email`, and `department`; mobile and
+UIS session identifiers are discarded.
+
+Token 端点使用 `client_secret_basic`。应用仅保存 UIS access token 的 SHA-256
+哈希，并将其关联到 Manager Session。服务端登出回调对收到的 `token` 计算哈希，撤销
+所有关联的 Manager Session。Nginx 精确匹配该路径并关闭访问日志，将查询参数 token
+转为内部请求头，同时在反向代理前移除查询串，避免 access token 进入应用请求日志。
+该精确路径的错误日志也会被丢弃，避免 token 进入 Nginx 日志。UIS Profile 仅保留
+`user_id`、`user_name`、`user_type`、`email` 和 `department`，不保存手机号和 UIS
+会话标识。
+
+Before enabling the provider, pre-bind each returned `user_id` to an existing
+platform user. First login never creates a platform user automatically:
+
+启用 Provider 前，将每个 UIS 返回的 `user_id` 预绑定到已有平台用户。首次登录不会自动
+创建平台用户：
+
+```bash
+python3 scripts/metadata_cli.py bind-identity \
+  --username alice \
+  --provider campus-uis \
+  --subject '<user_id>'
+```
+
+The migration is a database write. Schedule a short Manager maintenance window:
+stop the split Manager Web, Control, and Executor services first so the backup
+and migration see one consistent database state. Tenant runtime containers do
+not need to stop. Then migrate the metadata database to schema v6:
+
+```bash
+python3 scripts/migrate_external_session_tokens.py \
+  --db /data/docker/openclaw-public/manager.db --apply
+```
+
+The migration creates a `manager.db.pre-v6-<timestamp>.bak` backup before it
+creates the external-token/session association table. Then rerun
+`scripts/update_manager_auth.sh` to render the protected logout location,
+validate Nginx, and rebuild the split Manager Web services according to the
+normal deployment procedure.
+
+If migration or verification fails, keep Manager services stopped, restore the
+generated `manager.db.pre-v6-<timestamp>.bak` over `manager.db`, and redeploy the
+previous code revision before restarting Manager services.
+
+该迁移会写数据库。请安排短暂的 Manager 维护窗口，先停止拆分后的 Manager Web、
+Control 和 Executor 服务，确保备份与迁移期间数据库不再写入；租户实例容器无需停止。
+随后使用上述命令将元数据数据库迁移到 v6。迁移会先创建
+`manager.db.pre-v6-<timestamp>.bak` 备份，再创建外部 token 与 Session 关联表。随后
+重新运行 `scripts/update_manager_auth.sh` 生成受保护的登出路由并校验 Nginx，再按常规
+部署流程重建拆分后的 Manager Web 服务。
+
+如果迁移或验证失败，保持 Manager 服务停止，用生成的
+`manager.db.pre-v6-<timestamp>.bak` 覆盖恢复 `manager.db`，部署上一版代码后再启动
+Manager 服务。
 
 ### Emergency entry / 应急入口
 

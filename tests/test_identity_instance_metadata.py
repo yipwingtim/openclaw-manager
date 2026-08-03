@@ -295,6 +295,38 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
         session = self.store.get_session("admin-token", db_file=self.db_file)
         self.assertEqual(session["session_kind"], "admin")
 
+    def test_external_token_hash_deletes_linked_session(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        self.store.create_session(
+            "session-token",
+            user["id"],
+            "campus-uis",
+            "csrf-token",
+            "2999-01-01T00:00:00+00:00",
+            external_token_hash="external-token",
+            db_file=self.db_file,
+        )
+        self.store.create_session(
+            "second-session-token",
+            user["id"],
+            "campus-uis",
+            "csrf-token",
+            "2999-01-01T00:00:00+00:00",
+            external_token_hash="external-token",
+            db_file=self.db_file,
+        )
+
+        self.store.delete_session_by_external_token(
+            "external-token", db_file=self.db_file
+        )
+
+        self.assertIsNone(
+            self.store.get_session("session-token", db_file=self.db_file)
+        )
+        self.assertIsNone(
+            self.store.get_session("second-session-token", db_file=self.db_file)
+        )
+
     def test_execution_request_id_is_idempotent(self):
         user = self.store.create_user("Alice", db_file=self.db_file)
         instance = self.store.create_instance(

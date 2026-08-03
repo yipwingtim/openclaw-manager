@@ -134,6 +134,14 @@ def delete_session(token_hash):
     )
 
 
+def delete_external_session(external_token_hash):
+    request_json(
+        "DELETE",
+        "/internal/v1/auth/external-session",
+        payload={"external_token_hash": external_token_hash},
+    )
+
+
 def list_admin_instances():
     return request_json("GET", "/internal/v1/admin/instances")["instances"]
 

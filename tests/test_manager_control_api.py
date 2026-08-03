@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import hashlib
 import os
 import sys
 import tempfile
@@ -120,7 +121,7 @@ class ManagerControlApiTests(unittest.TestCase):
             response.get_json(),
             {
                 "ok": True,
-                "schema_version": 5,
+                "schema_version": 6,
                 "service_tokens_configured": True,
             },
         )
@@ -197,6 +198,46 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertIsNotNone(
             self.control.metadata_store.get_session(
                 "new-session-hash", db_file=self.db_file
+            )
+        )
+
+    def test_external_logout_deletes_session_by_hashed_provider_token(self):
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "12345", db_file=self.db_file
+        )
+        payload = {
+            "provider": "campus-uis",
+            "subject": "12345",
+            "token_hash": "manager-session-hash",
+            "external_token_hash": hashlib.sha256(b"uis-token").hexdigest(),
+            "csrf_token": "csrf-token",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        }
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer user-token"},
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            login, login_status = response_parts(self.control.external_auth_login())
+
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer user-token"},
+        ), patch.object(
+            self.control.request,
+            "get_json",
+            return_value={
+                "external_token_hash": hashlib.sha256(b"uis-token").hexdigest()
+            },
+        ):
+            _, logout_status = response_parts(self.control.delete_external_auth_session())
+
+        self.assertEqual(login_status, 200)
+        self.assertEqual(logout_status, 204)
+        self.assertIsNone(
+            self.control.metadata_store.get_session(
+                "manager-session-hash", db_file=self.db_file
             )
         )
 

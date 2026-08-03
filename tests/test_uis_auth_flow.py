@@ -137,6 +137,30 @@ class UISAuthFlowTests(unittest.TestCase):
         self.assertIs(response, rendered)
         self.assertEqual(render.call_args.kwargs["external_login_url"], "/auth/uis/login")
 
+    def test_nginx_basic_ignores_mixed_local_flag(self):
+        with patch.object(self.web_common, "AUTH_PROVIDER", "nginx-basic"), patch.object(
+            self.web_common, "LOCAL_AUTH_ENABLED", True
+        ):
+            self.assertFalse(self.web_common.local_auth_enabled())
+
+    def test_mixed_auth_resolves_local_session_after_external_miss(self):
+        self.request.cookies = {"openclaw_manager_session": "manager-token"}
+        external_miss = self.web_common.control_client.ControlError(404, "missing")
+        with patch.object(self.web_common, "AUTH_PROVIDER", "campus-uis"), patch.object(
+            self.web_common, "LOCAL_AUTH_ENABLED", True
+        ), patch.object(
+            self.web_common.control_client,
+            "resolve_session",
+            side_effect=[external_miss, {"provider": "local", "username": "guest"}],
+        ) as resolve_session:
+            current = self.web_common.actor()
+
+        self.assertEqual(current["provider"], "local")
+        self.assertEqual(
+            [call.args[1] for call in resolve_session.call_args_list],
+            ["campus-uis", "local"],
+        )
+
     def test_local_session_logout_does_not_redirect_to_uis(self):
         with patch.object(
             self.request, "cookies", {"openclaw_manager_session": "manager-token"}

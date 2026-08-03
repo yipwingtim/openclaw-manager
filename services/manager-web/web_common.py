@@ -70,7 +70,9 @@ def external_auth_enabled():
 
 
 def local_auth_enabled():
-    return AUTH_PROVIDER == "local" or LOCAL_AUTH_ENABLED
+    return AUTH_PROVIDER == "local" or (
+        external_auth_enabled() and LOCAL_AUTH_ENABLED
+    )
 
 
 def external_client(app):

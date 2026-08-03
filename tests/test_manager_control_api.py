@@ -275,6 +275,22 @@ class ManagerControlApiTests(unittest.TestCase):
             )
         )
 
+    def test_uis_profile_name_is_used_for_authenticated_display_name(self):
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "uis-123", db_file=self.db_file
+        )
+        self.control.metadata_store.record_identity_login(
+            "campus-uis", "uis-123", {"user_name": "UIS Name"}, db_file=self.db_file
+        )
+        self.control.metadata_store.create_session(
+            "uis-display-session", self.user["id"], "campus-uis", "csrf",
+            "2999-01-01T00:00:00+00:00", db_file=self.db_file
+        )
+        user = self.control.metadata_store.get_session(
+            "uis-display-session", db_file=self.db_file
+        )
+        self.assertEqual(self.control.authenticated_user_payload(user)["display_name"], "UIS Name")
+
     def test_executor_resolves_runtime_instance_only_after_actor_authorization(self):
         instance = self.control.metadata_store.create_instance(
             owner_public_id=self.user["public_id"],

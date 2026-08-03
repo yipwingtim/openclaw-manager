@@ -287,10 +287,13 @@ def get_session(token_hash, db_file=None, conn=None):
         row = active_conn.execute(
             """
             SELECT s.token_hash, s.provider, s.session_kind, s.csrf_token, s.expires_at,
+                   i.profile_json AS identity_profile_json,
                    u.id, u.public_id, u.username, u.normalized_username,
                    u.display_name, u.email, u.role, u.status
             FROM user_sessions s
             JOIN users u ON u.id = s.user_id
+            LEFT JOIN user_identities i
+              ON i.user_id = s.user_id AND i.provider = s.provider
             WHERE s.token_hash = ? AND s.expires_at > ?
             """,
             (token_hash, now),

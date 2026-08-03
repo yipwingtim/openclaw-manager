@@ -222,8 +222,15 @@ def require_csrf():
 
 def context():
     current = actor()
+    display_name = ""
+    if current:
+        display_name = (
+            current.get("display_name") or current["username"]
+            if current.get("provider") == "campus-uis"
+            else current["username"]
+        )
     return {
-        "current_user": current["username"] if current else "",
+        "current_user": display_name,
         "is_admin": bool(current and current["role"] == "admin"),
         "show_admin_instance_nav": bool(current and current["role"] == "admin"),
         "show_global_admin_nav": False,

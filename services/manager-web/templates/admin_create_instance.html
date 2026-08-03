@@ -60,13 +60,16 @@
         </select>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="owner_user_public_id">实例 Owner</label>
-        <select class="form-select" id="owner_user_public_id" name="owner_user_public_id" required>
-          <option value="">请选择已有平台用户</option>
-          {% for user in users %}
-            <option value="{{ user.public_id }}">{{ user.display_name or user.username }} ({{ user.username }})</option>
-          {% endfor %}
+        <label class="form-label" for="owner_identity_type">Owner 身份类型</label>
+        <select class="form-select" id="owner_identity_type" name="owner_identity_type" required>
+          <option value="local">Local 用户名</option>
+          <option value="campus-uis">UIS user_id</option>
         </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="owner_identity">Owner 身份标识</label>
+        <input class="form-control" id="owner_identity" name="owner_identity" required maxlength="128" autocomplete="off">
+        <div class="muted-small mt-1">精确匹配已有的活动平台用户，不会自动创建用户。</div>
       </div>
       <div class="mb-3">
         <label class="form-label" for="legacy_user_id">实例 ID</label>
@@ -94,7 +97,7 @@
         <input class="form-check-input" id="basic_auth_enabled" name="basic_auth_enabled" type="checkbox" value="true" checked>
         <label class="form-check-label" for="basic_auth_enabled">启用访问认证（Hermes 和 EvoScientist 必须启用）</label>
       </div>
-      <button class="btn btn-oc" type="submit" {% if not users %}disabled{% endif %}>创建实例</button>
+      <button class="btn btn-oc" type="submit">创建实例</button>
     </form>
 
     <form class="surface p-3 p-lg-4 mt-3" method="post" action="/admin/create-instance/batch" enctype="multipart/form-data" onsubmit="this.querySelector('button[type=submit]').disabled=true;">

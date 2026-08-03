@@ -216,16 +216,9 @@ def create_instance_page():
     current = web_common.actor()
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
-    try:
-        users = [
-            user for user in control_client.list_admin_users()
-            if user["status"] == "active"
-        ]
-        error = request.args.get("error", "")
-    except control_client.ControlError as exc:
-        users, error = [], str(exc)
+    error = request.args.get("error", "")
     return render_template(
-        "admin_create_instance.html", users=users, job=None, instance=None,
+        "admin_create_instance.html", job=None, instance=None,
         batch=None, error=error,
         default_versions=load_default_versions(),
     )
@@ -236,7 +229,8 @@ def create_instance():
     current = web_common.actor()
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
-    owner_public_id = request.form.get("owner_user_public_id", "").strip()
+    owner_identity_type = request.form.get("owner_identity_type", "").strip()
+    owner_identity = request.form.get("owner_identity", "").strip()
     legacy_user_id = request.form.get("legacy_user_id", "").strip()
     instance_name = request.form.get("instance_name", "").strip()
     product = request.form.get("product", "openclaw").strip()
@@ -245,8 +239,10 @@ def create_instance():
     default_versions = load_default_versions()
     version = request.form.get("version", "").strip() or default_versions.get(product, "")
     confirm_latest = request.form.get("confirm_latest") == "true"
-    if not owner_public_id or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
-        return redirect(url_for("create_instance_page", error="请选择 Owner 并填写有效的实例 ID。"))
+    if owner_identity_type not in {"local", "campus-uis"} or not owner_identity:
+        return redirect(url_for("create_instance_page", error="请选择 Owner 身份类型并填写身份标识。"))
+    if not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
+        return redirect(url_for("create_instance_page", error="请填写有效的实例 ID。"))
     if product not in {"openclaw", "hermes", "evoscientist"}:
         return redirect(url_for("create_instance_page", error="不支持该实例产品。"))
     if not instance_name or len(instance_name) > 128 or not password:
@@ -260,7 +256,8 @@ def create_instance():
         payload = {
                 "request_id": request_id,
                 "actor_user_public_id": current["public_id"],
-                "owner_user_public_id": owner_public_id,
+                "owner_identity_type": owner_identity_type,
+                "owner_identity": owner_identity,
                 "legacy_user_id": legacy_user_id,
                 "instance_name": instance_name,
                 "product": product,

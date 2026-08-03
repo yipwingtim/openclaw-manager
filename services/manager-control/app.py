@@ -589,6 +589,7 @@ def create_admin_instance():
     payload = request.get_json(silent=True) or {}
     allowed = {
         "request_id", "actor_user_public_id", "owner_user_public_id",
+        "owner_identity_type", "owner_identity",
         "legacy_user_id", "instance_name", "product",
         "basic_auth_enabled", "basic_auth_password", "version", "confirm_latest",
     }
@@ -597,6 +598,8 @@ def create_admin_instance():
     request_id = payload.get("request_id")
     actor_public_id = payload.get("actor_user_public_id")
     owner_public_id = payload.get("owner_user_public_id")
+    owner_identity_type = payload.get("owner_identity_type")
+    owner_identity = payload.get("owner_identity")
     legacy_user_id = payload.get("legacy_user_id")
     instance_name = payload.get("instance_name")
     product = payload.get("product")
@@ -606,6 +609,16 @@ def create_admin_instance():
     confirm_latest = payload.get("confirm_latest", False)
     if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
         return jsonify({"error": "invalid request_id"}), 400
+    if owner_public_id is not None and (
+        owner_identity_type is not None or owner_identity is not None
+    ):
+        return jsonify({"error": "owner fields are mutually exclusive"}), 400
+    if owner_public_id is None:
+        if owner_identity_type not in {"local", "campus-uis"}:
+            return jsonify({"error": "invalid owner_identity_type"}), 400
+        if not isinstance(owner_identity, str) or not owner_identity.strip() or len(owner_identity) > 128:
+            return jsonify({"error": "invalid owner_identity"}), 400
+        owner_identity = owner_identity.strip()
     if not isinstance(legacy_user_id, str) or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
         return jsonify({"error": "invalid legacy_user_id"}), 400
     if not isinstance(instance_name, str) or not instance_name.strip() or len(instance_name) > 128:
@@ -648,11 +661,19 @@ def create_admin_instance():
     secret_path = PROVISIONING_SECRET_DIR / secrets.token_urlsafe(32)
     try:
         actor = metadata_store.get_user_by_public_id(actor_public_id, db_file=DB_FILE)
-        owner = metadata_store.get_user_by_public_id(owner_public_id, db_file=DB_FILE)
+        if owner_public_id is not None:
+            owner = metadata_store.get_user_by_public_id(owner_public_id, db_file=DB_FILE)
+        elif owner_identity_type == "local":
+            owner = metadata_store.get_user_by_username(owner_identity, db_file=DB_FILE)
+        else:
+            owner = metadata_store.get_user_by_identity(
+                "campus-uis", owner_identity, db_file=DB_FILE
+            )
         if actor is None or actor["status"] != "active" or actor["role"] != "admin":
             raise ValueError("active administrator not found")
         if owner is None or owner["status"] != "active":
             raise ValueError("active owner user not found")
+        owner_public_id = owner["public_id"]
         PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
         PROVISIONING_SECRET_DIR.chmod(0o700)
         descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

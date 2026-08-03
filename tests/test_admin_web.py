@@ -206,20 +206,17 @@ class AdminWebTests(unittest.TestCase):
             ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"
         ).read_text(encoding="utf-8"))
 
-    def test_admin_create_instance_lists_only_active_users(self):
+    def test_admin_create_instance_does_not_load_all_users(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
-        users = [
-            {"public_id": "user-1", "username": "alice", "status": "active"},
-            {"public_id": "user-2", "username": "bob", "status": "disabled"},
-        ]
         self.admin.request.args = {}
         with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
-            self.admin.control_client, "list_admin_users", return_value=users
-        ):
+            self.admin.control_client, "list_admin_users"
+        ) as list_users:
             template, context = self.admin.create_instance_page()
 
         self.assertEqual(template, "admin_create_instance.html")
-        self.assertEqual(context["users"], [users[0]])
+        self.assertNotIn("users", context)
+        list_users.assert_not_called()
 
     def test_create_status_refresh_stays_on_page_during_proxy_restart(self):
         template = (
@@ -255,7 +252,8 @@ class AdminWebTests(unittest.TestCase):
     def test_admin_create_instance_submits_structured_payload(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         self.admin.request.form = {
-            "owner_user_public_id": "user-1",
+            "owner_identity_type": "campus-uis",
+            "owner_identity": "12345",
             "legacy_user_id": "alice-instance",
             "instance_name": "Alice instance",
             "basic_auth_enabled": "true",
@@ -278,7 +276,8 @@ class AdminWebTests(unittest.TestCase):
             {
                 "request_id": create_instance.call_args.args[0]["request_id"],
                 "actor_user_public_id": "admin-1",
-                "owner_user_public_id": "user-1",
+                "owner_identity_type": "campus-uis",
+                "owner_identity": "12345",
                 "legacy_user_id": "alice-instance",
                 "instance_name": "Alice instance",
                 "product": "openclaw",

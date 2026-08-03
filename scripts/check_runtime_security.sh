@@ -250,6 +250,7 @@ if has_cmd docker; then
     while IFS= read -r container; do
       user_id="${container#"$USER_CONTAINER_PREFIX"}"
       tenant_network="$(tenant_network_name "$user_id")"
+      container_state="$(docker inspect "$container" --format '{{.State.Status}}' 2>/dev/null || true)"
       if container_has_network "$container" manager-net; then
         error "user container is attached to manager-net: $container"
       else
@@ -265,15 +266,19 @@ if has_cmd docker; then
       else
         error "user container is missing tenant network: $container -> $tenant_network"
       fi
-      if container_has_network "$NGINX_CONTAINER_NAME" "$tenant_network"; then
-        ok "$NGINX_CONTAINER_NAME is attached to tenant network: $tenant_network"
+      if [ "$container_state" = running ]; then
+        if container_has_network "$NGINX_CONTAINER_NAME" "$tenant_network"; then
+          ok "$NGINX_CONTAINER_NAME is attached to tenant network: $tenant_network"
+        else
+          error "$NGINX_CONTAINER_NAME is missing tenant network: $tenant_network"
+        fi
+        if container_has_network "$MODEL_PROXY_CONTAINER_NAME" "$tenant_network"; then
+          ok "$MODEL_PROXY_CONTAINER_NAME is attached to tenant network: $tenant_network"
+        else
+          error "$MODEL_PROXY_CONTAINER_NAME is missing tenant network: $tenant_network"
+        fi
       else
-        error "$NGINX_CONTAINER_NAME is missing tenant network: $tenant_network"
-      fi
-      if container_has_network "$MODEL_PROXY_CONTAINER_NAME" "$tenant_network"; then
-        ok "$MODEL_PROXY_CONTAINER_NAME is attached to tenant network: $tenant_network"
-      else
-        error "$MODEL_PROXY_CONTAINER_NAME is missing tenant network: $tenant_network"
+        ok "skip shared-service tenant network checks for $container (state=$container_state)"
       fi
     done <<EOF
 $user_containers

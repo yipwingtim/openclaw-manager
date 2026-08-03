@@ -49,6 +49,12 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             'container_has_network "$MODEL_PROXY_CONTAINER_NAME" "$tenant_network"',
             script,
         )
+        self.assertIn(
+            'container_state="$(docker inspect "$container" --format \'{{.State.Status}}\'',
+            script,
+        )
+        self.assertIn('if [ "$container_state" = running ]; then', script)
+        self.assertIn("skip shared-service tenant network checks", script)
 
     def test_runtime_check_blocks_cloud_metadata_access(self):
         script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")

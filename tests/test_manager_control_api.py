@@ -241,6 +241,40 @@ class ManagerControlApiTests(unittest.TestCase):
             )
         )
 
+    def test_local_and_external_sessions_can_coexist(self):
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "local", "alice", db_file=self.db_file
+        )
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "uis-123", db_file=self.db_file
+        )
+        with patch.object(self.control, "MIXED_AUTH_ENABLED", True):
+            self.control.metadata_store.create_session(
+                "local-session", self.user["id"], "local", "csrf",
+                "2999-01-01T00:00:00+00:00", db_file=self.db_file
+            )
+            payload = {
+                "provider": "campus-uis", "subject": "uis-123",
+                "token_hash": "uis-session", "csrf_token": "csrf",
+                "expires_at": "2999-01-01T00:00:00+00:00",
+            }
+            with patch.object(
+                self.control.request, "headers", {"Authorization": "Bearer user-token"}
+            ), patch.object(self.control.request, "get_json", return_value=payload):
+                _, status = response_parts(self.control.external_auth_login())
+
+        self.assertEqual(status, 200)
+        self.assertIsNotNone(
+            self.control.metadata_store.get_session(
+                "local-session", db_file=self.db_file
+            )
+        )
+        self.assertIsNotNone(
+            self.control.metadata_store.get_session(
+                "uis-session", db_file=self.db_file
+            )
+        )
+
     def test_executor_resolves_runtime_instance_only_after_actor_authorization(self):
         instance = self.control.metadata_store.create_instance(
             owner_public_id=self.user["public_id"],

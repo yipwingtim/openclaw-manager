@@ -149,7 +149,7 @@ def health():
 
 @app.get("/admin/login")
 def login():
-    if web_common.external_auth_enabled():
+    if web_common.external_auth_enabled() and not web_common.local_auth_enabled():
         return redirect("/login")
     return web_common.login_page(app, "/admin/login")
 

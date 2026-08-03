@@ -32,6 +32,14 @@ def auth_callback():
     return web_common.external_callback(app)
 
 
+@app.get("/auth/uis/login")
+def uis_login():
+    if not web_common.external_auth_enabled():
+        return render_template("error.html", message="External login is disabled."), 404
+    client, config = web_common.external_client(app)
+    return client.authorize_redirect(config["redirect_uri"])
+
+
 @app.get("/auth/uis/logout")
 def uis_logout_callback():
     return web_common.external_logout_callback()

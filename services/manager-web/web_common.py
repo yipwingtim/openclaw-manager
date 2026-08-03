@@ -12,6 +12,9 @@ import auth_providers
 
 
 AUTH_PROVIDER = os.environ.get("MANAGER_AUTH_PROVIDER", "nginx-basic").strip()
+LOCAL_AUTH_ENABLED = os.environ.get(
+    "MANAGER_LOCAL_AUTH_ENABLED", "false"
+).lower() in {"1", "true", "yes", "on"}
 COOKIE_NAME = "openclaw_manager_session"
 COOKIE_SECURE = os.environ.get("MANAGER_COOKIE_SECURE", "true").lower() not in {
     "0", "false", "no"
@@ -35,7 +38,17 @@ def actor():
             ).strip()
             return control_client.resolve_identity("nginx-basic", subject) if subject else None
         raw_token = request.cookies.get(COOKIE_NAME, "")
-        return control_client.resolve_session(token_hash(raw_token), AUTH_PROVIDER) if raw_token else None
+        if not raw_token:
+            return None
+        providers = [AUTH_PROVIDER]
+        if local_auth_enabled() and AUTH_PROVIDER != "local":
+            providers.append("local")
+        for provider in providers:
+            try:
+                return control_client.resolve_session(token_hash(raw_token), provider)
+            except control_client.ControlError:
+                continue
+        return None
     except control_client.ControlError:
         return None
 
@@ -54,6 +67,12 @@ def require_internal_token():
 
 def external_auth_enabled():
     return AUTH_PROVIDER not in {"nginx-basic", "local"}
+
+
+def local_auth_enabled():
+    return AUTH_PROVIDER == "local" or (
+        external_auth_enabled() and LOCAL_AUTH_ENABLED
+    )
 
 
 def external_client(app):
@@ -96,12 +115,13 @@ def external_callback(app):
 
 
 def login_page(app, action="/login"):
-    if external_auth_enabled():
+    if external_auth_enabled() and not local_auth_enabled():
         client, config = external_client(app)
         return client.authorize_redirect(config["redirect_uri"])
     login_csrf = secrets.token_urlsafe(32)
     response = render_template(
-        "login.html", error="", login_csrf=login_csrf, login_action=action
+        "login.html", error="", login_csrf=login_csrf, login_action=action,
+        external_login_url="/auth/uis/login" if external_auth_enabled() else "",
     )
     response = app.make_response(response)
     response.set_cookie(
@@ -112,6 +132,8 @@ def login_page(app, action="/login"):
 
 
 def local_login(app, login_action="/login"):
+    if not local_auth_enabled():
+        return render_template("error.html", message="Local login is disabled."), 404
     cookie_csrf = request.cookies.get("openclaw_manager_login_csrf", "")
     if not cookie_csrf or not hmac.compare_digest(
         cookie_csrf, request.form.get("csrf_token", "")
@@ -136,6 +158,7 @@ def local_login(app, login_action="/login"):
         return render_template(
             "login.html", error="Invalid username or password.",
             login_csrf=cookie_csrf, login_action=login_action,
+            external_login_url="/auth/uis/login" if external_auth_enabled() else "",
         ), 401
     response = app.make_response(redirect(url_for("index")))
     response.set_cookie(
@@ -148,13 +171,19 @@ def local_login(app, login_action="/login"):
 
 def logout():
     raw_token = request.cookies.get(COOKIE_NAME, "")
+    current = actor() if raw_token else None
     if raw_token:
         control_client.delete_session(token_hash(raw_token))
     try:
         config = auth_providers.external_auth_config() if external_auth_enabled() else {}
     except auth_providers.AuthConfigurationError:
         config = {}
-    if config.get("logout_url") and config.get("post_logout_redirect_uri"):
+    if (
+        current
+        and current.get("provider") != "local"
+        and config.get("logout_url")
+        and config.get("post_logout_redirect_uri")
+    ):
         query = urllib.parse.urlencode(
             {
                 "redirectToLogin": "true",

@@ -22,6 +22,12 @@ DB_FILE = Path(
         "/data/docker/openclaw-public/manager.db",
     )
 )
+MIXED_AUTH_ENABLED = (
+    os.environ.get("MANAGER_LOCAL_AUTH_ENABLED", "false").lower()
+    in {"1", "true", "yes", "on"}
+    and os.environ.get("MANAGER_AUTH_PROVIDER", "nginx-basic")
+    not in {"nginx-basic", "local"}
+)
 EXECUTOR_STALE_SECONDS = max(
     1, int(os.environ.get("MANAGER_EXECUTOR_STALE_SECONDS", "900"))
 )
@@ -342,7 +348,8 @@ def resolve_auth_session():
     provider = request.args.get("provider", "")
     if not token_hash or not provider:
         return jsonify({"error": "token_hash and provider are required"}), 400
-    metadata_store.activate_auth_provider(provider, db_file=DB_FILE)
+    if not MIXED_AUTH_ENABLED:
+        metadata_store.activate_auth_provider(provider, db_file=DB_FILE)
     user = metadata_store.get_session(token_hash, db_file=DB_FILE)
     if user is None or user["provider"] != provider or user["status"] != "active":
         return jsonify({"error": "active session not found"}), 404
@@ -384,7 +391,8 @@ def resolve_auth_identity():
     subject = request.args.get("subject", "")
     if not provider or not subject:
         return jsonify({"error": "provider and subject are required"}), 400
-    metadata_store.activate_auth_provider(provider, db_file=DB_FILE)
+    if not MIXED_AUTH_ENABLED:
+        metadata_store.activate_auth_provider(provider, db_file=DB_FILE)
     user = metadata_store.get_user_by_identity(provider, subject, db_file=DB_FILE)
     if user is None or user["status"] != "active":
         return jsonify({"error": "active identity not found"}), 404
@@ -407,7 +415,8 @@ def external_auth_login():
         or not re.fullmatch(r"[0-9a-f]{64}", external_token_hash)
     ):
         return jsonify({"error": "invalid external login payload"}), 400
-    metadata_store.activate_auth_provider(payload["provider"], db_file=DB_FILE)
+    if not MIXED_AUTH_ENABLED:
+        metadata_store.activate_auth_provider(payload["provider"], db_file=DB_FILE)
     user = metadata_store.get_user_by_identity(
         payload["provider"], payload["subject"], db_file=DB_FILE
     )
@@ -455,7 +464,8 @@ def local_auth_login():
     required = {"username", "password", "token_hash", "csrf_token", "expires_at"}
     if any(not isinstance(payload.get(field), str) or not payload[field] for field in required):
         return jsonify({"error": "invalid local login payload"}), 400
-    metadata_store.activate_auth_provider("local", db_file=DB_FILE)
+    if not MIXED_AUTH_ENABLED:
+        metadata_store.activate_auth_provider("local", db_file=DB_FILE)
     user = metadata_store.get_user_by_identity(
         "local",
         metadata_store.normalize_username(payload["username"]),

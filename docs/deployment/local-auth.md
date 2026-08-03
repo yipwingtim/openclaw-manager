@@ -2,9 +2,9 @@
 
 ## Authentication policy / 认证策略
 
-`manager-web` has exactly one active authentication provider at a time:
+`MANAGER_AUTH_PROVIDER` selects the primary authentication provider:
 
-`manager-web` 同时只允许启用一种认证 Provider：
+`MANAGER_AUTH_PROVIDER` 用于选择主认证 Provider：
 
 - `nginx-basic` (default): Nginx performs Basic Auth and forwards the
   authenticated username to manager-web.
@@ -19,16 +19,20 @@
 - 命名的外部 Provider 使用 `MANAGER_AUTH_TYPE=oidc` 或 `oauth2`，通过 Authlib
   执行 Authorization Code 流程；优先使用 OIDC Discovery。
 
-One platform user may bind both `nginx-basic` and `local` identities. Binding
-multiple identities does not enable multiple login paths simultaneously; only
-`MANAGER_AUTH_PROVIDER` is accepted.
+With an external primary provider, `MANAGER_LOCAL_AUTH_ENABLED=true` also exposes
+the local username/password form. Both providers use the same `users` table.
+`user_identities.provider` distinguishes identities and `local_credentials`
+stores local password credentials. One platform user may bind both identities.
 
-同一个平台用户可以同时绑定 `nginx-basic` 和 `local` 身份，但这不代表两种入口同时可用；系统只接受 `MANAGER_AUTH_PROVIDER` 当前指定的方式。
+外部 Provider 作为主认证方式时，可设置 `MANAGER_LOCAL_AUTH_ENABLED=true` 同时开放
+本地用户名密码登录。两类用户共用 `users` 表，通过 `user_identities.provider` 区分
+身份，本地密码仍保存在 `local_credentials`；同一平台用户也可以同时绑定两类身份。
 
-Changing the active provider invalidates existing manager sessions. OpenClaw
-application Token login is independent and is not changed by this setting.
+Local and external sessions can coexist in mixed mode. OpenClaw application
+Token login is independent and is not changed by this setting.
 
-切换 Provider 会使现有管理端 Session 失效。OpenClaw 应用自身的 Token 登录与该设置相互独立，不受影响。
+混合模式下本地和外部 Session 可以并存。OpenClaw 应用自身的 Token 登录与该设置相互
+独立，不受影响。
 
 ## Identity mapping / 身份映射
 
@@ -108,6 +112,7 @@ with the assigned client credentials and registered callback URLs:
 ```dotenv
 MANAGER_AUTH_PROVIDER=campus-uis
 MANAGER_AUTH_TYPE=oauth2
+MANAGER_LOCAL_AUTH_ENABLED=true
 MANAGER_SESSION_SECRET=<random-high-entropy-secret>
 MANAGER_OAUTH_CLIENT_ID=<assigned-client-id>
 MANAGER_OAUTH_CLIENT_SECRET=<assigned-client-secret>

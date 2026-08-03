@@ -255,11 +255,18 @@ def create_batch_child_payload(job):
 
 
 def authenticated_user_payload(user):
+    display_name = user["display_name"]
+    if user.get("provider") == "campus-uis":
+        try:
+            profile = json.loads(user.get("identity_profile_json") or "{}")
+            display_name = profile.get("user_name") or profile.get("display_name") or display_name
+        except (TypeError, ValueError):
+            pass
     return {
         "id": user["id"],
         "public_id": user["public_id"],
         "username": user["username"],
-        "display_name": user["display_name"],
+        "display_name": display_name,
         "email": user["email"],
         "role": user["role"],
         "status": user["status"],

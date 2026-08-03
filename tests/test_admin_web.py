@@ -186,6 +186,14 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn("<span>模型设置</span>", template)
         self.assertNotIn("<span>模型供应商</span>", template)
 
+    def test_authenticated_sidebar_always_shows_logout_button(self):
+        template = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('{% if current_user %}', template)
+        self.assertNotIn('current_user and auth_provider == "local"', template)
+        self.assertIn("退出登录", template)
+
     def test_admin_metadata_is_in_the_admin_sidebar(self):
         template = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(
             encoding="utf-8"

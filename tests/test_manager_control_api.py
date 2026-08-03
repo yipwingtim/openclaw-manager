@@ -457,6 +457,111 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(repeated.get_json()["job"]["request_id"], "create-1")
         self.assertEqual(len(list(secret_dir.iterdir())), 1)
 
+    def test_admin_resolves_active_owner_by_uis_user_id(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        owner = self.control.metadata_store.create_user("bob", db_file=self.db_file)
+        self.control.metadata_store.upsert_identity(
+            owner["id"], "campus-uis", "12345", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "create-uis-owner",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_identity_type": "campus-uis",
+            "owner_identity": "12345",
+            "legacy_user_id": "bob-instance",
+            "instance_name": "Bob instance",
+            "product": "openclaw",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "secret",
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_admin_instance())
+
+        self.assertEqual(status, 202)
+        instance = self.control.metadata_store.get_instance_by_public_id(
+            response.get_json()["instance"]["public_id"], db_file=self.db_file
+        )
+        self.assertEqual(instance["owner_user_id"], owner["id"])
+
+    def test_admin_resolves_active_owner_by_local_username(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        owner = self.control.metadata_store.create_user("Bob", db_file=self.db_file)
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "create-local-owner",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_identity_type": "local",
+            "owner_identity": "bob",
+            "legacy_user_id": "bob-local-instance",
+            "instance_name": "Bob local instance",
+            "product": "openclaw",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "secret",
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_admin_instance())
+
+        self.assertEqual(status, 202)
+        instance = self.control.metadata_store.get_instance_by_public_id(
+            response.get_json()["instance"]["public_id"], db_file=self.db_file
+        )
+        self.assertEqual(instance["owner_user_id"], owner["id"])
+
+    def test_admin_rejects_unknown_uis_owner(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        payload = {
+            "request_id": "create-unknown-uis-owner",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_identity_type": "campus-uis",
+            "owner_identity": "missing",
+            "legacy_user_id": "missing-instance",
+            "instance_name": "Missing instance",
+            "product": "openclaw",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "secret",
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_admin_instance())
+
+        self.assertEqual(status, 409)
+        self.assertEqual(response.get_json(), {"error": "active owner user not found"})
+
+    def test_admin_rejects_ambiguous_owner_fields(self):
+        payload = {
+            "request_id": "create-ambiguous-owner",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_user_public_id": self.user["public_id"],
+            "owner_identity_type": "local",
+            "owner_identity": "alice",
+            "legacy_user_id": "alice-instance",
+            "instance_name": "Alice instance",
+            "product": "openclaw",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "secret",
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_admin_instance())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response.get_json(), {"error": "owner fields are mutually exclusive"}
+        )
+
     def test_admin_updates_default_versions_and_returns_saved_values(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file

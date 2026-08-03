@@ -25,6 +25,14 @@ server {
 
 {{MANAGER_EMERGENCY_LOCATION}}
 
+    location = /auth/uis/logout {
+        access_log off;
+        error_log /dev/null;
+        proxy_pass http://manager_user_web_backend/auth/uis/logout?;
+        proxy_set_header X-UIS-Logout-Token $arg_token;
+{{MANAGER_INTERNAL_TOKEN_HEADER}}
+    }
+
     location ^~ /admin {
         proxy_pass http://manager_admin_web_backend;
 

@@ -90,6 +90,17 @@ class WebServiceSplitTests(unittest.TestCase):
         self.assertIn('return redirect("/login")', source)
         self.assertNotIn('"/admin/auth/callback"', source)
 
+    def test_uis_logout_token_is_removed_before_proxying(self):
+        template = (ROOT_DIR / "templates" / "nginx" / "manager-web.conf.tpl").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("location = /auth/uis/logout", template)
+        self.assertIn("access_log off", template)
+        self.assertIn("error_log /dev/null", template)
+        self.assertIn("proxy_set_header X-UIS-Logout-Token $arg_token", template)
+        self.assertIn("proxy_pass http://manager_user_web_backend/auth/uis/logout?", template)
+
     def test_admin_local_login_is_exempt_from_authenticated_csrf_check(self):
         source = (ROOT_DIR / "services" / "manager-web" / "web_common.py").read_text(
             encoding="utf-8"

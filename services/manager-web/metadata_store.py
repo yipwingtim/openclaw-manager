@@ -51,6 +51,10 @@ def initialize(db_file=None, schema_file=None):
                 raise RuntimeError(
                     "metadata schema requires scripts/migrate_instance_provisioning_model.py"
                 )
+            if version < 6:
+                raise RuntimeError(
+                    "metadata schema requires scripts/migrate_external_session_tokens.py"
+                )
         conn.executescript(schema)
 
 
@@ -235,6 +239,7 @@ def create_session(
     csrf_token,
     expires_at,
     session_kind="user",
+    external_token_hash=None,
     db_file=None,
     conn=None,
 ):
@@ -263,6 +268,15 @@ def create_session(
                 now,
             ),
         )
+        if external_token_hash:
+            active_conn.execute(
+                """
+                INSERT INTO external_session_tokens (
+                    external_token_hash, session_token_hash
+                ) VALUES (?, ?)
+                """,
+                (external_token_hash, token_hash),
+            )
 
 
 def get_session(token_hash, db_file=None, conn=None):
@@ -289,6 +303,23 @@ def delete_session(token_hash, db_file=None, conn=None):
     context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
         active_conn.execute("DELETE FROM user_sessions WHERE token_hash = ?", (token_hash,))
+
+
+def delete_session_by_external_token(external_token_hash, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        active_conn.execute(
+            """
+            DELETE FROM user_sessions
+            WHERE token_hash IN (
+                SELECT session_token_hash
+                FROM external_session_tokens
+                WHERE external_token_hash = ?
+            )
+            """,
+            (external_token_hash,),
+        )
 
 
 def activate_auth_provider(provider, db_file=None, conn=None):

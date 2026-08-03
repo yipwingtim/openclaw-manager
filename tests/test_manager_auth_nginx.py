@@ -208,6 +208,14 @@ class ManagerAuthNginxTests(unittest.TestCase):
             self.assertIn('auth_basic "OpenClaw Manager Emergency";', config)
             self.assertIn("proxy_pass http://manager_admin_web_backend;", config)
             self.assertIn('X-OpenClaw-Internal-Token "test-token";', config)
+            self.assertIn("location = /auth/uis/logout", config)
+            self.assertIn("access_log off;", config)
+            self.assertIn("error_log /dev/null;", config)
+            self.assertIn("proxy_set_header X-UIS-Logout-Token $arg_token;", config)
+            self.assertIn(
+                "proxy_pass http://manager_user_web_backend/auth/uis/logout?;",
+                config,
+            )
             root_location = config.split("    location / {", 1)[1]
             self.assertNotIn("auth_basic_user_file", root_location)
 

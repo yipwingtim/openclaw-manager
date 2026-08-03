@@ -22,7 +22,7 @@ def execute_schema(conn, schema_file):
         statement += line
         if sqlite3.complete_statement(statement):
             sql, statement = statement.strip(), ""
-            if sql:
+            if sql.upper() not in {"BEGIN;", "COMMIT;"}:
                 conn.execute(sql)
     if statement.strip():
         raise RuntimeError("incomplete SQL statement in schema")
@@ -91,6 +91,7 @@ def migrate(conn, schema_file):
         conn.execute(f"INSERT INTO instances ({names}) SELECT {names} FROM instances_v4")
         conn.execute("DROP TABLE instances_v4")
         execute_schema(conn, schema_file)
+        conn.execute("DELETE FROM schema_migrations WHERE version > 5")
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:
             raise RuntimeError(f"foreign key violations after migration: {violations}")

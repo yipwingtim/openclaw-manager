@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from flask import redirect, render_template, request, url_for
@@ -65,9 +66,11 @@ def external_client(app):
 def external_callback(app):
     try:
         client, config = external_client(app)
-        identity = auth_providers.external_identity(
-            client, client.authorize_access_token(), config
-        )
+        token = client.authorize_access_token()
+        identity = auth_providers.external_identity(client, token, config)
+        access_token = token.get("access_token", "")
+        if not isinstance(access_token, str) or not access_token:
+            raise ValueError("external authentication returned no access token")
         raw_token = secrets.token_urlsafe(48)
         csrf_token = secrets.token_urlsafe(32)
         expires_at = (
@@ -77,6 +80,7 @@ def external_callback(app):
             {
                 **identity,
                 "token_hash": token_hash(raw_token),
+                "external_token_hash": token_hash(access_token),
                 "csrf_token": csrf_token,
                 "expires_at": expires_at,
             }
@@ -146,9 +150,30 @@ def logout():
     raw_token = request.cookies.get(COOKIE_NAME, "")
     if raw_token:
         control_client.delete_session(token_hash(raw_token))
-    response = redirect(url_for("login"))
+    try:
+        config = auth_providers.external_auth_config() if external_auth_enabled() else {}
+    except auth_providers.AuthConfigurationError:
+        config = {}
+    if config.get("logout_url") and config.get("post_logout_redirect_uri"):
+        query = urllib.parse.urlencode(
+            {
+                "redirectToLogin": "true",
+                "redirectToUrl": config["post_logout_redirect_uri"],
+            }
+        )
+        response = redirect(f'{config["logout_url"]}?{query}')
+    else:
+        response = redirect(url_for("login"))
     response.delete_cookie(COOKIE_NAME)
     return response
+
+
+def external_logout_callback():
+    external_token = request.headers.get("X-UIS-Logout-Token", "").strip()
+    if not external_auth_enabled() or not external_token:
+        return "", 400
+    control_client.delete_external_session(token_hash(external_token))
+    return "", 204
 
 
 def require_csrf():

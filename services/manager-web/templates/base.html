@@ -612,7 +612,7 @@
           {% endif %}
           <div class="sidebar-nav-extra">
             {% block nav_right %}{% endblock %}
-            {% if current_user and auth_provider == "local" %}
+            {% if current_user %}
               <form method="post" action="{{ logout_url|default('/logout') }}" class="mt-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-oc-outline" type="submit">退出登录</button>

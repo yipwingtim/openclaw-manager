@@ -233,6 +233,14 @@ class EvoScientistAdapterTests(unittest.TestCase):
             self.assertIn("zone evosci_ui_40062 64k;", config_text)
             self.assertIn("zone evosci_api_40062 64k;", config_text)
             self.assertIn("listen 443 ssl;", config_text)
+            self.assertIn(
+                "location /api/memory { proxy_pass http://evosci_ui_40062;",
+                config_text,
+            )
+            self.assertIn(
+                "location /api/workspace { proxy_pass http://evosci_ui_40062;",
+                config_text,
+            )
             self.assertNotIn("listen 40062 ssl;", config_text)
 
     def test_set_model_provider_persists_config_and_restarts_instance(self):

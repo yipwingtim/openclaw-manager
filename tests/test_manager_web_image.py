@@ -32,6 +32,7 @@ class ManagerWebImageTests(unittest.TestCase):
         for product, filename in (
             ("openclaw", "openclaw.svg"),
             ("hermes", "hermes.png"),
+            ("evoscientist", "evoscientist.png"),
         ):
             with self.subTest(product=product):
                 logo = manager_web / "static" / "products" / filename

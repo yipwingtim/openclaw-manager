@@ -17,6 +17,11 @@
 - 每个实例级 `.token` 是否有对应的非空 `.models` 模型白名单
 - `openclaw-model-proxy` 容器是否连接 `agent-net`
 
+租户网络检查按容器状态区分范围：所有 OpenClaw 容器（包括停止或历史容器）都检查
+自身是否连接预期的租户网络；只有 `running` 容器才要求 `openclaw-nginx` 和
+`openclaw-model-proxy` 同时连接该租户网络。停止、已创建但未启动或已退出的容器不再
+因为共享入口未连接而报告 `tenant_network_missing`，避免把历史残留误报为运行时故障。
+
 该脚本检查部署和网络安全状态，不替代 `scripts/check_metadata_consistency.py`。
 
 ## 使用方式

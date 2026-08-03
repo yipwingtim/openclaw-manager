@@ -22,6 +22,12 @@ class UserPortalCompatibilityTests(unittest.TestCase):
         )
         self.assertIn("实例成员", members)
 
+    def test_split_user_pages_do_not_override_authenticated_display_name(self):
+        source = (WEB_DIR / "user_app.py").read_text(encoding="utf-8")
+
+        self.assertNotIn('current_user=current["username"]', source)
+        self.assertIn('render_template("my_instances.html", instances=instances)', source)
+
 
 if __name__ == "__main__":
     unittest.main()

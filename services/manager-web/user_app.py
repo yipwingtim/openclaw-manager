@@ -63,7 +63,7 @@ def my_instances():
     instances = control_client.list_instances(current["public_id"])
     for instance in instances:
         instance["allowed_actions"] = ["access", "status"]
-    return render_template("my_instances.html", instances=instances, current_user=current["username"])
+    return render_template("my_instances.html", instances=instances)
 
 
 @app.get("/instance-admin")
@@ -140,7 +140,6 @@ def instance_detail(instance_public_id):
         instance_name=instance["instance_name"],
         instance_public_id=instance["public_id"],
         instance_mode=False,
-        current_user=current["username"],
         show_admin_links=False,
         status=snapshot["status"],
         port=instance.get("port"),

@@ -35,6 +35,13 @@
                     alt=""
                     aria-hidden="true"
                   >
+                {% elif instance.product == "evoscientist" %}
+                  <img
+                    class="instance-product-logo"
+                    src="{{ url_for('static', filename='products/evoscientist.png') }}"
+                    alt=""
+                    aria-hidden="true"
+                  >
                 {% else %}
                   <span class="instance-product-logo instance-product-logo-fallback" aria-hidden="true">
                     {{ instance.product[:1]|upper }}

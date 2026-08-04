@@ -29,6 +29,7 @@ MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 INSTANCE_PAGE_SIZE_OPTIONS = (10, 20, 50, 100)
 DEFAULT_INSTANCE_PAGE_SIZE = 20
 VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}|sha256:[0-9a-fA-F]{64})$")
+BATCH_VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-fA-F]{64})$")
 
 
 def default_instance_version(product):
@@ -338,16 +339,18 @@ def create_instance_batch():
         rows = list(csv.DictReader(io.StringIO(upload.read().decode("utf-8-sig"))))
     except (UnicodeDecodeError, csv.Error):
         return redirect(url_for("create_instance_page", error="CSV 文件格式无效。"))
-    required = {
+    legacy_fields = {
         "owner_username", "legacy_user_id", "instance_name",
         "basic_auth_password", "basic_auth_enabled",
     }
+    product_fields = legacy_fields | {"product", "version", "confirm_latest"}
     if not rows or len(rows) > MAX_INSTANCE_BATCH_ROWS:
         return redirect(url_for(
             "create_instance_page",
             error=f"CSV 必须包含 1-{MAX_INSTANCE_BATCH_ROWS} 行数据。",
         ))
-    if set(rows[0]) != required:
+    fields = frozenset(rows[0])
+    if fields not in {frozenset(legacy_fields), frozenset(product_fields)}:
         return redirect(url_for("create_instance_page", error="CSV 表头不符合要求。"))
     try:
         users = {
@@ -365,6 +368,9 @@ def create_instance_batch():
         instance_name = (row.get("instance_name") or "").strip()
         password = row.get("basic_auth_password") or ""
         enabled = (row.get("basic_auth_enabled") or "").strip().lower()
+        product = (row.get("product") or "openclaw").strip().lower()
+        version = (row.get("version") or "").strip()
+        confirm_latest = (row.get("confirm_latest") or "false").strip().lower()
         if owner is None:
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行 Owner 不存在或未启用。",
@@ -381,15 +387,49 @@ def create_instance_batch():
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行 Basic Auth 开关无效。",
             ))
+        if product not in {"openclaw", "hermes", "evoscientist"}:
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行产品无效。",
+            ))
+        if version and not BATCH_VERSION_RE.fullmatch(version):
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行版本无效。",
+            ))
+        if product == "evoscientist" and version not in {"", "latest"} and not re.fullmatch(
+            r"sha256:[0-9a-fA-F]{64}", version
+        ):
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行 EvoScientist 版本无效。",
+            ))
+        if product == "hermes" and version.startswith("sha256:"):
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行 Hermes 版本无效。",
+            ))
+        if confirm_latest not in {"true", "false"}:
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行 latest 确认值无效。",
+            ))
+        if product in {"hermes", "evoscientist"} and enabled != "true":
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行必须启用 Basic Auth。",
+            ))
+        if product == "evoscientist" and version == "latest" and confirm_latest != "true":
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行使用 latest 前必须确认风险。",
+            ))
         seen.add(legacy_user_id)
-        instances.append({
+        instance = {
             "owner_user_public_id": owner["public_id"],
             "legacy_user_id": legacy_user_id,
             "instance_name": instance_name,
-            "product": "openclaw",
+            "product": product,
+            **({"version": version} if version else {}),
             "basic_auth_enabled": enabled == "true",
             "basic_auth_password": password,
-        })
+        }
+        if fields == frozenset(product_fields):
+            instance["confirm_latest"] = confirm_latest == "true"
+        instances.append(instance)
     try:
         result = control_client.create_instance_batch({
             "request_id": "instance-batch-" + uuid.uuid4().hex,

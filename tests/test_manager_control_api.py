@@ -2,6 +2,7 @@
 
 import importlib.util
 import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -586,6 +587,29 @@ class ManagerControlApiTests(unittest.TestCase):
             "evoscientist": "sha256:" + "a" * 64,
         })
 
+    def test_admin_rejects_invalid_product_default_versions(self):
+        cases = (
+            (
+                {"evoscientist": "v1", "confirm_latest": False},
+                "EvoScientist version must be latest or a sha256 digest",
+            ),
+            (
+                {"hermes": "sha256:" + "a" * 64, "confirm_latest": False},
+                "Hermes version must be an image tag",
+            ),
+        )
+        for payload, error in cases:
+            with self.subTest(payload=payload), patch.object(
+                self.control.request,
+                "headers",
+                {"Authorization": "Bearer admin-token"},
+            ), patch.object(self.control.request, "get_json", return_value=payload):
+                response, status = response_parts(
+                    self.control.update_default_versions()
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(response.get_json(), {"error": error})
+
     def test_admin_creates_hermes_provisioning_instance(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file
@@ -735,6 +759,269 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertIsNone(self.control.metadata_store.get_execution_job(
             "batch-create-invalid-owner", db_file=self.db_file
         ))
+        self.assertEqual(list(secret_dir.iterdir()), [])
+
+    def test_admin_batch_creates_hermes_and_evoscientist_instances(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "batch-create-products",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [
+                {
+                    "owner_user_public_id": self.user["public_id"],
+                    "legacy_user_id": "alice-hermes",
+                    "instance_name": "Alice Hermes",
+                    "product": "hermes",
+                    "version": "v2026.7.20",
+                    "confirm_latest": False,
+                    "basic_auth_enabled": True,
+                    "basic_auth_password": "h-secret",
+                },
+                {
+                    "owner_user_public_id": self.user["public_id"],
+                    "legacy_user_id": "alice-evo",
+                    "instance_name": "Alice Evo",
+                    "product": "evoscientist",
+                    "version": "latest",
+                    "confirm_latest": True,
+                    "basic_auth_enabled": True,
+                    "basic_auth_password": "e-secret",
+                },
+            ],
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 202)
+        instances = {
+            item["product"]: item
+            for item in self.control.metadata_store.list_instances(db_file=self.db_file)
+        }
+        self.assertEqual(instances["hermes"]["runtime_identifier"], "hermes_alice-hermes")
+        self.assertTrue(instances["hermes"]["data_path"].endswith("/hermes/alice-hermes"))
+        self.assertEqual(instances["evoscientist"]["runtime_identifier"], "evoscientist_alice-evo")
+        self.assertTrue(instances["evoscientist"]["data_path"].endswith("/users/alice-evo"))
+        children = response.get_json()["children"]
+        self.assertEqual(
+            [child["params"] for child in children],
+            [{}, {}],
+        )
+        stored = self.control.metadata_store.list_execution_jobs(
+            parent_request_id="batch-create-products", limit=100, db_file=self.db_file
+        )
+        self.assertEqual(
+            [
+                json.loads(job["params_json"]).get("version")
+                for job in stored
+            ],
+            ["v2026.7.20", "latest"],
+        )
+
+    def test_admin_batch_rejects_product_auth_and_latest_violations(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        base = {
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-product",
+            "instance_name": "Alice product",
+            "basic_auth_password": "secret",
+        }
+        cases = (
+            (
+                "batch-hermes-no-auth",
+                {**base, "product": "hermes", "basic_auth_enabled": False},
+                "hermes requires Basic Auth in row 1",
+            ),
+            (
+                "batch-evo-latest-unconfirmed",
+                {
+                    **base,
+                    "product": "evoscientist",
+                    "version": "latest",
+                    "confirm_latest": False,
+                    "basic_auth_enabled": True,
+                },
+                "latest requires explicit confirmation in row 1",
+            ),
+        )
+        for request_id, row, error in cases:
+            with self.subTest(request_id=request_id), patch.object(
+                self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+            ), patch.object(
+                self.control.request,
+                "get_json",
+                return_value={
+                    "request_id": request_id,
+                    "actor_user_public_id": self.user["public_id"],
+                    "instances": [row],
+                },
+            ):
+                response, status = response_parts(self.control.create_instance_batch())
+                self.assertEqual(status, 400)
+                self.assertEqual(response.get_json(), {"error": error})
+
+        self.assertEqual(
+            self.control.metadata_store.list_instances(db_file=self.db_file), []
+        )
+
+    def test_admin_batch_rejects_invalid_evoscientist_tag(self):
+        payload = {
+            "request_id": "batch-evo-invalid-tag",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [{
+                "owner_user_public_id": self.user["public_id"],
+                "legacy_user_id": "alice-evo",
+                "instance_name": "Alice Evo",
+                "product": "evoscientist",
+                "version": "v1",
+                "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            }],
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response.get_json(), {
+                "error": "EvoScientist version must be latest or a sha256 digest in row 1"
+            }
+        )
+
+        payload["request_id"] = "batch-hermes-invalid-digest"
+        payload["instances"][0].update(
+            product="hermes", version="sha256:" + "a" * 64
+        )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response.get_json(), {"error": "Hermes version must be an image tag in row 1"}
+        )
+
+    def test_admin_batch_rejects_invalid_default_product_version(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        self.control.metadata_store.set_setting(
+            "default_version.evoscientist", "v1", db_file=self.db_file
+        )
+        payload = {
+            "request_id": "batch-invalid-evo-default",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [{
+                "owner_user_public_id": self.user["public_id"],
+                "legacy_user_id": "alice-evo-default",
+                "instance_name": "Alice Evo",
+                "product": "evoscientist",
+                "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            }],
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response.get_json(), {
+                "error": "EvoScientist version must be latest or a sha256 digest in row 1"
+            },
+        )
+        self.assertEqual(
+            self.control.metadata_store.list_instances(db_file=self.db_file), []
+        )
+
+    def test_admin_batch_retry_ignores_changed_default_version(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "batch-default-version",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [{
+                "owner_user_public_id": self.user["public_id"],
+                "legacy_user_id": "alice-hermes-default",
+                "instance_name": "Alice Hermes",
+                "product": "hermes",
+                "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            }],
+        }
+        self.control.metadata_store.set_setting(
+            "default_version.hermes", "v1", db_file=self.db_file
+        )
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            first, first_status = response_parts(self.control.create_instance_batch())
+            self.control.metadata_store.set_setting(
+                "default_version.hermes", "v2", db_file=self.db_file
+            )
+            repeated, repeated_status = response_parts(
+                self.control.create_instance_batch()
+            )
+
+        self.assertEqual(first_status, 202)
+        self.assertEqual(repeated_status, 202)
+        self.assertEqual(
+            repeated.get_json()["parent"]["request_id"],
+            first.get_json()["parent"]["request_id"],
+        )
+        child = self.control.metadata_store.list_execution_jobs(
+            parent_request_id="batch-default-version", limit=10, db_file=self.db_file
+        )[0]
+        self.assertEqual(json.loads(child["params_json"])["version"], "v1")
+
+    def test_admin_batch_cleans_secret_when_write_fails(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "batch-secret-write-failure",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [{
+                "owner_user_public_id": self.user["public_id"],
+                "legacy_user_id": "alice-one",
+                "instance_name": "Alice One",
+                "product": "openclaw",
+                "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            }],
+        }
+
+        class FailingSecret:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def write(self, value):
+                raise OSError("write failed")
+
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload), patch.object(
+            self.control.os, "fdopen", return_value=FailingSecret()
+        ):
+            with self.assertRaises(OSError):
+                self.control.create_instance_batch()
+
         self.assertEqual(list(secret_dir.iterdir()), [])
 
     def test_executor_finishes_created_instance_with_structured_result(self):

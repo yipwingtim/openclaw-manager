@@ -387,6 +387,19 @@ training02,,false
 
 `basic_auth_password` 可留空，脚本会自动生成；`basic_auth_enabled` 可省略，默认启用。
 
+新版实例管理页 `/admin/create-instance` 的批量入口支持 OpenClaw、Hermes 和
+EvoScientist，CSV 表头为：
+
+```csv
+owner_username,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled
+alice,alice-openclaw,Alice OpenClaw,openclaw,2026.7.1,false,example-password,true
+alice,alice-hermes,Alice Hermes,hermes,v2026.7.20,false,example-password,true
+alice,alice-evo,Alice Evo,evoscientist,latest,true,example-password,true
+```
+
+`version` 留空时使用该产品的默认版本。Hermes 和 EvoScientist 必须启用 Basic
+Auth；EvoScientist 使用 `latest` 时必须将 `confirm_latest` 设为 `true`。
+
 `https://<PUBLIC_HOST>:30015/admin/users` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
 用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
 

@@ -340,25 +340,44 @@ def platform_users():
     if status_filter not in {"all", "active", "disabled", "locked"}:
         status_filter = "all"
     try:
-        users = control_client.list_admin_users()
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = int(request.args.get("per_page", DEFAULT_INSTANCE_PAGE_SIZE))
+    except (TypeError, ValueError):
+        page, per_page = 1, DEFAULT_INSTANCE_PAGE_SIZE
+    if per_page not in INSTANCE_PAGE_SIZE_OPTIONS:
+        per_page = DEFAULT_INSTANCE_PAGE_SIZE
+    try:
+        result = control_client.list_platform_users(
+            provider=provider,
+            status=status_filter,
+            query=query,
+            page=page,
+            per_page=per_page,
+        )
+        users, pagination = result["users"], result["pagination"]
         error = request.args.get("error", "")
     except control_client.ControlError as exc:
-        users, error = [], str(exc)
-    needle = query.casefold()
-    users = [
-        user for user in users
-        if (provider == "all" or provider in user.get("identity_providers", []))
-        and (status_filter == "all" or user["status"] == status_filter)
-        and (not needle or needle in " ".join(
-            (user.get("username") or "", user.get("display_name") or "")
-        ).casefold())
-    ]
+        users, pagination, error = [], {
+            "page": 1, "per_page": per_page, "total": 0, "total_pages": 1,
+        }, str(exc)
+    pagination = {
+        **pagination,
+        "start": (pagination["page"] - 1) * pagination["per_page"] + 1
+        if pagination["total"] else 0,
+        "end": min(pagination["page"] * pagination["per_page"], pagination["total"]),
+        "has_prev": pagination["page"] > 1,
+        "has_next": pagination["page"] < pagination["total_pages"],
+        "prev_page": max(1, pagination["page"] - 1),
+        "next_page": min(pagination["total_pages"], pagination["page"] + 1),
+    }
     return render_template(
         "admin_platform_users.html",
         users=users,
         provider_filter=provider,
         status_filter=status_filter,
         query=query,
+        page_size_options=INSTANCE_PAGE_SIZE_OPTIONS,
+        pagination=pagination,
         actor_public_id=current["public_id"],
         error=error,
     )

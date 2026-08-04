@@ -44,6 +44,10 @@ def load_admin_app():
     control_client.get_admin_metadata = lambda: {}
     control_client.list_admin_instances = lambda: []
     control_client.list_admin_users = lambda: []
+    control_client.list_platform_users = lambda **kwargs: {
+        "users": [],
+        "pagination": {"page": 1, "per_page": 20, "total": 0, "total_pages": 1},
+    }
     control_client.update_admin_user_status = lambda *args: {}
     control_client.create_admin_instance = lambda payload: payload
     control_client.create_instance_batch = lambda payload: payload
@@ -223,23 +227,34 @@ class AdminWebTests(unittest.TestCase):
             {
                 "public_id": "user-1", "username": "uis-alice", "display_name": "张三",
                 "role": "user", "status": "active",
+                "uis_user_id": "uis-123",
                 "identity_providers": ["campus-uis"], "provisioning_source": "uis-import",
             },
             {
                 "public_id": "user-2", "username": "local-bob", "display_name": "李四",
                 "role": "user", "status": "disabled",
+                "uis_user_id": None,
                 "identity_providers": ["local"], "provisioning_source": "local",
             },
         ]
-        self.admin.request.args = {"provider": "campus-uis", "status": "active", "q": "张"}
+        pagination = {"page": 2, "per_page": 10, "total": 12, "total_pages": 2}
+        self.admin.request.args = {
+            "provider": "campus-uis", "status": "active", "q": "uis-123",
+            "page": "2", "per_page": "10",
+        }
         with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
-            self.admin.control_client, "list_admin_users", return_value=users
-        ):
+            self.admin.control_client, "list_platform_users",
+            return_value={"users": users[:1], "pagination": pagination},
+        ) as list_users:
             template, context = self.admin.platform_users()
 
         self.assertEqual(template, "admin_platform_users.html")
         self.assertEqual([user["public_id"] for user in context["users"]], ["user-1"])
         self.assertEqual(context["actor_public_id"], "admin-1")
+        self.assertEqual(context["pagination"]["start"], 11)
+        list_users.assert_called_once_with(
+            provider="campus-uis", status="active", query="uis-123", page=2, per_page=10
+        )
 
     def test_platform_user_status_update_includes_admin_actor(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
@@ -263,6 +278,8 @@ class AdminWebTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('href="/admin/platform-users"', base)
+        self.assertIn("UIS user_id", template)
+        self.assertIn("pagination.next_page", template)
         for sensitive_name in ("user.subject", "profile_json", "password_hash", "access_token"):
             self.assertNotIn(sensitive_name, template.lower())
 

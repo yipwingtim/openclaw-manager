@@ -608,6 +608,93 @@ def admin_users():
     ]})
 
 
+@app.get("/internal/v1/admin/platform-users")
+@require_services("manager-admin-web")
+def admin_platform_users():
+    provider = request.args.get("provider", "all").strip().lower()
+    status = request.args.get("status", "all").strip().lower()
+    query = request.args.get("q", "").strip()
+    try:
+        page = int(request.args.get("page", "1"))
+        per_page = int(request.args.get("per_page", "20"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid pagination"}), 400
+    if (
+        provider not in {"all", "local", "campus-uis"}
+        or status not in {"all", "active", "disabled", "locked"}
+        or page < 1
+        or per_page not in {10, 20, 50, 100}
+        or len(query) > 128
+    ):
+        return jsonify({"error": "invalid platform user filters"}), 400
+
+    conditions = ["u.status != 'deleted'"]
+    params = []
+    if provider != "all":
+        conditions.append(
+            "EXISTS (SELECT 1 FROM user_identities WHERE user_id = u.id AND provider = ?)"
+        )
+        params.append(provider)
+    if status != "all":
+        conditions.append("u.status = ?")
+        params.append(status)
+    if query:
+        conditions.append(
+            """
+            (INSTR(LOWER(u.username), LOWER(?)) > 0
+             OR INSTR(LOWER(COALESCE(u.display_name, '')), LOWER(?)) > 0
+             OR EXISTS (
+                 SELECT 1 FROM user_identities
+                 WHERE user_id = u.id AND provider = 'campus-uis'
+                   AND INSTR(LOWER(subject), LOWER(?)) > 0
+             ))
+            """
+        )
+        params.extend([query, query, query])
+    where = " AND ".join(conditions)
+
+    with metadata_store.connect(DB_FILE) as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM users u WHERE {where}", params
+        ).fetchone()[0]
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        page = min(page, total_pages)
+        users = conn.execute(
+            f"""
+            SELECT
+                u.public_id, u.username, u.display_name, u.role, u.status,
+                u.provisioning_source,
+                (SELECT subject FROM user_identities
+                 WHERE user_id = u.id AND provider = 'campus-uis'
+                 LIMIT 1) AS uis_user_id,
+                (SELECT GROUP_CONCAT(provider) FROM user_identities
+                 WHERE user_id = u.id) AS identity_providers
+            FROM users u
+            WHERE {where}
+            ORDER BY u.normalized_username
+            LIMIT ? OFFSET ?
+            """,
+            [*params, per_page, (page - 1) * per_page],
+        ).fetchall()
+    return jsonify({
+        "users": [
+            {
+                **dict(user),
+                "identity_providers": sorted(
+                    filter(None, (user["identity_providers"] or "").split(","))
+                ),
+            }
+            for user in users
+        ],
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+        },
+    })
+
+
 @app.patch("/internal/v1/admin/users/<user_public_id>/status")
 @require_services("manager-admin-web")
 def update_admin_user_status(user_public_id):

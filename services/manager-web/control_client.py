@@ -150,6 +150,17 @@ def list_admin_users():
     return request_json("GET", "/internal/v1/admin/users")["users"]
 
 
+def list_platform_users(*, provider, status, query, page, per_page):
+    params = urllib.parse.urlencode({
+        "provider": provider,
+        "status": status,
+        "q": query,
+        "page": page,
+        "per_page": per_page,
+    })
+    return request_json("GET", f"/internal/v1/admin/platform-users?{params}")
+
+
 def update_admin_user_status(actor_public_id, user_public_id, status):
     user_id = urllib.parse.quote(user_public_id, safe="")
     return request_json(

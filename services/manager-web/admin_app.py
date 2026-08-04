@@ -344,25 +344,42 @@ def create_instance_batch():
         "basic_auth_password", "basic_auth_enabled",
     }
     product_fields = legacy_fields | {"product", "version", "confirm_latest"}
+    identity_legacy_fields = (legacy_fields - {"owner_username"}) | {
+        "owner_identity_type", "owner_identity",
+    }
+    identity_product_fields = identity_legacy_fields | {
+        "product", "version", "confirm_latest",
+    }
     if not rows or len(rows) > MAX_INSTANCE_BATCH_ROWS:
         return redirect(url_for(
             "create_instance_page",
             error=f"CSV 必须包含 1-{MAX_INSTANCE_BATCH_ROWS} 行数据。",
         ))
     fields = frozenset(rows[0])
-    if fields not in {frozenset(legacy_fields), frozenset(product_fields)}:
+    accepted_fields = {
+        frozenset(legacy_fields), frozenset(product_fields),
+        frozenset(identity_legacy_fields), frozenset(identity_product_fields),
+    }
+    if fields not in accepted_fields:
         return redirect(url_for("create_instance_page", error="CSV 表头不符合要求。"))
-    try:
-        users = {
-            user["username"].casefold(): user
-            for user in control_client.list_admin_users()
-            if user["status"] == "active"
-        }
-    except control_client.ControlError as exc:
-        return redirect(url_for("create_instance_page", error=str(exc)))
+    identity_format = fields in {
+        frozenset(identity_legacy_fields), frozenset(identity_product_fields),
+    }
+    users = {}
+    if not identity_format:
+        try:
+            users = {
+                user["username"].casefold(): user
+                for user in control_client.list_admin_users()
+                if user["status"] == "active"
+            }
+        except control_client.ControlError as exc:
+            return redirect(url_for("create_instance_page", error=str(exc)))
     instances = []
     seen = set()
     for line_number, row in enumerate(rows, 2):
+        owner_identity_type = (row.get("owner_identity_type") or "").strip()
+        owner_identity = (row.get("owner_identity") or "").strip()
         owner = users.get((row.get("owner_username") or "").strip().casefold())
         legacy_user_id = (row.get("legacy_user_id") or "").strip()
         instance_name = (row.get("instance_name") or "").strip()
@@ -371,7 +388,14 @@ def create_instance_batch():
         product = (row.get("product") or "openclaw").strip().lower()
         version = (row.get("version") or "").strip()
         confirm_latest = (row.get("confirm_latest") or "false").strip().lower()
-        if owner is None:
+        if identity_format and (
+            owner_identity_type not in {"local", "campus-uis"}
+            or not owner_identity or len(owner_identity) > 128
+        ):
+            return redirect(url_for(
+                "create_instance_page", error=f"第 {line_number} 行 Owner 身份无效。",
+            ))
+        if not identity_format and owner is None:
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行 Owner 不存在或未启用。",
             ))
@@ -419,7 +443,10 @@ def create_instance_batch():
             ))
         seen.add(legacy_user_id)
         instance = {
-            "owner_user_public_id": owner["public_id"],
+            **(
+                {"owner_identity_type": owner_identity_type, "owner_identity": owner_identity}
+                if identity_format else {"owner_user_public_id": owner["public_id"]}
+            ),
             "legacy_user_id": legacy_user_id,
             "instance_name": instance_name,
             "product": product,
@@ -427,7 +454,7 @@ def create_instance_batch():
             "basic_auth_enabled": enabled == "true",
             "basic_auth_password": password,
         }
-        if fields == frozenset(product_fields):
+        if fields in {frozenset(product_fields), frozenset(identity_product_fields)}:
             instance["confirm_latest"] = confirm_latest == "true"
         instances.append(instance)
     try:

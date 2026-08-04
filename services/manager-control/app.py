@@ -739,7 +739,8 @@ def create_instance_batch():
     existing = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
 
     allowed = {
-        "owner_user_public_id", "legacy_user_id", "instance_name", "product",
+        "owner_user_public_id", "owner_identity_type", "owner_identity",
+        "legacy_user_id", "instance_name", "product",
         "basic_auth_enabled", "basic_auth_password", "version", "confirm_latest",
     }
     legacy_ids = []
@@ -748,6 +749,24 @@ def create_instance_batch():
     for index, row in enumerate(rows, 1):
         if not isinstance(row, dict) or set(row) - allowed:
             return jsonify({"error": f"invalid fields in row {index}"}), 400
+        owner_public_id = row.get("owner_user_public_id")
+        owner_identity_type = row.get("owner_identity_type")
+        owner_identity = row.get("owner_identity")
+        if owner_public_id is not None and (
+            owner_identity_type is not None or owner_identity is not None
+        ):
+            return jsonify({"error": f"owner fields are mutually exclusive in row {index}"}), 400
+        if owner_public_id is None:
+            if owner_identity_type not in {"local", "campus-uis"}:
+                return jsonify({"error": f"invalid owner_identity_type in row {index}"}), 400
+            if (
+                not isinstance(owner_identity, str) or not owner_identity.strip()
+                or len(owner_identity) > 128
+            ):
+                return jsonify({"error": f"invalid owner_identity in row {index}"}), 400
+            owner_identity = owner_identity.strip()
+        elif not isinstance(owner_public_id, str) or not owner_public_id:
+            return jsonify({"error": f"invalid owner_user_public_id in row {index}"}), 400
         legacy_user_id = row.get("legacy_user_id")
         instance_name = row.get("instance_name")
         if not isinstance(legacy_user_id, str) or not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
@@ -775,18 +794,25 @@ def create_instance_batch():
                 version = default_version(product, conn=conn)
         if existing is None and (error := product_version_error(product, version, confirm_latest)):
             return jsonify({"error": f"{error} in row {index}"}), 400
-        if not isinstance(row.get("owner_user_public_id"), str) or not row["owner_user_public_id"]:
-            return jsonify({"error": f"owner_user_public_id is required in row {index}"}), 400
         legacy_ids.append(legacy_user_id)
         summaries.append({
-            "owner_user_public_id": row["owner_user_public_id"],
+            **(
+                {"owner_user_public_id": owner_public_id}
+                if owner_public_id is not None else {
+                    "owner_identity_type": owner_identity_type,
+                    "owner_identity": owner_identity,
+                }
+            ),
             "legacy_user_id": legacy_user_id,
             "instance_name": instance_name.strip(),
             "product": product,
             "basic_auth_enabled": row["basic_auth_enabled"],
             **({"version": requested_version} if requested_version else {}),
         })
-        prepared_rows.append({**row, "version": version})
+        prepared_rows.append({
+            **row, "version": version,
+            **({"owner_identity": owner_identity} if owner_public_id is None else {}),
+        })
     if len(set(legacy_ids)) != len(legacy_ids):
         return jsonify({"error": "legacy_user_id values must be unique"}), 400
 
@@ -815,10 +841,19 @@ def create_instance_batch():
         PROVISIONING_SECRET_DIR.chmod(0o700)
         with metadata_store.connect(DB_FILE) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            for owner_public_id in {row["owner_user_public_id"] for row in prepared_rows}:
-                owner = metadata_store.get_user_by_public_id(owner_public_id, conn=conn)
+            for row in prepared_rows:
+                owner_public_id = row.get("owner_user_public_id")
+                if owner_public_id is not None:
+                    owner = metadata_store.get_user_by_public_id(owner_public_id, conn=conn)
+                elif row["owner_identity_type"] == "local":
+                    owner = metadata_store.get_user_by_username(row["owner_identity"], conn=conn)
+                else:
+                    owner = metadata_store.get_user_by_identity(
+                        "campus-uis", row["owner_identity"], conn=conn
+                    )
                 if owner is None or owner["status"] != "active":
-                    raise ValueError(f"active owner user not found: {owner_public_id}")
+                    raise ValueError("active owner user not found")
+                row["owner_user_public_id"] = owner["public_id"]
             metadata_store.create_execution_job(
                 request_id=request_id, actor_user_id=actor["id"],
                 action="batch.create", params={"instances": summaries}, conn=conn,

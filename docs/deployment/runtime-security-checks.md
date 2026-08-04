@@ -7,12 +7,12 @@
 `scripts/check_runtime_security.sh` 用于检查生产或测试环境中的运行时安全基线，重点覆盖：
 
 - `OPENCLAW_INTERNAL_TOKEN` 是否已配置
-- Nginx 代理到 `manager-web` 的配置是否携带 `X-OpenClaw-Internal-Token`
+- Nginx 代理到拆分 Web 服务的配置是否携带 `X-OpenClaw-Internal-Token`
 - Nginx 配置中的内部令牌值是否和 `OPENCLAW_INTERNAL_TOKEN` 一致
-- `manager-web` 是否只连接 `manager-net`
+- `manager-user-web` 和 `manager-admin-web` 是否只连接 `manager-net`
 - `openclaw-nginx` 是否同时连接 `agent-net` 和 `manager-net`
 - 用户实例容器是否没有连接 `manager-net`
-- 从 Nginx 容器内部不带 token 直连管理路由是否被 `manager-web` 返回 `403`
+- 从 Nginx 容器内部不带 token 直连管理路由是否被拆分 Web 服务返回 `403`
 - `model-proxy` token 目录是否存在
 - 每个实例级 `.token` 是否有对应的非空 `.models` 模型白名单
 - `openclaw-model-proxy` 容器是否连接 `agent-net`
@@ -48,7 +48,8 @@ config/openclaw-manager.env
 OPENCLAW_INTERNAL_TOKEN=
 NGINX_CONF_DIR=/data/docker/nginx/conf
 NGINX_CONTAINER_NAME=openclaw-nginx
-MANAGER_WEB_CONTAINER_NAME=openclaw-manager-web
+MANAGER_USER_WEB_CONTAINER_NAME=openclaw-manager-user-web
+MANAGER_ADMIN_WEB_CONTAINER_NAME=openclaw-manager-admin-web
 MODEL_PROXY_CONTAINER_NAME=openclaw-model-proxy
 MODEL_PROXY_TOKEN_DIR=/data/docker/openclaw-public/model-proxy-tokens
 USER_CONTAINER_PREFIX=openclaw_
@@ -62,7 +63,7 @@ USER_CONTAINER_PREFIX=openclaw_
 - 修改 Nginx 配置后
 - 修改 `OPENCLAW_INTERNAL_TOKEN` 后
 - 修改 model-proxy token 或 `.models` 白名单后
-- 重建 `manager-web` 或 `openclaw-nginx` 后
+- 重建 `manager-user-web`、`manager-admin-web` 或 `openclaw-nginx` 后
 - 批量创建或恢复用户实例后
 
 ## 和元数据一致性检查的区别
@@ -80,6 +81,6 @@ USER_CONTAINER_PREFIX=openclaw_
 
 - 网络隔离
 - 内部代理令牌
-- Nginx 到 `manager-web` 的受信代理路径
+- Nginx 到拆分 Web 服务的受信代理路径
 
 两者建议都运行。

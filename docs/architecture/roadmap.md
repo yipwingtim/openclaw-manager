@@ -25,9 +25,9 @@ for completing the multi-product control plane.
   `manager-executor` 已拆分部署，用户门户不再需要宿主机高权限挂载。
 - The global `/admin/*` portal now runs on `manager-admin-web`, while
   per-instance `/admin/` redirects through `manager-user-web`. The legacy
-  `manager-web` remains only as a temporary rollback target.
+  `manager-web` service and container have been retired from production.
 - 全局 `/admin/*` 管理门户现已由 `manager-admin-web` 提供，实例独立端口下的
-  `/admin/` 则转入 `manager-user-web`。旧 `manager-web` 仅作为临时回滚目标保留。
+  `/admin/` 则转入 `manager-user-web`。旧 `manager-web` 服务和容器已从生产环境退役。
 - OpenClaw and EvoScientist adapters declare capabilities. Existing runtime
   lifecycle methods accept instance records and resolve targets from
   `runtime_identifier`; OpenClaw creation and legacy Nginx/file paths still use
@@ -66,21 +66,20 @@ for completing the multi-product control plane.
    结构化 Executor 动作。
 9. 管理员功能迁移以及生产 `/admin/*` 切换到 `manager-admin-web`。
 
-## Current Transition: Retire Legacy manager-web | 当前过渡：退出旧 manager-web
+## Completed: Retire Legacy manager-web | 已完成：退出旧 manager-web
 
-- Verify that existing as well as newly generated instance `/admin/` routes use
-  `manager-user-web`, not the compatibility container.
-- 验证历史及新生成的实例 `/admin/` 路由均使用 `manager-user-web`，不再依赖兼容容器。
-- Keep the legacy container during the production rollback window, then remove
-  the service and its Docker Socket, Nginx, repository, and writable runtime
-  mounts.
-- 在生产回滚观察期内保留旧容器，随后删除该服务及其 Docker Socket、Nginx、仓库和
-  可写运行时挂载。
+- Existing and newly generated instance `/admin/` routes use `manager-user-web`;
+  global `/admin/*` routes use `manager-admin-web`.
+- 历史及新生成的实例 `/admin/` 路由均使用 `manager-user-web`，全局 `/admin/*` 使用
+  `manager-admin-web`。
+- Production Compose, active Nginx configuration, and the running Nginx
+  configuration no longer reference the legacy service.
+- 生产 Compose、生效的 Nginx 配置及 Nginx 实际加载配置均不再引用旧服务。
 - Continue using `legacy_user_id` only for existing OpenClaw filesystem and
   Nginx compatibility until those paths are replaced.
 - 在对应路径替换前，`legacy_user_id` 仅用于既有 OpenClaw 文件系统与 Nginx 兼容。
 
-## Next: Hermes MVP | 下一步：Hermes MVP
+## Completed: Hermes MVP | 已完成：Hermes MVP
 
 - Support Hermes registration and single-container creation plus start, stop,
   restart, status, logs, access, recoverable deletion, restore, and version

@@ -2,7 +2,9 @@
 
 ## 1. 功能定位
 
-`manager-web` 同时承载兼容管理页面和统一多实例用户门户。
+`manager-user-web` 承载统一多实例用户门户和实例端口内的兼容管理入口；
+`manager-admin-web` 承载全局管理员后台。高权限运行时操作由结构化的
+`manager-control` 和 `manager-executor` 完成。
 
 它的目标不是给用户开放 SSH、容器 shell 或宿主机权限，而是把常用管理动作封装成受控 Web 操作。用户只看到自己的实例信息和平台允许执行的白名单动作。
 
@@ -84,34 +86,37 @@ https://<PUBLIC_HOST>:<USER_PORT>/admin/
 https://<PUBLIC_HOST>:<USER_PORT>/admin/help
 ```
 
-该入口由每个用户实例的 Nginx 配置代理到 `manager-web`：
+该入口由每个用户实例的 Nginx 配置代理到 `manager-user-web`：
 
 ```text
 User Browser
   -> https://<PUBLIC_HOST>:<USER_PORT>/admin/
   -> openclaw-nginx
   -> HTTPS + Basic Auth
-  -> openclaw-manager-web:8080/instance-admin/
-  -> scripts/approve_device.sh / Docker API / user workspace
+  -> openclaw-manager-user-web:8080/instance-admin/
+  -> manager-control / manager-executor-api
 ```
 
-Nginx 会通过 `X-OpenClaw-User` header 将当前实例的 `user_id` 传给 `manager-web`，因此用户不需要在 `/admin/` 页面再次选择自己的账号。
+Nginx 会通过 `X-OpenClaw-User` header 将当前实例的 `user_id` 传给
+`manager-user-web`，因此用户不需要在 `/admin/` 页面再次选择自己的账号。
 
-`X-OpenClaw-User` 是内部信任 header，只应由 Nginx 注入。用户 OpenClaw 容器应只加入 `agent-net`，`manager-web` 应只加入 `manager-net`，Nginx 同时加入两个网络并作为唯一反向代理入口。
+`X-OpenClaw-User` 是内部信任 header，只应由 Nginx 注入。用户 OpenClaw 容器不应加入
+`manager-net`；拆分后的管理服务只加入 `manager-net`，Nginx 作为受信反向代理连接所需网络。
 
-生产环境启用网络隔离时，应先创建 `manager-net` 并让 Nginx 同时加入 `agent-net` 和 `manager-net`，再重建 `manager-web`。如果先把 `manager-web` 移到 `manager-net`，但 Nginx 尚未加入该网络，实例端口 `/admin/` 会返回 502。
+生产环境启用网络隔离时，应先创建 `manager-net` 并让 Nginx 加入该网络，再重建拆分后的
+管理服务。Nginx 无法访问 `manager-user-web` 时，实例端口 `/admin/` 会返回 502。
 
 还需要把 `manager-net` 写入 Nginx 的 compose 文件；只执行 `docker network connect manager-net openclaw-nginx` 属于运行时变更，未来 Nginx 容器被 compose 重建后可能丢失该网络。
 
 可用以下命令验证隔离是否生效：
 
 ```bash
-docker exec openclaw-nginx sh -lc 'wget -qO- -T 3 http://openclaw-manager-web:8080/ >/dev/null && echo "[OK] nginx can reach manager-web"'
-docker exec openclaw_<user_id> sh -lc 'getent hosts openclaw-manager-web || true'
-docker exec openclaw_<user_id> sh -lc 'wget -qO- -T 3 http://openclaw-manager-web:8080/ 2>&1 || echo "[OK] blocked"'
+docker exec openclaw-nginx sh -lc 'wget -qO- -T 3 http://openclaw-manager-user-web:8080/health >/dev/null && echo "[OK] nginx can reach manager-user-web"'
+docker exec openclaw_<user_id> sh -lc 'getent hosts openclaw-manager-user-web || true'
+docker exec openclaw_<user_id> sh -lc 'wget -qO- -T 3 http://openclaw-manager-user-web:8080/health 2>&1 || echo "[OK] blocked"'
 ```
 
-预期结果：Nginx 可以访问 `manager-web`；普通用户实例容器不能解析或不能访问 `openclaw-manager-web:8080`。
+预期结果：Nginx 可以访问 `manager-user-web`；普通用户实例容器不能解析或访问该服务。
 
 如果文件名在允许目录中唯一，也可以使用直链下载：
 
@@ -134,21 +139,21 @@ User Browser
   -> https://<PUBLIC_HOST>:30015
   -> openclaw-nginx
   -> HTTPS + Basic Auth
-  -> openclaw-manager-web:8080
-  -> scripts/approve_device.sh / Docker API
+  -> openclaw-manager-admin-web:8080
+  -> manager-control / manager-executor
 ```
 
-`manager-web` 自身仍然只通过本机端口暴露：
+`manager-admin-web` 还通过本机回环端口提供部署检查入口：
 
 ```text
-127.0.0.1:18082 -> openclaw-manager-web:8080
+127.0.0.1:18083 -> openclaw-manager-admin-web:8080
 ```
 
-外部用户不应直接访问 `18082`，也不应将该端口加入公网白名单。
+外部用户不应直接访问 `18083`，也不应将该端口加入公网白名单。
 
 ## 4. 服务部署
 
-`manager-web` 定义在：
+拆分后的 Web 服务定义在：
 
 ```text
 services/docker-compose.yml
@@ -158,21 +163,20 @@ services/docker-compose.yml
 
 ```bash
 cd /data/docker/openclaw-manager/services
-docker compose up -d --build manager-web
+docker compose up -d --build manager-user-web manager-admin-web
 ```
 
 检查服务状态：
 
 ```bash
-docker ps --filter name=openclaw-manager-web
-docker logs --tail 50 openclaw-manager-web
+docker compose ps manager-user-web manager-admin-web
+docker compose logs --tail=50 manager-user-web manager-admin-web
 ```
 
 本机测试：
 
 ```bash
-curl -I http://127.0.0.1:18082/
-curl -I http://127.0.0.1:18082/me
+curl -I http://127.0.0.1:18083/health
 ```
 
 ## 5. Nginx 外部入口
@@ -184,10 +188,10 @@ curl -I http://127.0.0.1:18082/me
 新建实例时，`scripts/create_user.sh` 会在用户 Nginx 配置中自动加入：
 
 ```nginx
-upstream manager_web_backend_<port> {
-    zone manager_web_backend_<port> 64k;
+upstream manager_user_web_backend_<port> {
+    zone manager_user_web_backend_<port> 64k;
     resolver 127.0.0.11 valid=10s ipv6=off;
-    server openclaw-manager-web:8080 resolve;
+    server openclaw-manager-user-web:8080 resolve;
 }
 
 location = /admin {
@@ -198,7 +202,7 @@ location /admin/ {
     auth_basic "OpenClaw Login";
     auth_basic_user_file /etc/nginx/auth/.htpasswd;
 
-    proxy_pass http://manager_web_backend_<port>/instance-admin/;
+    proxy_pass http://manager_user_web_backend_<port>/instance-admin/;
 
     proxy_set_header X-OpenClaw-User "<user_id>";
 }
@@ -235,11 +239,18 @@ Nginx 配置文件：
 示例配置：
 
 ```nginx
-upstream manager_web_backend {
-    zone manager_web_backend 64k;
+upstream manager_user_web_backend {
+    zone manager_user_web_backend 64k;
     resolver 127.0.0.11 valid=10s ipv6=off;
     resolver_timeout 5s;
-    server openclaw-manager-web:8080 resolve;
+    server openclaw-manager-user-web:8080 resolve;
+}
+
+upstream manager_admin_web_backend {
+    zone manager_admin_web_backend 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    server openclaw-manager-admin-web:8080 resolve;
 }
 
 server {
@@ -251,11 +262,15 @@ server {
 
     client_max_body_size 10M;
 
-    location / {
-        auth_basic "OpenClaw Manager";
-        auth_basic_user_file /etc/nginx/auth/.htpasswd;
+    location ^~ /admin {
+        proxy_pass http://manager_admin_web_backend;
 
-        proxy_pass http://manager_web_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://manager_user_web_backend;
 
         proxy_buffering off;
         proxy_request_buffering off;
@@ -300,17 +315,18 @@ docker compose up -d
 
 ## 6. 安全边界
 
-`manager-web` 需要访问 Docker API，并会调用管理脚本。因此它比普通 Web 页面权限更高。
+Web 服务不挂载 Docker Socket、元数据库、仓库或 Nginx 配置。Docker 与宿主机操作只由
+`manager-executor` 和 `manager-executor-api` 通过结构化白名单接口执行。
 
 必须遵守以下约束：
 
-- 不直接公网开放 `18082`
+- 不直接公网开放 `18083`
 - 不开放容器 shell
 - 不给用户 SSH 权限
 - 所有用户动作必须是白名单动作
 - 管理入口必须放在 Nginx HTTPS 后面
 - 管理入口必须启用 Basic Auth 或更强认证
-- 后续应增加平台登录、用户与实例绑定、审计日志
+- Control 和 Executor 必须再次校验实例权限、产品能力并记录审计日志
 
 实例端口 `/admin/` 依赖 Nginx 注入的 `X-OpenClaw-User` header 来绑定当前实例用户；全局 `30015` 管理入口仍依赖认证用户或管理员权限。
 
@@ -408,7 +424,8 @@ Auth；EvoScientist 使用 `latest` 时必须将 `confirm_latest` 设为 `true`�
 
 批量安装 Skill 功能只允许选择 `MANAGER_SKILL_PRESETS` 中配置的白名单 Skill。页面会默认填入当前筛选结果中的运行中实例，管理员可在提交前编辑目标实例列表。结构化安装动作会拒绝 OpenClaw 内置 Skill，以及 ClawHub 搜索中候选数量不等于一的 slug；实际执行的是固定模板 `docker exec openclaw_<user_id> openclaw skills install <skill_id>`。OpenClaw 2026.6.6 尚不接受搜索结果中的 `owner/slug` reference，因此当前校验只能拒绝提交时已存在的重名候选，不能固定安装来源；在上游 CLI 支持唯一 reference 前，不应将高风险通用 slug 加入白名单。
 
-文件能力当前由 `manager-web` 直接处理：
+文件能力由 `manager-user-web` 校验用户权限和产品能力，再通过 `manager-executor-api`
+访问服务端解析的实例目录：
 
 - 上传文件写入 `/data/docker/openclaw-public/users/<user_id>/uploads`
 - 下载只允许读取用户目录下的 `workspace`、`workspaces` 和 `uploads`
@@ -437,19 +454,15 @@ Auth；EvoScientist 使用 `latest` 时必须将 `confirm_latest` 设为 `true`�
 /data/docker/openclaw-public/users/<user_id>/backups/version-upgrades/<timestamp>/post-check.txt
 ```
 
-`manager-web` 通过 Web 页面调用管理脚本，并需要 Docker API 管理实例容器。容器内需要 Docker CLI、Docker Compose plugin、`/var/run/docker.sock`，并挂载 OpenClaw Manager 项目目录、OpenClaw public 数据目录、Nginx conf/auth/compose 目录。`manager-web` 应只加入 `manager-net`；用户实例容器应只加入 `agent-net`；Nginx 需要同时加入两个网络。
+`manager-user-web` 和 `manager-admin-web` 不直接调用管理脚本或 Docker API。宿主机目录、
+Docker Socket、Nginx 配置和认证目录仅按职责挂载到 Executor 服务。
 
-Web 创建实例时，`create_user.sh` 会在成功后把用户目录、用户 Nginx 配置和 `users.csv` 的 owner 归还给宿主机数据目录 owner，避免后续宿主机脚本因为 root-owned 文件失败。Web 批量创建还要求 `/data/docker/openclaw-public/batches`、`users.csv`、`ports.txt`、Nginx 用户配置目录和 `auth/users` 对 manager-web 执行用户可写；可通过 `scripts/check_bootstrap_readiness.sh` 做部署前检查。
+Web 创建实例时由 Control 创建结构化任务，再由 Executor 调用固定实现。可通过
+`scripts/check_bootstrap_readiness.sh` 做部署前检查。
 
 ## 8. 后续计划
 
 建议按以下顺序演进：
 
-- 使用 `gunicorn` 替代 Flask development server
-- 增加平台登录
-- 建立用户和实例绑定关系
-- 增加审计日志
-- 增加 CSRF 防护
-- 将脚本调用收敛到 action dispatcher
 - 支持更多用户自助动作
 - 后续使用域名和 443 入口替代临时端口访问

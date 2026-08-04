@@ -162,6 +162,16 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn("显示 {{ pagination.start }}-{{ pagination.end }}", template)
         self.assertIn("<th>访问认证</th><th>操作</th>", template)
 
+    def test_admin_instances_shortens_evoscientist_digest_in_version_column(self):
+        template = (
+            ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('instance.product == "evoscientist"', template)
+        self.assertIn('instance.version.startswith("sha256:")', template)
+        self.assertIn('title="{{ instance.version }}"', template)
+        self.assertIn('{{ instance.version[:21] }}…', template)
+
     def test_admin_instances_fetches_runtime_statuses_in_bounded_batches(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         instances = [

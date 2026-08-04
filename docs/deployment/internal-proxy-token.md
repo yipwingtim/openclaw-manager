@@ -1,16 +1,17 @@
 # Internal Proxy Token Deployment
 
-本文档说明如何启用 `manager-web` 与 Nginx 之间的内部代理令牌校验。
+本文档说明如何启用拆分 Web 服务与 Nginx 之间的内部代理令牌校验。
 
 ## 目标
 
-OpenClaw Manager 的管理入口由 Nginx 反向代理到 `manager-web`。启用内部代理令牌后，`manager-web` 不再无条件信任代理请求，而是要求请求携带共享密钥请求头：
+OpenClaw Manager 的入口由 Nginx 分别代理到 `manager-user-web` 和
+`manager-admin-web`。启用内部代理令牌后，Web 服务要求请求携带共享密钥请求头：
 
 ```text
 X-OpenClaw-Internal-Token
 ```
 
-该机制用于防止能访问 `manager-web:8080` 的其他容器绕过 Nginx 直接访问管理端路由。
+该机制用于防止能访问 Web 服务端口的其他容器绕过 Nginx 直接访问管理路由。
 
 ## 兼容行为
 
@@ -44,9 +45,9 @@ OPENCLAW_INTERNAL_TOKEN=<replace-with-generated-token>
 /data/docker/openclaw-manager/config/openclaw-manager.env
 ```
 
-`manager-web` 通过 Compose `env_file` 读取该文件；不要在 `environment` 中用空默认值覆盖 `OPENCLAW_INTERNAL_TOKEN`。
+拆分 Web 服务通过 Compose `env_file` 读取该文件；不要在 `environment` 中用空默认值覆盖 `OPENCLAW_INTERNAL_TOKEN`。
 
-3. 更新所有代理到 `manager-web` 的 Nginx 配置，在对应 `location` 中加入：
+3. 更新所有代理到拆分 Web 服务的 Nginx 配置，在对应 `location` 中加入：
 
 ```nginx
 proxy_set_header X-OpenClaw-Internal-Token "<replace-with-generated-token>";
@@ -64,11 +65,11 @@ docker exec openclaw-nginx nginx -t
 docker exec openclaw-nginx nginx -s reload
 ```
 
-5. 重建或重启 `manager-web`，让环境变量生效：
+5. 重建或重启拆分 Web 服务，让环境变量生效：
 
 ```bash
 cd /data/docker/openclaw-manager/services
-docker compose up -d --build manager-web
+docker compose up -d --build manager-user-web manager-admin-web
 ```
 
 ## 新实例行为
@@ -82,10 +83,10 @@ docker compose up -d --build manager-web
 
 ## 验证
 
-1. 查看 `manager-web` 日志，确认不再出现未配置令牌的 warning：
+1. 查看拆分 Web 服务日志，确认不再出现未配置令牌的 warning：
 
 ```bash
-docker logs --tail=80 openclaw-manager-web
+docker compose logs --tail=80 manager-user-web manager-admin-web
 ```
 
 2. 浏览器访问管理端入口和实例 `/admin/` 页面，确认仍能正常打开。
@@ -94,7 +95,8 @@ docker logs --tail=80 openclaw-manager-web
 
 ## 回滚
 
-如果启用后出现异常，可以先移除或注释 `OPENCLAW_INTERNAL_TOKEN`，然后重建或重启 `manager-web`。Nginx 中已经添加的 `X-OpenClaw-Internal-Token` 请求头可以暂时保留，不会影响未启用令牌校验的 `manager-web`。
+如果启用后出现异常，可以先移除或注释 `OPENCLAW_INTERNAL_TOKEN`，然后重建拆分 Web
+服务。Nginx 中已添加的请求头可以暂时保留。
 
 ## 安全注意事项
 

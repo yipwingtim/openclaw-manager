@@ -135,6 +135,9 @@ operation. It never accepts or stores passwords.
 为新身份创建内部平台用户，写入 `user_identities(provider=campus-uis)` 并记录
 `identity.import_uis` 操作；不会接收或保存密码。
 
+管理员可通过 `/admin/platform-users` 查看 Local/UIS 身份来源并管理
+`active`、`disabled`、`locked` 状态。停用或锁定用户会注销其现有平台 Session。
+
 New identities receive a deterministic internal username and are not merged with
 an unbound Local user. Existing bindings keep their platform username. A blank
 `status` defaults new users to `active` and preserves the status of existing users.

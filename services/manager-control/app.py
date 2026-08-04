@@ -586,12 +586,68 @@ def admin_users():
     with metadata_store.connect(DB_FILE) as conn:
         users = conn.execute(
             """
-            SELECT public_id, username, display_name, role, status
-            FROM users
-            ORDER BY normalized_username
+            SELECT
+                u.public_id, u.username, u.display_name, u.role, u.status,
+                u.provisioning_source,
+                GROUP_CONCAT(DISTINCT i.provider) AS identity_providers
+            FROM users u
+            LEFT JOIN user_identities i ON i.user_id = u.id
+            WHERE u.status != 'deleted'
+            GROUP BY u.id
+            ORDER BY u.normalized_username
             """
         ).fetchall()
-    return jsonify({"users": [dict(user) for user in users]})
+    return jsonify({"users": [
+        {
+            **dict(user),
+            "identity_providers": sorted(
+                filter(None, (user["identity_providers"] or "").split(","))
+            ),
+        }
+        for user in users
+    ]})
+
+
+@app.patch("/internal/v1/admin/users/<user_public_id>/status")
+@require_services("manager-admin-web")
+def update_admin_user_status(user_public_id):
+    payload = request.get_json(silent=True) or {}
+    new_status = payload.get("status")
+    if set(payload) != {"status"} or new_status not in {"active", "disabled", "locked"}:
+        return jsonify({"error": "invalid user status"}), 400
+
+    with metadata_store.connect(DB_FILE) as conn:
+        actor = metadata_store.get_user_by_public_id(actor_public_id(), conn=conn)
+        if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+            return jsonify({"error": "active administrator not found"}), 403
+        target = metadata_store.get_user_by_public_id(user_public_id, conn=conn)
+        if target is None:
+            return jsonify({"error": "platform user not found"}), 404
+        if target["id"] == actor["id"] and new_status != "active":
+            return jsonify({"error": "administrator cannot disable or lock self"}), 409
+
+        conn.execute(
+            "UPDATE users SET status = ?, updated_at = ? WHERE id = ?",
+            (new_status, metadata_store.utc_now(), target["id"]),
+        )
+        if new_status != "active":
+            conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (target["id"],))
+        metadata_store.record_operation(
+            action="platform_user.status",
+            status="success",
+            actor_user_id=actor["id"],
+            source_service=g.source_service,
+            message=f"user={target['public_id']} status={new_status}",
+            conn=conn,
+        )
+        updated = conn.execute(
+            """
+            SELECT public_id, username, display_name, role, status, provisioning_source
+            FROM users WHERE id = ?
+            """,
+            (target["id"],),
+        ).fetchone()
+    return jsonify({"user": dict(updated)})
 
 
 @app.post("/internal/v1/admin/instances")

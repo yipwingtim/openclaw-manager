@@ -347,6 +347,12 @@ class ManagerControlApiTests(unittest.TestCase):
         )
 
     def test_admin_lists_platform_users_without_sensitive_fields(self):
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "local", "alice", db_file=self.db_file
+        )
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "uis-secret-subject", db_file=self.db_file
+        )
         with patch.object(
             self.control.request,
             "headers",
@@ -363,8 +369,94 @@ class ManagerControlApiTests(unittest.TestCase):
                 "display_name": None,
                 "role": "user",
                 "status": "active",
+                "provisioning_source": "local",
+                "identity_providers": ["campus-uis", "local"],
             }],
         )
+        serialized = repr(response.get_json())
+        self.assertNotIn("uis-secret-subject", serialized)
+        self.assertNotIn("profile_json", serialized)
+        self.assertNotIn("password_hash", serialized)
+
+    def test_admin_disables_platform_user_revokes_sessions_and_records_audit(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        self.control.metadata_store.create_session(
+            "alice-session", self.user["id"], "local", "csrf",
+            "2999-01-01T00:00:00+00:00", db_file=self.db_file,
+        )
+        with patch.object(
+            self.control.request,
+            "headers",
+            {
+                "Authorization": "Bearer admin-token",
+                "X-Actor-User-Public-Id": admin["public_id"],
+            },
+        ), patch.object(
+            self.control.request, "get_json", return_value={"status": "disabled"}
+        ):
+            response, status = response_parts(
+                self.control.update_admin_user_status(self.user["public_id"])
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["user"]["status"], "disabled")
+        self.assertIsNone(self.control.metadata_store.get_session("alice-session", db_file=self.db_file))
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            operation = conn.execute(
+                "SELECT action, actor_user_id FROM operation_records ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(dict(operation), {
+            "action": "platform_user.status", "actor_user_id": admin["id"],
+        })
+
+    def test_admin_cannot_disable_self(self):
+        self.control.metadata_store.set_user_role(self.user["id"], "admin", db_file=self.db_file)
+        with patch.object(
+            self.control.request,
+            "headers",
+            {
+                "Authorization": "Bearer admin-token",
+                "X-Actor-User-Public-Id": self.user["public_id"],
+            },
+        ), patch.object(
+            self.control.request, "get_json", return_value={"status": "locked"}
+        ):
+            response, status = response_parts(
+                self.control.update_admin_user_status(self.user["public_id"])
+            )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(response.get_json(), {"error": "administrator cannot disable or lock self"})
+        self.assertEqual(
+            self.control.metadata_store.get_user_by_public_id(
+                self.user["public_id"], db_file=self.db_file
+            )["status"],
+            "active",
+        )
+
+    def test_non_admin_and_invalid_status_cannot_update_platform_user(self):
+        headers = {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": self.user["public_id"],
+        }
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value={"status": "disabled"}
+        ):
+            denied, denied_status = response_parts(
+                self.control.update_admin_user_status(self.user["public_id"])
+            )
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value={"status": "deleted"}
+        ):
+            invalid, invalid_status = response_parts(
+                self.control.update_admin_user_status(self.user["public_id"])
+            )
+
+        self.assertEqual(denied_status, 403)
+        self.assertEqual(denied.get_json(), {"error": "active administrator not found"})
+        self.assertEqual(invalid_status, 400)
+        self.assertEqual(invalid.get_json(), {"error": "invalid user status"})
 
     def test_admin_reads_metadata_summary_without_sensitive_fields(self):
         instance = self.control.metadata_store.create_instance(

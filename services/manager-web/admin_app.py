@@ -327,6 +327,57 @@ def update_default_versions():
     return redirect(url_for("default_versions_page"))
 
 
+@app.get("/admin/platform-users")
+def platform_users():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    provider = request.args.get("provider", "all").strip().lower()
+    status_filter = request.args.get("status", "all").strip().lower()
+    query = request.args.get("q", "").strip()
+    if provider not in {"all", "local", "campus-uis"}:
+        provider = "all"
+    if status_filter not in {"all", "active", "disabled", "locked"}:
+        status_filter = "all"
+    try:
+        users = control_client.list_admin_users()
+        error = request.args.get("error", "")
+    except control_client.ControlError as exc:
+        users, error = [], str(exc)
+    needle = query.casefold()
+    users = [
+        user for user in users
+        if (provider == "all" or provider in user.get("identity_providers", []))
+        and (status_filter == "all" or user["status"] == status_filter)
+        and (not needle or needle in " ".join(
+            (user.get("username") or "", user.get("display_name") or "")
+        ).casefold())
+    ]
+    return render_template(
+        "admin_platform_users.html",
+        users=users,
+        provider_filter=provider,
+        status_filter=status_filter,
+        query=query,
+        actor_public_id=current["public_id"],
+        error=error,
+    )
+
+
+@app.post("/admin/platform-users/<user_public_id>/status")
+def update_platform_user_status(user_public_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        control_client.update_admin_user_status(
+            current["public_id"], user_public_id, request.form.get("status", "")
+        )
+    except control_client.ControlError as exc:
+        return redirect(url_for("platform_users", error=str(exc)))
+    return redirect(url_for("platform_users"))
+
+
 @app.post("/admin/create-instance/batch")
 def create_instance_batch():
     current = web_common.actor()

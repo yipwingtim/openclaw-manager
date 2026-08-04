@@ -150,6 +150,16 @@ def list_admin_users():
     return request_json("GET", "/internal/v1/admin/users")["users"]
 
 
+def update_admin_user_status(actor_public_id, user_public_id, status):
+    user_id = urllib.parse.quote(user_public_id, safe="")
+    return request_json(
+        "PATCH",
+        f"/internal/v1/admin/users/{user_id}/status",
+        actor_public_id=actor_public_id,
+        payload={"status": status},
+    )["user"]
+
+
 def create_admin_instance(payload):
     return request_json("POST", "/internal/v1/admin/instances", payload=payload)
 

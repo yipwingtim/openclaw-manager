@@ -135,6 +135,17 @@ def default_version(product, conn=None):
     return value
 
 
+def product_version_error(product, version, confirm_latest=False):
+    if product == "evoscientist":
+        if version != "latest" and not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", version or ""):
+            return "EvoScientist version must be latest or a sha256 digest"
+        if version == "latest" and not confirm_latest:
+            return "latest requires explicit confirmation"
+    if product == "hermes" and (version or "").startswith("sha256:"):
+        return "Hermes version must be an image tag"
+    return None
+
+
 def configured_tokens():
     return {
         service: token
@@ -640,8 +651,8 @@ def create_admin_instance():
     if version is None:
         with metadata_store.connect(DB_FILE) as conn:
             version = default_version(product, conn=conn)
-        if version and product == "evoscientist" and version == "latest" and not confirm_latest:
-            return jsonify({"error": "latest requires explicit confirmation"}), 400
+    if error := product_version_error(product, version, confirm_latest):
+        return jsonify({"error": error}), 400
 
     existing_job = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
     if existing_job is not None:
@@ -725,13 +736,15 @@ def create_instance_batch():
         return jsonify({"error": "invalid request_id"}), 400
     if not isinstance(rows, list) or not 1 <= len(rows) <= 100:
         return jsonify({"error": "instances must contain 1-100 rows"}), 400
+    existing = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
 
     allowed = {
         "owner_user_public_id", "legacy_user_id", "instance_name", "product",
-        "basic_auth_enabled", "basic_auth_password",
+        "basic_auth_enabled", "basic_auth_password", "version", "confirm_latest",
     }
     legacy_ids = []
     summaries = []
+    prepared_rows = []
     for index, row in enumerate(rows, 1):
         if not isinstance(row, dict) or set(row) - allowed:
             return jsonify({"error": f"invalid fields in row {index}"}), 400
@@ -741,12 +754,27 @@ def create_instance_batch():
             return jsonify({"error": f"invalid legacy_user_id in row {index}"}), 400
         if not isinstance(instance_name, str) or not instance_name.strip() or len(instance_name) > 128:
             return jsonify({"error": f"invalid instance_name in row {index}"}), 400
-        if row.get("product") != "openclaw" or not product_supports("openclaw", "create"):
+        product = row.get("product")
+        if product not in {"openclaw", "hermes", "evoscientist"} or not product_supports(product, "create"):
             return jsonify({"error": f"unsupported product in row {index}"}), 400
         if not isinstance(row.get("basic_auth_enabled"), bool):
             return jsonify({"error": f"invalid basic_auth_enabled in row {index}"}), 400
         if not isinstance(row.get("basic_auth_password"), str) or not row["basic_auth_password"]:
             return jsonify({"error": f"basic_auth_password is required in row {index}"}), 400
+        if product in {"hermes", "evoscientist"} and not row["basic_auth_enabled"]:
+            return jsonify({"error": f"{product} requires Basic Auth in row {index}"}), 400
+        requested_version = row.get("version")
+        version = requested_version
+        if version is not None and (not isinstance(version, str) or not VERSION_RE.fullmatch(version)):
+            return jsonify({"error": f"invalid version in row {index}"}), 400
+        confirm_latest = row.get("confirm_latest", False)
+        if not isinstance(confirm_latest, bool):
+            return jsonify({"error": f"invalid confirm_latest in row {index}"}), 400
+        if version is None and existing is None:
+            with metadata_store.connect(DB_FILE) as conn:
+                version = default_version(product, conn=conn)
+        if existing is None and (error := product_version_error(product, version, confirm_latest)):
+            return jsonify({"error": f"{error} in row {index}"}), 400
         if not isinstance(row.get("owner_user_public_id"), str) or not row["owner_user_public_id"]:
             return jsonify({"error": f"owner_user_public_id is required in row {index}"}), 400
         legacy_ids.append(legacy_user_id)
@@ -754,16 +782,17 @@ def create_instance_batch():
             "owner_user_public_id": row["owner_user_public_id"],
             "legacy_user_id": legacy_user_id,
             "instance_name": instance_name.strip(),
-            "product": "openclaw",
+            "product": product,
             "basic_auth_enabled": row["basic_auth_enabled"],
+            **({"version": requested_version} if requested_version else {}),
         })
+        prepared_rows.append({**row, "version": version})
     if len(set(legacy_ids)) != len(legacy_ids):
         return jsonify({"error": "legacy_user_id values must be unique"}), 400
 
     actor = metadata_store.get_user_by_public_id(actor_public_id, db_file=DB_FILE)
     if actor is None or actor["status"] != "active" or actor["role"] != "admin":
         return jsonify({"error": "active admin actor is required"}), 403
-    existing = metadata_store.get_execution_job(request_id, db_file=DB_FILE)
     if existing is not None:
         try:
             parent = metadata_store.create_execution_job(
@@ -786,7 +815,7 @@ def create_instance_batch():
         PROVISIONING_SECRET_DIR.chmod(0o700)
         with metadata_store.connect(DB_FILE) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            for owner_public_id in {row["owner_user_public_id"] for row in rows}:
+            for owner_public_id in {row["owner_user_public_id"] for row in prepared_rows}:
                 owner = metadata_store.get_user_by_public_id(owner_public_id, conn=conn)
                 if owner is None or owner["status"] != "active":
                     raise ValueError(f"active owner user not found: {owner_public_id}")
@@ -797,25 +826,37 @@ def create_instance_batch():
             metadata_store.update_execution_job(
                 request_id, "running", current_step="creating instances", conn=conn
             )
-            for index, row in enumerate(rows, 1):
+            for index, row in enumerate(prepared_rows, 1):
                 secret_path = PROVISIONING_SECRET_DIR / secrets.token_urlsafe(32)
                 descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(descriptor, "w", encoding="utf-8") as secret_file:
-                    secret_file.write(row["basic_auth_password"])
                 secret_paths.append(secret_path)
+                try:
+                    secret_file = os.fdopen(descriptor, "w", encoding="utf-8")
+                except Exception:
+                    os.close(descriptor)
+                    raise
+                with secret_file:
+                    secret_file.write(row["basic_auth_password"])
                 instance = metadata_store.create_instance(
-                    owner_public_id=row["owner_user_public_id"], product="openclaw",
+                    owner_public_id=row["owner_user_public_id"], product=row["product"],
                     instance_name=row["instance_name"].strip(),
                     legacy_user_id=row["legacy_user_id"],
-                    runtime_identifier=f"openclaw_{row['legacy_user_id']}",
-                    data_path=str(PROVISIONING_SECRET_DIR.parent / "users" / row["legacy_user_id"]),
+                    runtime_identifier=f"{row['product']}_{row['legacy_user_id']}",
+                    data_path=str(
+                        PROVISIONING_SECRET_DIR.parent
+                        / ("hermes" if row["product"] == "hermes" else "users")
+                        / row["legacy_user_id"]
+                    ),
                     status="provisioning", basic_auth_enabled=row["basic_auth_enabled"],
                     conn=conn,
                 )
                 metadata_store.create_execution_job(
                     request_id=f"{request_id}:{index}", parent_request_id=request_id,
                     actor_user_id=actor["id"], instance_public_id=instance["public_id"],
-                    action="instance.create", params={"secret_path": str(secret_path)},
+                    action="instance.create", params={
+                        "secret_path": str(secret_path),
+                        **({"version": row["version"]} if row["version"] else {}),
+                    },
                     conn=conn,
                 )
             parent = metadata_store.update_execution_job(
@@ -898,8 +939,10 @@ def update_default_versions():
             continue
         if not isinstance(value, str) or not VERSION_RE.fullmatch(value.strip()):
             return jsonify({"error": f"invalid {product} default version"}), 400
-        if product == "evoscientist" and value.strip() == "latest" and not payload.get("confirm_latest"):
-            return jsonify({"error": "latest requires explicit confirmation"}), 400
+        if error := product_version_error(
+            product, value.strip(), payload.get("confirm_latest", False)
+        ):
+            return jsonify({"error": error}), 400
     with metadata_store.connect(DB_FILE) as conn:
         for product, value in payload.items():
             if product not in DEFAULT_VERSION_KEYS:

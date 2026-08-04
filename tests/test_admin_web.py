@@ -322,6 +322,52 @@ class AdminWebTests(unittest.TestCase):
             "create_instance_batch_job", request_id="batch-1"
         )
 
+    def test_admin_batch_create_submits_hermes_and_evoscientist_rows(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        upload = types.SimpleNamespace(read=lambda: (
+            b"owner_username,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled\n"
+            b"alice,alice-hermes,Alice Hermes,hermes,v2026.7.20,false,h-secret,true\n"
+            b"alice,alice-evo,Alice Evo,evoscientist,latest,true,e-secret,true\n"
+        ))
+        self.admin.request.files = {"input_csv": upload}
+        users = [{"public_id": "user-1", "username": "alice", "status": "active"}]
+        result = {"parent": {"request_id": "batch-1"}, "children": []}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_users", return_value=users
+        ), patch.object(
+            self.admin.control_client, "create_instance_batch", return_value=result
+        ) as create_batch, patch.object(
+            self.admin, "url_for", return_value="batch-url"
+        ):
+            response = self.admin.create_instance_batch()
+
+        self.assertEqual(response, "batch-url")
+        self.assertEqual(
+            create_batch.call_args.args[0]["instances"],
+            [
+                {
+                    "owner_user_public_id": "user-1",
+                    "legacy_user_id": "alice-hermes",
+                    "instance_name": "Alice Hermes",
+                    "product": "hermes",
+                    "version": "v2026.7.20",
+                    "confirm_latest": False,
+                    "basic_auth_enabled": True,
+                    "basic_auth_password": "h-secret",
+                },
+                {
+                    "owner_user_public_id": "user-1",
+                    "legacy_user_id": "alice-evo",
+                    "instance_name": "Alice Evo",
+                    "product": "evoscientist",
+                    "version": "latest",
+                    "confirm_latest": True,
+                    "basic_auth_enabled": True,
+                    "basic_auth_password": "e-secret",
+                },
+            ],
+        )
+
     def test_admin_model_provider_batch_discards_legacy_api_key(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         upload = types.SimpleNamespace(read=lambda: (

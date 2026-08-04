@@ -99,7 +99,11 @@
                 {% elif instance.runtime_status == "deleted" %}<span class="badge-status badge-neutral">已删除</span>
                 {% else %}<span class="badge-status badge-neutral">未知</span>{% endif %}
               </td>
-              <td>{% if instance.version %}<span class="badge-status badge-neutral">{{ instance.version }}</span>{% else %}<span class="muted-small">未知</span>{% endif %}</td>
+              <td>
+                {% if instance.version %}
+                  <span class="badge-status badge-neutral" title="{{ instance.version }}">{% if instance.product == "evoscientist" and instance.version.startswith("sha256:") %}{{ instance.version[:21] }}…{% else %}{{ instance.version }}{% endif %}</span>
+                {% else %}<span class="muted-small">未知</span>{% endif %}
+              </td>
               <td>{% if instance.access_url %}<a href="{{ instance.access_url }}" target="_blank" rel="noreferrer">{{ instance.access_url }}</a>{% else %}<span class="muted-small">未知</span>{% endif %}</td>
               <td>
                 {% if "basic_auth" not in instance.capabilities or instance.status == "deleted" %}<span class="badge-status badge-neutral">不适用</span>

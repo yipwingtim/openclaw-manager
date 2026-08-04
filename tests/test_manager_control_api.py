@@ -378,6 +378,58 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertNotIn("profile_json", serialized)
         self.assertNotIn("password_hash", serialized)
 
+    def test_admin_platform_users_filters_uis_user_id_and_paginates(self):
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "uis-12345", db_file=self.db_file
+        )
+        local = self.control.metadata_store.create_user(
+            "bob", display_name="Bob", db_file=self.db_file
+        )
+        self.control.metadata_store.upsert_identity(
+            local["id"], "local", "bob", db_file=self.db_file
+        )
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(
+            self.control.request,
+            "args",
+            {
+                "provider": "campus-uis", "status": "active", "q": "12345",
+                "page": "1", "per_page": "10",
+            },
+        ):
+            response, status = response_parts(self.control.admin_platform_users())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["pagination"], {
+            "page": 1, "per_page": 10, "total": 1, "total_pages": 1,
+        })
+        self.assertEqual(response.get_json()["users"], [{
+            "public_id": self.user["public_id"],
+            "username": "alice",
+            "display_name": None,
+            "role": "user",
+            "status": "active",
+            "provisioning_source": "local",
+            "uis_user_id": "uis-12345",
+            "identity_providers": ["campus-uis"],
+        }])
+
+    def test_admin_platform_users_rejects_invalid_pagination(self):
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(
+            self.control.request, "args", {"page": "bad"}
+        ):
+            response, status = response_parts(self.control.admin_platform_users())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(response.get_json(), {"error": "invalid pagination"})
+
     def test_admin_disables_platform_user_revokes_sessions_and_records_audit(self):
         admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
         self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)

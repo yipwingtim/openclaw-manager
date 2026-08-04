@@ -103,17 +103,17 @@ MANAGER_OAUTH_POST_LOGOUT_REDIRECT_URI=https://manager.example.test/login
 ### Campus UIS OAuth2 / 校内 UIS OAuth2
 
 UIS identities can be imported in bulk without creating a second user table.
-The CSV must contain `work_id` and `username`; `display_name`, `email`, and
+The CSV must contain `user_id` and `name`; `email` and
 `status` (`active`, `disabled`, or `locked`) are optional. The command is a
 dry-run by default and is idempotent when applied.
 
-UIS 身份可以批量导入，无需新建第二张用户表。CSV 必须包含 `work_id` 和
-`username`，可选字段为 `display_name`、`email` 和 `status`（`active`、`disabled` 或
+UIS 身份可以批量导入，无需新建第二张用户表。CSV 必须包含 `user_id` 和
+`name`，可选字段为 `email` 和 `status`（`active`、`disabled` 或
 `locked`）。命令默认只做预校验，使用 `--apply` 后可幂等执行。
 
 ```csv
-work_id,username,display_name,email,status
-12345,wenjie,文杰,wenjie@example.edu.cn,active
+user_id,name,email,status
+12345,文杰,wenjie@example.edu.cn,active
 ```
 
 ```bash
@@ -126,14 +126,21 @@ python3 scripts/import_uis_users.py \
   --db /data/docker/openclaw-public/manager.db --apply
 ```
 
-The import refuses duplicate CSV identities, refuses a `work_id` already linked
-to another platform user, updates matching platform users, binds
+The import refuses duplicate CSV identities, updates users already linked by
+`campus-uis + user_id`, creates an internal platform user for new identities, binds
 `user_identities(provider=campus-uis)`, and records an `identity.import_uis`
 operation. It never accepts or stores passwords.
 
-导入会拒绝 CSV 内重复身份、拒绝已绑定到其他平台用户的 `work_id`，更新匹配的平台
-用户，写入 `user_identities(provider=campus-uis)` 并记录
+导入会拒绝 CSV 内重复身份；按 `campus-uis + user_id` 更新已绑定的平台用户，
+为新身份创建内部平台用户，写入 `user_identities(provider=campus-uis)` 并记录
 `identity.import_uis` 操作；不会接收或保存密码。
+
+New identities receive a deterministic internal username and are not merged with
+an unbound Local user. Existing bindings keep their platform username. A blank
+`status` defaults new users to `active` and preserves the status of existing users.
+
+新身份使用确定性的内部平台用户名，不会与未绑定的 Local 用户自动合并；已有绑定保留
+原平台用户名。`status` 留空时，新用户默认为 `active`，已有用户保持当前状态。
 
 For an OAuth2 authorization-code provider whose UserInfo response uses
 `user_id` as the stable campus identity, configure the production environment

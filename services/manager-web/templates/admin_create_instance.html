@@ -103,7 +103,7 @@
     <form class="surface p-3 p-lg-4 mt-3" method="post" action="/admin/create-instance/batch" enctype="multipart/form-data" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="section-title mb-2">批量创建实例</div>
-      <div class="muted-small mb-3">CSV 表头：owner_username,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled。product 支持 openclaw、hermes、evoscientist；version 留空时使用默认版本。最多 100 行。</div>
+      <div class="muted-small mb-3">CSV 表头：owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled。Owner 类型支持 local（平台用户名）和 campus-uis（UIS user_id/work_id）；身份必须已导入或绑定。product 支持 openclaw、hermes、evoscientist；version 留空时使用默认版本。最多 100 行。</div>
       <input class="form-control mb-3" name="input_csv" type="file" accept=".csv,text/csv" required>
       <button class="btn btn-oc-outline" type="submit">提交批量创建</button>
     </form>

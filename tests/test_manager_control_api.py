@@ -703,6 +703,11 @@ class ManagerControlApiTests(unittest.TestCase):
             self.control.request, "headers", {"Authorization": "Bearer admin-token"}
         ), patch.object(self.control.request, "get_json", return_value=payload):
             response, status = response_parts(self.control.create_instance_batch())
+            with self.control.metadata_store.connect(self.db_file) as conn:
+                conn.execute(
+                    "DELETE FROM user_identities WHERE provider = ? AND subject = ?",
+                    ("campus-uis", "12345"),
+                )
             repeated, repeated_status = response_parts(self.control.create_instance_batch())
             queried, queried_status = response_parts(
                 self.control.get_instance_batch("batch-create-1")
@@ -758,6 +763,98 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(self.control.metadata_store.list_instances(db_file=self.db_file), [])
         self.assertIsNone(self.control.metadata_store.get_execution_job(
             "batch-create-invalid-owner", db_file=self.db_file
+        ))
+        self.assertEqual(list(secret_dir.iterdir()), [])
+
+    def test_admin_batch_resolves_local_and_uis_owner_identities(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        owner = self.control.metadata_store.create_user("Bob", db_file=self.db_file)
+        self.control.metadata_store.upsert_identity(
+            owner["id"], "campus-uis", "12345", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "batch-create-identities",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [
+                {
+                    "owner_identity_type": "local", "owner_identity": "bob",
+                    "legacy_user_id": "bob-local", "instance_name": "Bob local",
+                    "product": "openclaw", "basic_auth_enabled": True,
+                    "basic_auth_password": "local-secret",
+                },
+                {
+                    "owner_identity_type": "campus-uis", "owner_identity": "12345",
+                    "legacy_user_id": "bob-uis", "instance_name": "Bob UIS",
+                    "product": "openclaw", "basic_auth_enabled": True,
+                    "basic_auth_password": "uis-secret",
+                },
+            ],
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+            repeated, repeated_status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual((status, repeated_status), (202, 202))
+        self.assertEqual(len(response.get_json()["children"]), 2)
+        instances = self.control.metadata_store.list_instances(db_file=self.db_file)
+        self.assertEqual({instance["owner_user_id"] for instance in instances}, {owner["id"]})
+
+    def test_admin_batch_rejects_ambiguous_owner_fields(self):
+        payload = {
+            "request_id": "batch-create-ambiguous-owner",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [{
+                "owner_user_public_id": self.user["public_id"],
+                "owner_identity_type": "local", "owner_identity": "alice",
+                "legacy_user_id": "alice-one", "instance_name": "Alice One",
+                "product": "openclaw", "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            }],
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 400)
+        self.assertIn("mutually exclusive", response.get_json()["error"])
+
+    def test_admin_batch_rejects_inactive_uis_owner_without_partial_resources(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        owner = self.control.metadata_store.create_user("Bob", db_file=self.db_file)
+        self.control.metadata_store.upsert_identity(
+            owner["id"], "campus-uis", "12345", db_file=self.db_file
+        )
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            conn.execute("UPDATE users SET status = 'disabled' WHERE id = ?", (owner["id"],))
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        payload = {
+            "request_id": "batch-create-inactive-owner",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [{
+                "owner_identity_type": "campus-uis", "owner_identity": "12345",
+                "legacy_user_id": "bob-one", "instance_name": "Bob One",
+                "product": "openclaw", "basic_auth_enabled": True,
+                "basic_auth_password": "secret",
+            }],
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 409)
+        self.assertIn("active owner user not found", response.get_json()["error"])
+        self.assertEqual(self.control.metadata_store.list_instances(db_file=self.db_file), [])
+        self.assertIsNone(self.control.metadata_store.get_execution_job(
+            "batch-create-inactive-owner", db_file=self.db_file
         ))
         self.assertEqual(list(secret_dir.iterdir()), [])
 

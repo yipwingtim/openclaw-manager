@@ -368,6 +368,42 @@ class AdminWebTests(unittest.TestCase):
             ],
         )
 
+    def test_admin_batch_create_submits_owner_identities_without_listing_users(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        upload = types.SimpleNamespace(read=lambda: (
+            b"owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled\n"
+            b"local,alice,alice-hermes,Alice Hermes,hermes,,false,h-secret,true\n"
+            b"campus-uis,12345,alice-evo,Alice Evo,evoscientist,latest,true,e-secret,true\n"
+        ))
+        self.admin.request.files = {"input_csv": upload}
+        result = {"parent": {"request_id": "batch-1"}, "children": []}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_users"
+        ) as list_users, patch.object(
+            self.admin.control_client, "create_instance_batch", return_value=result
+        ) as create_batch, patch.object(
+            self.admin, "url_for", return_value="batch-url"
+        ):
+            response = self.admin.create_instance_batch()
+
+        self.assertEqual(response, "batch-url")
+        list_users.assert_not_called()
+        self.assertEqual(create_batch.call_args.args[0]["instances"], [
+            {
+                "owner_identity_type": "local", "owner_identity": "alice",
+                "legacy_user_id": "alice-hermes", "instance_name": "Alice Hermes",
+                "product": "hermes", "basic_auth_enabled": True,
+                "basic_auth_password": "h-secret", "confirm_latest": False,
+            },
+            {
+                "owner_identity_type": "campus-uis", "owner_identity": "12345",
+                "legacy_user_id": "alice-evo", "instance_name": "Alice Evo",
+                "product": "evoscientist", "version": "latest",
+                "basic_auth_enabled": True, "basic_auth_password": "e-secret",
+                "confirm_latest": True,
+            },
+        ])
+
     def test_admin_model_provider_batch_discards_legacy_api_key(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         upload = types.SimpleNamespace(read=lambda: (

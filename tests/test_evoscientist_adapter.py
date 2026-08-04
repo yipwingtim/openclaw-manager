@@ -241,6 +241,10 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 "location /api/workspace { proxy_pass http://evosci_ui_40062;",
                 config_text,
             )
+            self.assertIn(
+                "location /api/skills { proxy_pass http://evosci_ui_40062;",
+                config_text,
+            )
             self.assertNotIn("listen 40062 ssl;", config_text)
 
     def test_set_model_provider_persists_config_and_restarts_instance(self):

@@ -44,6 +44,7 @@ def load_admin_app():
     control_client.get_admin_metadata = lambda: {}
     control_client.list_admin_instances = lambda: []
     control_client.list_admin_users = lambda: []
+    control_client.update_admin_user_status = lambda *args: {}
     control_client.create_admin_instance = lambda payload: payload
     control_client.create_instance_batch = lambda payload: payload
     control_client.get_instance_batch = lambda request_id: {}
@@ -215,6 +216,55 @@ class AdminWebTests(unittest.TestCase):
         self.assertNotIn('元数据与操作记录', (
             ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"
         ).read_text(encoding="utf-8"))
+
+    def test_platform_users_filters_by_provider_status_and_name(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        users = [
+            {
+                "public_id": "user-1", "username": "uis-alice", "display_name": "张三",
+                "role": "user", "status": "active",
+                "identity_providers": ["campus-uis"], "provisioning_source": "uis-import",
+            },
+            {
+                "public_id": "user-2", "username": "local-bob", "display_name": "李四",
+                "role": "user", "status": "disabled",
+                "identity_providers": ["local"], "provisioning_source": "local",
+            },
+        ]
+        self.admin.request.args = {"provider": "campus-uis", "status": "active", "q": "张"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_users", return_value=users
+        ):
+            template, context = self.admin.platform_users()
+
+        self.assertEqual(template, "admin_platform_users.html")
+        self.assertEqual([user["public_id"] for user in context["users"]], ["user-1"])
+        self.assertEqual(context["actor_public_id"], "admin-1")
+
+    def test_platform_user_status_update_includes_admin_actor(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {"status": "disabled"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "update_admin_user_status"
+        ) as update_status, patch.object(
+            self.admin, "url_for", return_value="platform-users-url"
+        ):
+            response = self.admin.update_platform_user_status("user-1")
+
+        self.assertEqual(response, "platform-users-url")
+        update_status.assert_called_once_with("admin-1", "user-1", "disabled")
+
+    def test_platform_users_navigation_and_template_hide_identity_details(self):
+        base = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(
+            encoding="utf-8"
+        )
+        template = (
+            ROOT_DIR / "services" / "manager-web" / "templates" / "admin_platform_users.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('href="/admin/platform-users"', base)
+        for sensitive_name in ("user.subject", "profile_json", "password_hash", "access_token"):
+            self.assertNotIn(sensitive_name, template.lower())
 
     def test_admin_create_instance_does_not_load_all_users(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

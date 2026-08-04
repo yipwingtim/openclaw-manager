@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}平台用户管理{% endblock %}
+{% block content %}
+  <div class="page-kicker">管理员控制台</div>
+  <h1 class="page-title">平台用户管理</h1>
+  <div class="page-subtitle mb-3">查看 Local 与 UIS 用户身份，并管理平台访问状态。</div>
+
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+
+  <form class="surface p-3 mb-3" method="get" action="/admin/platform-users">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="provider">身份来源</label>
+        <select class="form-select" id="provider" name="provider">
+          <option value="all" {% if provider_filter == "all" %}selected{% endif %}>全部</option>
+          <option value="local" {% if provider_filter == "local" %}selected{% endif %}>Local</option>
+          <option value="campus-uis" {% if provider_filter == "campus-uis" %}selected{% endif %}>UIS</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="status">状态</label>
+        <select class="form-select" id="status" name="status">
+          {% for value in ["all", "active", "disabled", "locked"] %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label" for="q">关键字</label>
+        <input class="form-control" id="q" name="q" type="search" value="{{ query }}" placeholder="平台用户名或姓名">
+      </div>
+      <div class="col-12 col-md-2"><button class="btn btn-oc w-100" type="submit">筛选</button></div>
+    </div>
+  </form>
+
+  <div class="surface">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead><tr><th>平台用户名</th><th>姓名</th><th>角色</th><th>身份来源</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for user in users %}
+            <tr>
+              <td class="fw-semibold">{{ user.username }}</td>
+              <td>{{ user.display_name or "—" }}</td>
+              <td><span class="badge-status badge-neutral">{{ user.role }}</span></td>
+              <td>
+                {% for provider in user.identity_providers %}
+                  <span class="badge-status badge-neutral">{{ "UIS" if provider == "campus-uis" else provider }}</span>
+                {% else %}
+                  <span class="badge-status badge-neutral">{{ user.provisioning_source }}</span>
+                {% endfor %}
+              </td>
+              <td><span class="badge-status {% if user.status == 'active' %}badge-running{% elif user.status == 'disabled' %}badge-stopped{% else %}badge-neutral{% endif %}">{{ user.status }}</span></td>
+              <td>
+                {% if user.public_id == actor_public_id %}
+                  <span class="muted-small">当前管理员</span>
+                {% elif user.status == "active" %}
+                  <div class="d-flex gap-2">
+                    {% for next_status, label in [("disabled", "停用"), ("locked", "锁定")] %}
+                      <form method="post" action="/admin/platform-users/{{ user.public_id|urlencode }}/status" onsubmit="return confirm('确认{{ label }}该平台用户？现有登录会立即失效。');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="status" value="{{ next_status }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">{{ label }}</button>
+                      </form>
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  <form method="post" action="/admin/platform-users/{{ user.public_id|urlencode }}/status">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="status" value="active">
+                    <button class="btn btn-sm btn-oc-outline" type="submit">恢复启用</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-4">没有符合条件的平台用户。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

@@ -42,7 +42,11 @@ class WebServiceSplitTests(unittest.TestCase):
             "  manager-executor-api:\n", 1
         )[0]
         self.assertIn("NGINX_AUTH_DIR", executor_block)
-        self.assertIn("NGINX_AUTH_DIR:-/data/docker/nginx/auth}:ro", executor_block)
+        self.assertIn(
+            "${NGINX_AUTH_DIR:-/data/docker/nginx/auth}:"
+            "${NGINX_AUTH_DIR:-/data/docker/nginx/auth}\n",
+            executor_block,
+        )
         self.assertIn("healthcheck:", executor_api_block)
         self.assertNotIn("NGINX_AUTH_DIR", executor_api_block)
         self.assertNotIn("NGINX_USERS_CONF_DIR", executor_api_block)

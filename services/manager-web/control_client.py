@@ -197,8 +197,13 @@ def get_model_provider_batch(request_id):
     )
 
 
-def get_admin_metadata():
-    return request_json("GET", "/internal/v1/admin/metadata")
+def get_admin_metadata(*, instances_page=1, operations_page=1, per_page=20):
+    params = urllib.parse.urlencode({
+        "instances_page": instances_page,
+        "operations_page": operations_page,
+        "per_page": per_page,
+    })
+    return request_json("GET", f"/internal/v1/admin/metadata?{params}")
 
 
 def get_activity_snapshots(actor_public_id):

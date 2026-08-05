@@ -40,5 +40,18 @@ Nginx server configuration, port mapping, and external network attachment. A
 configuration or Nginx validation failure restores the previous files and
 rolls back the metadata transaction.
 
+## Platform integration
+
+Hermes instances use the shared `/me` user portal and instance detail route.
+Authorized users can view the instance status, access URL, and recent logs, then
+enter the Hermes Dashboard through its registered endpoint. OpenClaw-only device,
+file, Skill, and WeChat actions are not exposed for Hermes because they are not
+declared by the Hermes capability set.
+
+Administrators manage Hermes instances from the global `/admin/*` portal. The
+Control and Executor services resolve the instance by its public ID and pass the
+instance record to the Hermes Adapter; callers cannot provide an arbitrary
+container name or data path.
+
 The legacy v0.12 two-container `hermes-main` plus `hermes-dashboard` layout is
 not supported by this adapter and must be replaced before using these actions.

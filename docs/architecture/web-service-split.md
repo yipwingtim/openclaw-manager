@@ -1,6 +1,8 @@
 # Web Service Split
 
-`manager-user-web` and `manager-admin-web` use separate processes and routes.
+`manager-user-web` and `manager-admin-web` use separate processes and routes;
+`manager-executor-api` is the runtime read API and `manager-executor` is the
+privileged structured job worker.
 Neither service mounts the metadata database, Docker socket, repository, or
 Nginx configuration. Both resolve authentication and authorization through
 `manager-control`.
@@ -34,7 +36,9 @@ The service split and global admin migration are complete:
 
 Production acceptance confirmed that active instance and manager Nginx routes
 do not reference `openclaw-manager-web:8080`. Privileged runtime mounts now
-belong only to the structured Executor services.
+belong only to the structured Executor services. Adapter lifecycle and ingress
+methods consume server-resolved instance records, and product capability checks
+are enforced before structured actions execute.
 
 ## Production switch
 

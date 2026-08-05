@@ -28,13 +28,13 @@ for completing the multi-product control plane.
   `manager-web` service and container have been retired from production.
 - 全局 `/admin/*` 管理门户现已由 `manager-admin-web` 提供，实例独立端口下的
   `/admin/` 则转入 `manager-user-web`。旧 `manager-web` 服务和容器已从生产环境退役。
-- OpenClaw and EvoScientist adapters declare capabilities. Existing runtime
+- OpenClaw, Hermes, and EvoScientist adapters declare capabilities. Existing runtime
   lifecycle methods accept instance records and resolve targets from
-  `runtime_identifier`; OpenClaw creation and legacy Nginx/file paths still use
-  `legacy_user_id` compatibility data.
-- OpenClaw 与 EvoScientist Adapter 已声明能力。现有运行时生命周期方法接收实例记录，
-  并从 `runtime_identifier` 解析目标；OpenClaw 创建流程及旧 Nginx/文件路径仍使用
-  `legacy_user_id` 兼容数据。
+  `runtime_identifier`; legacy OpenClaw filesystem and Nginx paths use
+  `legacy_user_id` only as compatibility data inside the resolved instance.
+- OpenClaw、Hermes 和 EvoScientist Adapter 已声明能力。运行时生命周期方法接收实例记录，
+  并从 `runtime_identifier` 解析目标；旧 OpenClaw 文件系统和 Nginx 路径仅在已解析实例内部
+  使用 `legacy_user_id` 兼容数据。
 - Existing instances continue to use per-instance HTTPS ports and Basic Auth
   while unified ingress and instance access authorization remain future work.
 - 在统一入口和实例访问授权完成前，现有实例继续使用独立 HTTPS 端口和 Basic Auth。
@@ -65,6 +65,18 @@ for completing the multi-product control plane.
 8. 实例创建、生命周期、保留策略、版本、Basic Auth、Skill、设备和模型供应商的
    结构化 Executor 动作。
 9. 管理员功能迁移以及生产 `/admin/*` 切换到 `manager-admin-web`。
+10. Hermes MVP 生命周期、访问、保留策略和产品能力支持。
+11. OpenClaw、Hermes、EvoScientist 只读 Activity 快照采集，包括 Schema v7 元数据、
+    筛选、分页和平台总览统计。
+
+## Completed: Adapter objectification and Activity overview | 已完成：Adapter 实例化与 Activity 总览
+
+- Adapter lifecycle, Nginx configuration, and product-specific ingress helpers
+  consume resolved instance records; runtime targets are never accepted from the browser.
+- Adapter 生命周期、Nginx 配置和产品专属入口方法均接收已解析实例记录；运行目标不接受浏览器传值。
+- The administrator platform overview reports users, identities, instances, runtime
+  status, Activity outcomes, recent instances, and recent operations with pagination.
+- 管理员平台总览展示用户、身份、实例、运行状态、Activity 结果、最近实例和最近操作，并支持分页。
 
 ## Completed: Retire Legacy manager-web | 已完成：退出旧 manager-web
 

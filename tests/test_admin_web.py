@@ -110,8 +110,117 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(template, "admin_metadata.html")
         self.assertEqual(context["error"], "control unavailable")
         self.assertEqual(context["counts"], {})
+        self.assertEqual(context["overview"]["runtime"], {
+            "running": 0, "stopped": 0, "unknown": 0,
+        })
         self.assertEqual(context["instances"], [])
         self.assertEqual(context["operations"], [])
+
+    def test_admin_metadata_adds_runtime_summary_in_bounded_batches(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        instance_ids = [f"instance-{index}" for index in range(101)]
+        summary = {
+            "counts": {"operation_records": 0},
+            "overview": {
+                "users": {}, "identities": {}, "instances": {"products": {}},
+                "activity": {},
+            },
+            "instance_public_ids": instance_ids,
+            "instances": [], "operations": [],
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "get_admin_metadata", return_value=summary
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses",
+            side_effect=lambda _, ids: [
+                {"instance_public_id": value, "status": "running"}
+                for value in ids
+            ],
+        ) as statuses:
+            template, context = self.admin.metadata()
+
+        self.assertEqual(template, "admin_metadata.html")
+        self.assertEqual([len(call.args[1]) for call in statuses.call_args_list], [100, 1])
+        self.assertEqual(context["overview"]["runtime"], {
+            "running": 101, "stopped": 0, "unknown": 0,
+        })
+
+    def test_admin_metadata_keeps_summary_when_runtime_status_fails(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        summary = {
+            "counts": {},
+            "overview": {
+                "users": {"total": 2}, "identities": {},
+                "instances": {"products": {}}, "activity": {},
+            },
+            "instance_public_ids": ["instance-1"],
+            "instances": [], "operations": [],
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "get_admin_metadata", return_value=summary
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses",
+            side_effect=self.admin.executor_client.ExecutorError("executor unavailable"),
+        ):
+            _, context = self.admin.metadata()
+
+        self.assertEqual(context["overview"]["users"]["total"], 2)
+        self.assertEqual(context["overview"]["runtime"]["unknown"], 1)
+        self.assertIn("executor unavailable", context["error"])
+
+    def test_admin_metadata_counts_missing_runtime_status_as_unknown(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        summary = {
+            "counts": {},
+            "overview": {
+                "users": {}, "identities": {},
+                "instances": {"products": {}}, "activity": {},
+            },
+            "instance_public_ids": ["instance-1", "instance-2"],
+            "instances": [], "operations": [],
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "get_admin_metadata", return_value=summary
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses", return_value=[
+                {"instance_public_id": "instance-1", "status": "running"},
+            ],
+        ):
+            _, context = self.admin.metadata()
+
+        self.assertEqual(context["overview"]["runtime"], {
+            "running": 1, "stopped": 0, "unknown": 1,
+        })
+
+    def test_admin_metadata_preserves_successful_batches_when_one_fails(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        instance_ids = [f"instance-{index}" for index in range(101)]
+        summary = {
+            "counts": {},
+            "overview": {
+                "users": {}, "identities": {},
+                "instances": {"products": {}}, "activity": {},
+            },
+            "instance_public_ids": instance_ids,
+            "instances": [], "operations": [],
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "get_admin_metadata", return_value=summary
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses", side_effect=[
+                [
+                    {"instance_public_id": value, "status": "running"}
+                    for value in instance_ids[:100]
+                ],
+                self.admin.executor_client.ExecutorError("last batch unavailable"),
+            ],
+        ):
+            _, context = self.admin.metadata()
+
+        self.assertEqual(context["overview"]["runtime"], {
+            "running": 100, "stopped": 0, "unknown": 1,
+        })
+        self.assertIn("last batch unavailable", context["error"])
 
     def test_activity_page_filters_snapshots_without_exposing_details(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
@@ -358,6 +467,7 @@ class AdminWebTests(unittest.TestCase):
             '{% if show_global_admin_nav %}', 1
         )[0]
         self.assertIn('href="/admin/metadata"', admin_nav)
+        self.assertIn("平台总览", admin_nav)
         self.assertNotIn('元数据与操作记录', (
             ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"
         ).read_text(encoding="utf-8"))

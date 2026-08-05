@@ -120,7 +120,9 @@ class OpenClawActivityAdapter:
 
 class HermesActivityAdapter:
     def collect(self, instance):
-        if instance.get("version") != "v2026.7.30":
+        supported_schemas = {"v2026.7.20": 22, "v2026.7.30": 23}
+        expected_schema = supported_schemas.get(instance.get("version"))
+        if expected_schema is None:
             raise ValueError("unsupported Hermes version")
         root = Path(instance["data_path"])
         state = root / "state.db"
@@ -128,8 +130,10 @@ class HermesActivityAdapter:
         cron = root / "cron" / "executions.db"
         with readonly_database(state) as connection:
             require_columns(connection, "schema_version", {"version"})
-            version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-            if version != 23:
+            observed_schema = connection.execute(
+                "SELECT MAX(version) FROM schema_version"
+            ).fetchone()[0]
+            if observed_schema != expected_schema:
                 raise ValueError("unsupported Hermes state schema")
             require_columns(connection, "sessions", {
                 "started_at", "ended_at", "message_count", "tool_call_count", "api_call_count",
@@ -165,7 +169,7 @@ class HermesActivityAdapter:
             timestamp_ms(cron_activity) / 1000,
         )
         return snapshot_result(
-            metrics, instance.get("version") or "unknown", "hermes-state-23",
+            metrics, instance["version"], f"hermes-state-{observed_schema}",
             max(path.stat().st_mtime_ns for path in (state, kanban, cron)),
         )
 

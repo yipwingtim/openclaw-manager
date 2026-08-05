@@ -118,7 +118,9 @@ class AdminWebTests(unittest.TestCase):
         snapshots = [{
             "instance_public_id": "instance-1", "instance_name": "Alice Lab",
             "owner_username": "alice", "owner_display_name": "张三",
-            "product": "hermes", "metrics": {"sessions": 2}, "status": "success",
+            "product": "hermes", "metrics": {
+                "sessions": 2, "last_activity_at_s": 1785557569.2623322,
+            }, "status": "success",
         }, {
             "instance_public_id": "instance-2", "instance_name": "Bob Lab",
             "owner_username": "bob", "owner_display_name": None,
@@ -138,6 +140,14 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(template, "admin_activity.html")
         self.assertEqual([item["instance_public_id"] for item in context["snapshots"]], ["instance-1"])
         self.assertEqual(context["status_filter"], "running")
+        self.assertIn(
+            ("last_activity_at_s", "2026-08-01 12:12:49"),
+            context["snapshots"][0]["metric_items"],
+        )
+        self.assertEqual(
+            self.admin.activity_metric_items({"last_activity_at_ms": 1785557569262})[0],
+            ("last_activity_at_ms", "2026-08-01 12:12:49"),
+        )
         get_snapshots.assert_called_once_with("admin-1")
         source = (ROOT_DIR / "services" / "manager-web" / "templates" / "admin_activity.html").read_text(encoding="utf-8")
         for sensitive in ("prompt", "reasoning", "tool_name", "filename", "source_cursor"):

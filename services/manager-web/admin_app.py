@@ -6,6 +6,7 @@ import secrets
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, redirect, render_template, request, url_for
 
@@ -30,6 +31,7 @@ INSTANCE_PAGE_SIZE_OPTIONS = (10, 20, 50, 100)
 DEFAULT_INSTANCE_PAGE_SIZE = 20
 VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}|sha256:[0-9a-fA-F]{64})$")
 BATCH_VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-fA-F]{64})$")
+DISPLAY_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def default_instance_version(product):
@@ -55,6 +57,21 @@ def configured_skill_presets():
         if item and SKILL_ID_RE.fullmatch(item) and item not in values:
             values.append(item)
     return values
+
+
+def activity_metric_items(metrics):
+    items = []
+    for name, value in sorted(metrics.items()):
+        if name in {"last_activity_at_ms", "last_activity_at_s"} and value:
+            seconds = value / 1000 if name.endswith("_ms") else value
+            try:
+                value = datetime.fromtimestamp(seconds, DISPLAY_TIMEZONE).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            except (OverflowError, OSError, TypeError, ValueError):
+                pass
+        items.append((name, value))
+    return items
 
 
 def instance_list_context(instances):
@@ -747,6 +764,7 @@ def activity_page():
             snapshot["runtime_status"] = runtime_statuses.get(
                 snapshot["instance_public_id"], "unknown"
             )
+            snapshot["metric_items"] = activity_metric_items(snapshot["metrics"])
         error = request.args.get("error", "")
     except (control_client.ControlError, executor_client.ExecutorError) as exc:
         snapshots, error = [], str(exc)

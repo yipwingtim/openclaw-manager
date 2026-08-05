@@ -4,11 +4,11 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 文档版本 | 1.0.0 |
+| 文档版本 | 1.1.0 |
 | 盘点日期 | 2026-08-05 |
-| 产品镜像 | `nousresearch/hermes-agent:v2026.7.30` |
-| 镜像 ID | `sha256:b869e64d6496d4763d5e4fb675b5f504cb23b0e35ec9b790481a56118602b10f` |
-| `state.db` Schema | `schema_version=23` |
+| 产品镜像 | `nousresearch/hermes-agent:v2026.7.20`、`nousresearch/hermes-agent:v2026.7.30` |
+| 镜像 ID | `v2026.7.20`: `sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a`；`v2026.7.30`: `sha256:b869e64d6496d4763d5e4fb675b5f504cb23b0e35ec9b790481a56118602b10f` |
+| `state.db` Schema | `v2026.7.20`: `schema_version=22`；`v2026.7.30`: `schema_version=23` |
 | 其他数据库 Schema | 无显式版本，使用白名单表字段作为指纹 |
 
 本字典只描述活动统计所需字段，不是 Hermes 完整数据库字典。
@@ -102,8 +102,7 @@ Kanban 任务、任务运行和 Cron 执行表当时为空。样本计数仅用�
 ## 重新盘点条件
 
 - Hermes 镜像 tag 或 digest 变化；
-- `state.db` Schema 不再为 23；
+- `state.db` Schema 不再与已登记的镜像版本匹配；
 - 任一白名单表或字段缺失；
 - `kanban.db` 或 Cron 时间字段出现真实数据后，首次实现前必须确认时间格式与单位；
 - 数据目录或数据库路径发生变化。
-

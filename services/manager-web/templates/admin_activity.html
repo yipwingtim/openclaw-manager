@@ -36,7 +36,7 @@
         </select>
       </div>
       <div class="col-12 col-md-4">
-        <label class="form-label" for="q">实例或 Owner</label>
+        <label class="form-label" for="q">实例、Owner 或 UIS user_id</label>
         <input class="form-control" id="q" name="q" type="search" value="{{ query }}">
       </div>
       <div class="col-12 col-md-2"><button class="btn btn-oc-outline w-100" type="submit">筛选</button></div>
@@ -46,11 +46,12 @@
   <div class="surface">
     <div class="table-responsive">
       <table class="table table-hover mb-0 align-middle">
-        <thead><tr><th>Owner</th><th>实例</th><th>产品</th><th>累计指标</th><th>数据源</th><th>采集状态</th><th>采集时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>Owner</th><th>UIS user_id</th><th>实例</th><th>产品</th><th>累计指标</th><th>数据源</th><th>采集状态</th><th>采集时间</th><th>操作</th></tr></thead>
         <tbody>
           {% for snapshot in snapshots %}
             <tr>
               <td>{{ snapshot.owner_display_name or snapshot.owner_username }}</td>
+              <td>{{ snapshot.owner_uis_user_id or "—" }}</td>
               <td class="fw-semibold">{{ snapshot.instance_name }}</td>
               <td><span class="badge-status badge-neutral">{{ snapshot.product }}</span></td>
               <td>
@@ -80,7 +81,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="8" class="text-center text-muted py-4">没有符合条件的实例。</td></tr>
+            <tr><td colspan="9" class="text-center text-muted py-4">没有符合条件的实例。</td></tr>
           {% endfor %}
         </tbody>
       </table>

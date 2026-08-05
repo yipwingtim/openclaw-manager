@@ -776,6 +776,7 @@ def activity_page():
         and (not needle or needle in " ".join(
             str(snapshot.get(key) or "") for key in (
                 "instance_name", "owner_username", "owner_display_name",
+                "owner_uis_user_id",
             )
         ).casefold())
     ]

@@ -1694,7 +1694,10 @@ def list_latest_activity_snapshots(*, db_file=None, conn=None):
                    instance.product, instance.instance_name,
                    owner.public_id AS owner_user_public_id,
                    owner.username AS owner_username,
-                   owner.display_name AS owner_display_name
+                   owner.display_name AS owner_display_name,
+                   (SELECT subject FROM user_identities
+                    WHERE user_id = owner.id AND provider = 'campus-uis'
+                    LIMIT 1) AS owner_uis_user_id
             FROM instances instance
             JOIN users owner ON owner.id = instance.owner_user_id
             LEFT JOIN activity_snapshots snapshot ON snapshot.id = (

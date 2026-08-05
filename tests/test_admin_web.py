@@ -118,6 +118,7 @@ class AdminWebTests(unittest.TestCase):
         snapshots = [{
             "instance_public_id": "instance-1", "instance_name": "Alice Lab",
             "owner_username": "alice", "owner_display_name": "张三",
+            "owner_uis_user_id": "uis-12345",
             "product": "hermes", "metrics": {
                 "sessions": 2, "last_activity_at_s": 1785557569.2623322,
             }, "status": "success",
@@ -126,7 +127,7 @@ class AdminWebTests(unittest.TestCase):
             "owner_username": "bob", "owner_display_name": None,
             "product": "openclaw", "metrics": {}, "status": None,
         }]
-        self.admin.request.args = {"product": "hermes", "q": "张三"}
+        self.admin.request.args = {"product": "hermes", "q": "uis-12345"}
         with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
             self.admin.control_client, "get_activity_snapshots", return_value=snapshots
         ) as get_snapshots, patch.object(
@@ -152,6 +153,8 @@ class AdminWebTests(unittest.TestCase):
         source = (ROOT_DIR / "services" / "manager-web" / "templates" / "admin_activity.html").read_text(encoding="utf-8")
         for sensitive in ("prompt", "reasoning", "tool_name", "filename", "source_cursor"):
             self.assertNotIn(sensitive, source.lower())
+        self.assertIn("UIS user_id", source)
+        self.assertIn("snapshot.owner_uis_user_id", source)
 
     def test_activity_collection_batches_instance_ids(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

@@ -1103,8 +1103,18 @@ def resolve_deletable_file(user_id, root_key, relative_path):
     return target
 
 
+def legacy_instance_record(user_id):
+    try:
+        return get_instance_record(user_id) or {"legacy_user_id": user_id}
+    except Exception as exc:
+        app.logger.warning("Could not read instance metadata for %s: %s", user_id, exc)
+        return {"legacy_user_id": user_id}
+
+
 def detect_port(user_id):
-    for nginx_conf in nginx_user_conf_candidates(user_id):
+    instance = legacy_instance_record(user_id)
+    adapter = get_instance_adapter(instance.get("product") or "openclaw")
+    for nginx_conf in adapter.nginx_conf_candidates(instance):
         if not nginx_conf.is_file():
             continue
         for line in nginx_conf.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -1116,7 +1126,9 @@ def detect_port(user_id):
 
 
 def is_basic_auth_enabled(user_id):
-    for nginx_conf in nginx_user_conf_candidates(user_id):
+    instance = legacy_instance_record(user_id)
+    adapter = get_instance_adapter(instance.get("product") or "openclaw")
+    for nginx_conf in adapter.nginx_conf_candidates(instance):
         if not nginx_conf.is_file():
             continue
 
@@ -1134,22 +1146,6 @@ def nginx_disabled_conf_dir():
 
 def nginx_legacy_disabled_conf_dir():
     return get_instance_adapter().nginx_legacy_disabled_conf_dir()
-
-
-def nginx_active_user_conf(user_id):
-    return get_instance_adapter().nginx_active_user_conf(user_id)
-
-
-def nginx_disabled_user_conf(user_id):
-    return get_instance_adapter().nginx_disabled_user_conf(user_id)
-
-
-def nginx_legacy_disabled_user_conf(user_id):
-    return get_instance_adapter().nginx_legacy_disabled_user_conf(user_id)
-
-
-def nginx_user_conf_candidates(user_id):
-    return get_instance_adapter().nginx_user_conf_candidates(user_id)
 
 
 def run_command(command, timeout=30, cwd=None):
@@ -1194,14 +1190,6 @@ def refresh_nginx_after_create(user_id, actor=None):
         actor=actor,
         message=message,
     )
-
-
-def disable_nginx_user_conf(user_id):
-    return get_instance_adapter().disable_nginx_user_conf(user_id)
-
-
-def enable_nginx_user_conf(user_id):
-    return get_instance_adapter().enable_nginx_user_conf(user_id)
 
 
 def detect_openclaw_version(user_id):
@@ -2887,7 +2875,7 @@ def run_admin_batch_model_provider():
         ), 400
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
-    returncode, command_output = get_instance_adapter().batch_set_model_provider(
+    returncode, command_output = get_instance_adapter("openclaw").batch_set_model_provider(
         input_csv,
         output_csv,
         timeout=BATCH_MODEL_PROVIDER_TIMEOUT,

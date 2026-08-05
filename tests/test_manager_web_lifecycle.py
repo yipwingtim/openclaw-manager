@@ -115,6 +115,15 @@ class LifecycleActionTests(unittest.TestCase):
             self.assertEqual(records_dir.stat().st_mode & 0o777, 0o700)
             self.assertEqual(record_path.stat().st_mode & 0o777, 0o600)
 
+    def test_legacy_instance_record_falls_back_when_metadata_is_unavailable(self):
+        with patch.object(
+            self.app_module, "get_instance_record", side_effect=RuntimeError("db unavailable")
+        ):
+            self.assertEqual(
+                self.app_module.legacy_instance_record("alice"),
+                {"legacy_user_id": "alice"},
+            )
+
     def test_status_and_logs_pass_instance_record_to_adapter(self):
         instance = {
             "legacy_user_id": "alice",

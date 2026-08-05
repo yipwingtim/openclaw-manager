@@ -112,25 +112,28 @@ class OpenClawDockerAdapter:
     def nginx_legacy_disabled_conf_dir(self):
         return Path(str(self.nginx_users_conf_dir) + ".disabled")
 
-    def nginx_active_user_conf(self, user_id):
-        return self.nginx_users_conf_dir / f"{user_id}.conf"
+    def nginx_active_conf(self, instance):
+        return self.nginx_users_conf_dir / f"{self.get_legacy_user_id(instance)}.conf"
 
-    def nginx_disabled_user_conf(self, user_id):
-        return self.nginx_disabled_conf_dir() / f"{user_id}.conf"
+    def nginx_disabled_conf(self, instance):
+        return self.nginx_disabled_conf_dir() / f"{self.get_legacy_user_id(instance)}.conf"
 
-    def nginx_legacy_disabled_user_conf(self, user_id):
-        return self.nginx_legacy_disabled_conf_dir() / f"{user_id}.conf"
+    def nginx_legacy_disabled_conf(self, instance):
+        return self.nginx_legacy_disabled_conf_dir() / f"{self.get_legacy_user_id(instance)}.conf"
 
-    def nginx_user_conf_candidates(self, user_id):
+    def ingress_conf(self, instance, disabled=False):
+        return self.nginx_disabled_conf(instance) if disabled else self.nginx_active_conf(instance)
+
+    def nginx_conf_candidates(self, instance):
         return [
-            self.nginx_active_user_conf(user_id),
-            self.nginx_disabled_user_conf(user_id),
-            self.nginx_legacy_disabled_user_conf(user_id),
+            self.ingress_conf(instance),
+            self.ingress_conf(instance, disabled=True),
+            self.nginx_legacy_disabled_conf(instance),
         ]
 
-    def disable_nginx_user_conf(self, user_id):
-        active_conf = self.nginx_active_user_conf(user_id)
-        disabled_conf = self.nginx_disabled_user_conf(user_id)
+    def disable_nginx_conf(self, instance):
+        active_conf = self.nginx_active_conf(instance)
+        disabled_conf = self.nginx_disabled_conf(instance)
         if not active_conf.is_file():
             if disabled_conf.is_file():
                 return 0, f"Nginx config already disabled: {disabled_conf}"
@@ -152,10 +155,10 @@ class OpenClawDockerAdapter:
             rollback_note += f"\nRollback reload failed:\n{rollback_output}"
         return reload_code, f"{reload_output}{rollback_note}"
 
-    def enable_nginx_user_conf(self, user_id):
-        active_conf = self.nginx_active_user_conf(user_id)
-        disabled_conf = self.nginx_disabled_user_conf(user_id)
-        legacy_disabled_conf = self.nginx_legacy_disabled_user_conf(user_id)
+    def enable_nginx_conf(self, instance):
+        active_conf = self.nginx_active_conf(instance)
+        disabled_conf = self.nginx_disabled_conf(instance)
+        legacy_disabled_conf = self.nginx_legacy_disabled_conf(instance)
         if active_conf.is_file():
             return 0, f"Nginx config already enabled: {active_conf}"
         if not disabled_conf.is_file():
@@ -225,7 +228,7 @@ class OpenClawDockerAdapter:
             self.run_command(["docker", "stop", runtime_target], timeout=60)
             return code, output
 
-        nginx_code, nginx_output = self.enable_nginx_user_conf(legacy_user_id)
+        nginx_code, nginx_output = self.enable_nginx_conf(instance)
         combined_output = "\n".join(part for part in [start_output, nginx_output] if part)
         if nginx_code == 0:
             return 0, combined_output
@@ -241,7 +244,7 @@ class OpenClawDockerAdapter:
         legacy_user_id = self.get_legacy_user_id(instance, required=False)
         nginx_code, nginx_output = (0, "")
         if legacy_user_id:
-            nginx_code, nginx_output = self.disable_nginx_user_conf(legacy_user_id)
+            nginx_code, nginx_output = self.disable_nginx_conf(instance)
             if nginx_code != 0:
                 return nginx_code, nginx_output
 
@@ -252,7 +255,7 @@ class OpenClawDockerAdapter:
 
         rollback_code, rollback_output = (0, "")
         if legacy_user_id:
-            rollback_code, rollback_output = self.enable_nginx_user_conf(legacy_user_id)
+            rollback_code, rollback_output = self.enable_nginx_conf(instance)
         rollback_note = "\nRolled back nginx config disable."
         if rollback_code != 0:
             rollback_note += f"\nRollback enable failed:\n{rollback_output}"
@@ -263,7 +266,7 @@ class OpenClawDockerAdapter:
 
     def set_basic_auth(self, instance, enabled):
         user_id = self.get_legacy_user_id(instance)
-        nginx_conf = self.nginx_active_user_conf(user_id)
+        nginx_conf = self.nginx_active_conf(instance)
         if not nginx_conf.is_file():
             return 1, f"Nginx config not found: {nginx_conf}"
         backup = nginx_conf.read_bytes()
@@ -724,8 +727,7 @@ while True:
         return self.public_dir / "deleted" / "evoscientist" / public_id
 
     def ingress_conf(self, instance, disabled=False):
-        user_id = self.get_legacy_user_id(instance)
-        return self.nginx_disabled_user_conf(user_id) if disabled else self.nginx_active_user_conf(user_id)
+        return self.nginx_disabled_conf(instance) if disabled else self.nginx_active_conf(instance)
 
     def _existing_ingress_conf(self, instance, disabled=False):
         return self.ingress_conf(instance, disabled=disabled)
@@ -1326,6 +1328,9 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             raise ValueError("Hermes instance public_id is not safe for ingress")
         directory = self.nginx_disabled_conf_dir() if disabled else self.nginx_users_conf_dir
         return directory / f"hermes-{public_id}.conf"
+
+    def nginx_conf_candidates(self, instance):
+        return [self.ingress_conf(instance), self.ingress_conf(instance, disabled=True)]
 
     def tenant_network(self, instance):
         user_id = self.get_legacy_user_id(instance)

@@ -67,7 +67,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 commands.append(command)
                 return 0, command[-1]
 
-            with patch.object(adapter, "disable_nginx_user_conf", return_value=(0, "disabled")):
+            with patch.object(adapter, "disable_nginx_conf", return_value=(0, "disabled")):
                 with patch.object(adapter, "run_command", side_effect=run_command):
                     code, _ = adapter.stop(self.INSTANCE)
 
@@ -86,7 +86,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
             instance = {"runtime_identifier": "evoscientist.project-1"}
 
             with patch.object(adapter, "run_command", return_value=(0, "started")) as run, patch.object(
-                adapter, "enable_nginx_user_conf"
+                adapter, "enable_nginx_conf"
             ) as enable_nginx:
                 result = adapter.start(instance)
 

@@ -1095,18 +1095,32 @@ def get_instance_batch(request_id):
 @app.get("/internal/v1/admin/metadata")
 @require_services("manager-admin-web")
 def admin_metadata():
+    try:
+        instances_page = int(request.args.get("instances_page", "1"))
+        operations_page = int(request.args.get("operations_page", "1"))
+        per_page = int(request.args.get("per_page", "20"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid pagination"}), 400
+    if instances_page < 1 or operations_page < 1 or per_page not in {10, 20, 50, 100}:
+        return jsonify({"error": "invalid pagination"}), 400
     with metadata_store.connect(DB_FILE) as conn:
         all_counts = metadata_store.table_counts(conn=conn)
         counts = {
             key: all_counts[key]
             for key in ("instances", "ports", "instance_credentials", "operation_records")
         }
+        instance_total = conn.execute("SELECT COUNT(*) FROM instances").fetchone()[0]
+        operation_total = conn.execute("SELECT COUNT(*) FROM operation_records").fetchone()[0]
+        instance_pages = max(1, (instance_total + per_page - 1) // per_page)
+        operation_pages = max(1, (operation_total + per_page - 1) // per_page)
+        instances_page = min(instances_page, instance_pages)
+        operations_page = min(operations_page, operation_pages)
         all_instances = metadata_store.list_instances(conn=conn)
         active_instances = [
             instance for instance in all_instances if instance["status"] != "deleted"
         ]
-        instances = all_instances[:20]
-        operations = metadata_store.list_operation_events(20, conn=conn)
+        instances = metadata_store.list_instances(conn=conn, limit=per_page, offset=(instances_page - 1) * per_page)
+        operations = metadata_store.list_operation_events(per_page, offset=(operations_page - 1) * per_page, conn=conn)
         user_statuses = {
             row["status"]: row["count"]
             for row in conn.execute(
@@ -1157,6 +1171,8 @@ def admin_metadata():
             "instance_public_ids": [instance["public_id"] for instance in active_instances],
             "instances": [admin_metadata_instance(item) for item in instances],
             "operations": operations,
+            "instances_pagination": {"page": instances_page, "per_page": per_page, "total": instance_total, "total_pages": instance_pages},
+            "operations_pagination": {"page": operations_page, "per_page": per_page, "total": operation_total, "total_pages": operation_pages},
         }
     )
 

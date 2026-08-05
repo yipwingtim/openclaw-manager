@@ -1304,19 +1304,20 @@ def get_instance(user_id, conn=None):
         return instance_dict(row)
 
 
-def list_instances(status=None, db_file=None, conn=None):
+def list_instances(status=None, db_file=None, conn=None, *, limit=None, offset=0):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
+        query = "SELECT * FROM instances"
+        params = []
         if status:
-            rows = active_conn.execute(
-                "SELECT * FROM instances WHERE status = ? ORDER BY created_at DESC, legacy_user_id ASC",
-                (status,),
-            ).fetchall()
-        else:
-            rows = active_conn.execute(
-                "SELECT * FROM instances ORDER BY created_at DESC, legacy_user_id ASC"
-            ).fetchall()
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC, legacy_user_id ASC"
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend((limit, offset))
+        rows = active_conn.execute(query, params).fetchall()
         return [instance_dict(row) for row in rows]
 
 
@@ -1593,7 +1594,7 @@ def list_operations(limit=100, conn=None):
         return [row_to_dict(row) for row in rows]
 
 
-def list_operation_events(limit=100, *, db_file=None, conn=None):
+def list_operation_events(limit=100, *, offset=0, db_file=None, conn=None):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
@@ -1614,9 +1615,9 @@ def list_operation_events(limit=100, *, db_file=None, conn=None):
             LEFT JOIN users actor ON actor.id = o.actor_user_id
             LEFT JOIN instances instance ON instance.id = o.instance_id
             ORDER BY o.created_at DESC, o.id DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (limit,),
+            (limit, offset),
         ).fetchall()
         return [row_to_dict(row) for row in rows]
 

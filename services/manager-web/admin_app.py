@@ -727,7 +727,22 @@ def metadata():
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
     try:
-        summary = control_client.get_admin_metadata()
+        try:
+            per_page = int(request.args.get("per_page", DEFAULT_INSTANCE_PAGE_SIZE))
+        except (TypeError, ValueError):
+            per_page = DEFAULT_INSTANCE_PAGE_SIZE
+        if per_page not in INSTANCE_PAGE_SIZE_OPTIONS:
+            per_page = DEFAULT_INSTANCE_PAGE_SIZE
+        try:
+            instances_page = max(1, int(request.args.get("instances_page", 1)))
+            operations_page = max(1, int(request.args.get("operations_page", 1)))
+        except (TypeError, ValueError):
+            instances_page = operations_page = 1
+        summary = control_client.get_admin_metadata(
+            instances_page=instances_page,
+            operations_page=operations_page,
+            per_page=per_page,
+        )
         error = ""
     except control_client.ControlError as exc:
         summary = {
@@ -736,6 +751,8 @@ def metadata():
                 "activity": {},
             }, "instance_public_ids": [],
             "instances": [], "operations": [],
+            "instances_pagination": {"page": 1, "per_page": per_page, "total": 0, "total_pages": 1},
+            "operations_pagination": {"page": 1, "per_page": per_page, "total": 0, "total_pages": 1},
         }
         error = str(exc)
     runtime = {"running": 0, "stopped": 0, "unknown": 0}
@@ -755,7 +772,17 @@ def metadata():
             runtime[status] += 1
         runtime["unknown"] += len(batch) - len(statuses)
     summary.setdefault("overview", {})["runtime"] = runtime
-    return render_template("admin_metadata.html", error=error, **summary)
+    for key in ("instances_pagination", "operations_pagination"):
+        pagination = summary.setdefault(key, {"page": 1, "per_page": per_page, "total": 0, "total_pages": 1})
+        pagination.update({
+            "start": (pagination["page"] - 1) * pagination["per_page"] + 1 if pagination["total"] else 0,
+            "end": min(pagination["page"] * pagination["per_page"], pagination["total"]),
+            "has_prev": pagination["page"] > 1,
+            "has_next": pagination["page"] < pagination["total_pages"],
+            "prev_page": max(1, pagination["page"] - 1),
+            "next_page": min(pagination["total_pages"], pagination["page"] + 1),
+        })
+    return render_template("admin_metadata.html", error=error, page_size_options=INSTANCE_PAGE_SIZE_OPTIONS, **summary)
 
 
 @app.get("/admin/activity")

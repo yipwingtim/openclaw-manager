@@ -59,6 +59,13 @@ def admin_instance_statuses(actor_public_id, instance_public_ids):
     ).json()["statuses"]
 
 
+def collect_activity_snapshots(actor_public_id, instance_public_ids):
+    return request(
+        "POST", "/internal/v1/admin/activity-snapshots/collect", actor_public_id,
+        json={"instance_public_ids": instance_public_ids},
+    ).json()["results"]
+
+
 def device_action(actor_public_id, instance_public_id, action):
     instance_id = urllib.parse.quote(instance_public_id, safe="")
     return request(

@@ -15,5 +15,6 @@ COPY services/manager-web/instance_adapters.py .
 COPY services/manager-web/product_capabilities.py .
 COPY services/manager-executor/executor.py .
 COPY services/manager-executor/api.py .
+COPY services/manager-executor/activity_adapters.py .
 
 CMD ["python", "executor.py"]

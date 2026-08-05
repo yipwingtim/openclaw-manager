@@ -55,6 +55,10 @@ def initialize(db_file=None, schema_file=None):
                 raise RuntimeError(
                     "metadata schema requires scripts/migrate_external_session_tokens.py"
                 )
+            if version < 7:
+                raise RuntimeError(
+                    "metadata schema requires scripts/migrate_activity_snapshots.py"
+                )
         conn.executescript(schema)
 
 
@@ -1617,6 +1621,99 @@ def list_operation_events(limit=100, *, db_file=None, conn=None):
         return [row_to_dict(row) for row in rows]
 
 
+def record_activity_snapshot(
+    instance_public_id,
+    *,
+    status,
+    source_version=None,
+    source_schema=None,
+    source_cursor=None,
+    metrics=None,
+    error_summary=None,
+    db_file=None,
+    conn=None,
+):
+    if status not in {"success", "failed"}:
+        raise ValueError("invalid activity snapshot status")
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        instance = active_conn.execute(
+            "SELECT id FROM instances WHERE public_id = ?", (instance_public_id,)
+        ).fetchone()
+        if instance is None:
+            raise ValueError("instance not found")
+        inserted = active_conn.execute(
+            """
+            INSERT OR IGNORE INTO activity_snapshots (
+                instance_id, status, source_version, source_schema,
+                source_cursor, metrics_json, error_summary, collected_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                instance["id"], status, source_version, source_schema,
+                source_cursor, json.dumps(metrics or {}, sort_keys=True),
+                error_summary, utc_now(),
+            ),
+        )
+        if inserted.rowcount == 0 and status == "success":
+            selector = (
+                "snapshot.instance_id = ? "
+                "AND snapshot.status = 'success' "
+                "AND snapshot.source_cursor = ?"
+            )
+            selector_params = (instance["id"], source_cursor)
+        else:
+            selector = "snapshot.id = ?"
+            selector_params = (inserted.lastrowid,)
+        row = active_conn.execute(
+            """
+            SELECT snapshot.*, instance.public_id AS instance_public_id,
+                   instance.product, instance.instance_name,
+                   owner.public_id AS owner_user_public_id,
+                   owner.username AS owner_username,
+                   owner.display_name AS owner_display_name
+            FROM activity_snapshots snapshot
+            JOIN instances instance ON instance.id = snapshot.instance_id
+            JOIN users owner ON owner.id = instance.owner_user_id
+            WHERE """ + selector + " LIMIT 1",
+            selector_params,
+        ).fetchone()
+        value = row_to_dict(row)
+        value["metrics"] = json.loads(value.pop("metrics_json"))
+        return value
+
+
+def list_latest_activity_snapshots(*, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        rows = active_conn.execute(
+            """
+            SELECT snapshot.*, instance.public_id AS instance_public_id,
+                   instance.product, instance.instance_name,
+                   owner.public_id AS owner_user_public_id,
+                   owner.username AS owner_username,
+                   owner.display_name AS owner_display_name
+            FROM instances instance
+            JOIN users owner ON owner.id = instance.owner_user_id
+            LEFT JOIN activity_snapshots snapshot ON snapshot.id = (
+                SELECT id FROM activity_snapshots
+                WHERE instance_id = instance.id
+                ORDER BY collected_at DESC, id DESC LIMIT 1
+            )
+            WHERE instance.status != 'deleted'
+            ORDER BY owner.normalized_username, instance.instance_name
+            """
+        ).fetchall()
+        values = []
+        for row in rows:
+            value = row_to_dict(row)
+            value["metrics"] = json.loads(value.pop("metrics_json") or "{}")
+            values.append(value)
+        return values
+
+
 def table_counts(conn=None):
     tables = [
         "users",
@@ -1630,6 +1727,7 @@ def table_counts(conn=None):
         "ports",
         "operation_records",
         "execution_jobs",
+        "activity_snapshots",
         "instance_credentials",
     ]
     owns_conn = conn is None

@@ -61,6 +61,20 @@ JOB_STATUSES = {
     "interrupted",
     "cancelled",
 }
+ACTIVITY_METRICS = {
+    "openclaw": {
+        "sessions", "user_interactions", "model_responses", "tool_calls",
+        "task_runs", "subagent_runs", "scheduled_runs", "scheduled_tokens",
+        "last_activity_at_ms",
+    },
+    "hermes": {
+        "sessions", "messages", "tool_calls", "model_calls", "task_runs",
+        "scheduled_runs", "last_activity_at_s",
+    },
+    "evoscientist": {
+        "sessions", "checkpoints", "writes", "write_tasks", "last_activity_at_ms",
+    },
+}
 JOB_ACTION_PARAMS = {
     "instance.start": set(),
     "instance.stop": set(),
@@ -299,6 +313,7 @@ def executor_instance_payload(instance):
         "status": instance["status"],
         "restore_state": instance.get("restore_state"),
         "access_role": instance.get("access_role"),
+        "version": instance.get("openclaw_version"),
     }
 
 
@@ -347,7 +362,7 @@ def health():
                 "service_tokens_configured": tokens_valid,
             }
         ), 503
-    ready = version == 6 and tokens_valid
+    ready = version == 7 and tokens_valid
     return jsonify(
         {
             "ok": ready,
@@ -1095,6 +1110,92 @@ def admin_metadata():
             "operations": operations,
         }
     )
+
+
+@app.get("/internal/v1/admin/activity-snapshots")
+@require_services("manager-admin-web")
+def admin_activity_snapshots():
+    actor = metadata_store.get_user_by_public_id(actor_public_id(), db_file=DB_FILE)
+    if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+        return jsonify({"error": "active administrator not found"}), 403
+    snapshots = metadata_store.list_latest_activity_snapshots(db_file=DB_FILE)
+    return jsonify({"snapshots": [
+        {key: value for key, value in snapshot.items() if key not in {
+            "id", "instance_id", "source_cursor",
+        }}
+        for snapshot in snapshots
+    ]})
+
+
+@app.post("/internal/v1/activity-snapshots")
+@require_services("manager-executor")
+def record_activity_snapshot():
+    payload = request.get_json(silent=True) or {}
+    allowed = {
+        "actor_user_public_id", "instance_public_id", "status", "source_version",
+        "source_schema", "source_cursor", "metrics", "error_summary",
+    }
+    if set(payload) - allowed:
+        return jsonify({"error": "unsupported activity snapshot fields"}), 400
+    actor = metadata_store.get_user_by_public_id(
+        payload.get("actor_user_public_id"), db_file=DB_FILE
+    )
+    instance = metadata_store.get_instance_by_public_id(
+        payload.get("instance_public_id"), db_file=DB_FILE
+    )
+    status = payload.get("status")
+    metrics = payload.get("metrics")
+    if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+        return jsonify({"error": "active administrator not found"}), 403
+    if instance is None or instance["status"] == "deleted":
+        return jsonify({"error": "active instance not found"}), 404
+    if status not in {"success", "failed"} or not isinstance(metrics, dict):
+        return jsonify({"error": "invalid activity snapshot"}), 400
+    if set(metrics) - ACTIVITY_METRICS[instance["product"]] or any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0
+        for value in metrics.values()
+    ):
+        return jsonify({"error": "invalid activity metrics"}), 400
+    if status == "success" and (
+        not metrics
+        or not isinstance(payload.get("source_cursor"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", payload["source_cursor"])
+        or not isinstance(payload.get("source_schema"), str)
+        or len(payload["source_schema"]) > 128
+        or not isinstance(payload.get("source_version"), str)
+        or not 1 <= len(payload["source_version"]) <= 128
+    ):
+        return jsonify({"error": "invalid successful activity snapshot"}), 400
+    if status == "failed" and (
+        metrics
+        or payload.get("source_cursor") is not None
+        or payload.get("error_summary") not in {
+            "activity source not found", "activity source schema mismatch",
+            "activity collection failed",
+        }
+    ):
+        return jsonify({"error": "invalid failed activity snapshot"}), 400
+    with metadata_store.connect(DB_FILE) as conn:
+        snapshot = metadata_store.record_activity_snapshot(
+            instance["public_id"],
+            status=status,
+            source_version=payload.get("source_version"),
+            source_schema=payload.get("source_schema"),
+            source_cursor=payload.get("source_cursor"),
+            metrics=metrics,
+            error_summary=payload.get("error_summary"),
+            conn=conn,
+        )
+        metadata_store.record_operation(
+            action="activity.collect",
+            status=status,
+            actor_user_id=actor["id"],
+            instance_id=instance["id"],
+            source_service=g.source_service,
+            message=payload.get("error_summary") or "activity snapshot collected",
+            conn=conn,
+        )
+    return jsonify({"snapshot": snapshot})
 
 
 @app.get("/internal/v1/admin/default-versions")

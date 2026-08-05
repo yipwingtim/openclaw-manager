@@ -131,6 +131,32 @@ class ManagerExecutorApiTests(unittest.TestCase):
             {"instance_public_id": "instance-2", "status": "stopped"},
         ])
 
+    def test_admin_collects_and_persists_activity_snapshot(self):
+        self.api.request.headers = {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": "admin-1",
+        }
+        self.api.request.get_json = lambda **kwargs: {"instance_public_ids": ["instance-1"]}
+        instance = {"public_id": "instance-1", "product": "hermes"}
+        collected = {
+            "status": "success", "source_version": "v1", "source_schema": "schema-1",
+            "source_cursor": "a" * 64, "metrics": {"sessions": 1},
+        }
+        with patch.dict(self.api.TOKENS, {"admin": "admin-token", "user": "user-token"}), patch.object(
+            self.api.CONTROL, "get_runtime_instance", return_value=instance
+        ), patch.object(self.api, "get_activity_adapter") as adapter, patch.object(
+            self.api.CONTROL, "record_activity",
+            return_value={"snapshot": {"status": "success", "error_summary": None}},
+        ) as record:
+            adapter.return_value.collect.return_value = collected
+            response = self.api.collect_activity_snapshots()
+        self.assertEqual(response.get_json()["results"], [{
+            "instance_public_id": "instance-1", "status": "success", "error_summary": None,
+        }])
+        self.assertEqual(record.call_args.args[0], {
+            "actor_user_public_id": "admin-1", "instance_public_id": "instance-1", **collected,
+        })
+
     def test_admin_instance_statuses_rejects_user_service_token(self):
         self.api.request.headers = {"Authorization": "Bearer user-token"}
         with patch.dict(self.api.TOKENS, {"admin": "admin-token", "user": "user-token"}):

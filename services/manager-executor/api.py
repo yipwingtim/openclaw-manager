@@ -1,5 +1,7 @@
 import hmac
+import json
 import os
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -7,6 +9,7 @@ from flask import Flask, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from executor import ControlClient, get_adapter, resolve_instance_file
+from activity_adapters import get_activity_adapter
 from product_capabilities import product_supports
 
 
@@ -216,6 +219,53 @@ def admin_instance_statuses():
         status = "running" if raw.startswith("Up") else "stopped" if raw == "STOPPED" else "unknown"
         statuses.append({"instance_public_id": instance_id, "status": status})
     return jsonify({"statuses": statuses})
+
+
+@app.post("/internal/v1/admin/activity-snapshots/collect")
+def collect_activity_snapshots():
+    if caller_role() != "admin":
+        return jsonify({"error": "admin service token is required"}), 403
+    actor = request.headers.get("X-Actor-User-Public-Id", "").strip()
+    instance_ids = (request.get_json(silent=True) or {}).get("instance_public_ids")
+    if not actor:
+        return jsonify({"error": "actor user public ID is required"}), 400
+    if (
+        not isinstance(instance_ids, list) or not 1 <= len(instance_ids) <= 100
+        or any(not isinstance(value, str) or not value for value in instance_ids)
+        or len(set(instance_ids)) != len(instance_ids)
+    ):
+        return jsonify({"error": "instance_public_ids must contain 1-100 unique IDs"}), 400
+    results = []
+    for instance_id in instance_ids:
+        payload = {
+            "actor_user_public_id": actor,
+            "instance_public_id": instance_id,
+        }
+        try:
+            instance = CONTROL.get_runtime_instance(instance_id, actor, True)
+            payload.update(get_activity_adapter(instance["product"]).collect(instance))
+        except FileNotFoundError:
+            payload.update(status="failed", metrics={}, error_summary="activity source not found")
+        except json.JSONDecodeError:
+            payload.update(status="failed", metrics={}, error_summary="activity collection failed")
+        except ValueError:
+            payload.update(status="failed", metrics={}, error_summary="activity source schema mismatch")
+        except (OSError, sqlite3.Error):
+            payload.update(status="failed", metrics={}, error_summary="activity collection failed")
+        try:
+            snapshot = CONTROL.record_activity(payload)["snapshot"]
+            results.append({
+                "instance_public_id": instance_id,
+                "status": snapshot["status"],
+                "error_summary": snapshot.get("error_summary"),
+            })
+        except RuntimeError:
+            results.append({
+                "instance_public_id": instance_id,
+                "status": "failed",
+                "error_summary": "activity snapshot persistence failed",
+            })
+    return jsonify({"results": results})
 
 
 @app.post("/internal/v1/instances/<instance_public_id>/devices/<action>")

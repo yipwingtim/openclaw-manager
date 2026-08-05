@@ -201,6 +201,12 @@ def get_admin_metadata():
     return request_json("GET", "/internal/v1/admin/metadata")
 
 
+def get_activity_snapshots(actor_public_id):
+    return request_json(
+        "GET", "/internal/v1/admin/activity-snapshots", actor_public_id=actor_public_id
+    )["snapshots"]
+
+
 def get_default_versions():
     return request_json("GET", "/internal/v1/admin/default-versions")["versions"]
 

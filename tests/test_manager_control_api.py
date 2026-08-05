@@ -122,7 +122,7 @@ class ManagerControlApiTests(unittest.TestCase):
             response.get_json(),
             {
                 "ok": True,
-                "schema_version": 6,
+                "schema_version": 7,
                 "service_tokens_configured": True,
             },
         )
@@ -377,6 +377,79 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertNotIn("uis-secret-subject", serialized)
         self.assertNotIn("profile_json", serialized)
         self.assertNotIn("password_hash", serialized)
+
+    def test_executor_records_validated_activity_snapshot(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        payload = {
+            "actor_user_public_id": admin["public_id"],
+            "instance_public_id": instance["public_id"],
+            "status": "success", "source_version": "2026.6.6",
+            "source_schema": "openclaw-global-1", "source_cursor": "a" * 64,
+            "metrics": {"sessions": 2, "user_interactions": 4},
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.record_activity_snapshot())
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["snapshot"]["metrics"], payload["metrics"])
+        self.assertNotIn("source_cursor", repr(
+            self.control.metadata_store.list_latest_activity_snapshots(db_file=self.db_file)[0]["metrics"]
+        ))
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            operation = conn.execute(
+                "SELECT action, actor_user_id, instance_id FROM operation_records ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(tuple(operation), ("activity.collect", admin["id"], instance["id"]))
+
+    def test_activity_snapshot_duplicate_returns_matching_success(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        success = self.control.metadata_store.record_activity_snapshot(
+            instance["public_id"], status="success", source_cursor="a" * 64,
+            source_schema="schema", source_version="v1", metrics={"sessions": 1},
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.record_activity_snapshot(
+            instance["public_id"], status="failed", metrics={},
+            error_summary="activity collection failed", db_file=self.db_file,
+        )
+        repeated = self.control.metadata_store.record_activity_snapshot(
+            instance["public_id"], status="success", source_cursor="a" * 64,
+            source_schema="schema", source_version="v1", metrics={"sessions": 1},
+            db_file=self.db_file,
+        )
+        self.assertEqual(repeated["id"], success["id"])
+        self.assertEqual(repeated["status"], "success")
+
+    def test_executor_rejects_unknown_or_sensitive_activity_metrics(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        payload = {
+            "actor_user_public_id": admin["public_id"], "instance_public_id": instance["public_id"],
+            "status": "success", "source_schema": "schema", "source_cursor": "a" * 64,
+            "metrics": {"prompt": 1},
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.record_activity_snapshot())
+        self.assertEqual(status, 400)
+        self.assertEqual(response.get_json(), {"error": "invalid activity metrics"})
 
     def test_admin_platform_users_filters_uis_user_id_and_paginates(self):
         self.control.metadata_store.upsert_identity(
@@ -2793,6 +2866,7 @@ class ManagerControlApiTests(unittest.TestCase):
                 "status": "active",
                 "restore_state": "not_applicable",
                 "access_role": None,
+                "version": None,
             },
         )
         self.assertEqual(empty_status, 204)

@@ -14,6 +14,12 @@ class ExternalSessionTokensMigrationTests(unittest.TestCase):
     def make_v5_database(self, root):
         db_file = root / "manager.db"
         schema = SCHEMA.read_text(encoding="utf-8")
+        start = schema.index("CREATE TABLE IF NOT EXISTS activity_snapshots")
+        end = schema.index(
+            "INSERT OR IGNORE INTO schema_migrations (version, name)\nVALUES (3",
+            start,
+        )
+        schema = schema[:start] + schema[end:]
         schema = schema.replace(
             """
 CREATE TABLE IF NOT EXISTS external_session_tokens (
@@ -31,6 +37,12 @@ CREATE INDEX IF NOT EXISTS idx_external_session_tokens_external_token
             """
 INSERT OR IGNORE INTO schema_migrations (version, name)
 VALUES (6, 'external_session_tokens');
+""",
+            "",
+        ).replace(
+            """
+INSERT OR IGNORE INTO schema_migrations (version, name)
+VALUES (7, 'activity_snapshots');
 """,
             "",
         )

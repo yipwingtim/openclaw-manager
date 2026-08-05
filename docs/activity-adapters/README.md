@@ -6,7 +6,7 @@
 | --- | --- |
 | 文档版本 | 1.0.0 |
 | 盘点日期 | 2026-08-05 |
-| 状态 | 数据源盘点完成，尚未实现采集代码 |
+| 状态 | 第一版手动采集与累计快照已实现 |
 
 ## 目标
 
@@ -20,10 +20,11 @@ instance_id
 product
 collected_at
 source_version
-metric_name
-cumulative_value
+metrics_json
 source_cursor
 ```
+
+`metrics_json` 只允许保存各产品数据字典定义的数值型累计指标白名单。
 
 Manager 根据相邻快照计算日、周、月增量。计数下降通常表示产品升级、数据清理或数据源重建，
 此时应建立新基线，不生成负增量。
@@ -82,8 +83,26 @@ Adapter 应使用明确的表、字段和事件类型白名单。产品升级后
 
 ## 后续代码 PR 建议
 
-1. 新增活动快照表及迁移，确定保留期限和聚合策略。
-2. 实现三个只读 Activity Adapter 及 Schema 指纹校验。
-3. 增加定时采集任务、幂等快照写入和失败隔离。
-4. 增加管理员使用成效页面，按用户拥有实例、产品和时间范围汇总。
+当前第一版提供 Schema v7 活动快照、三个只读 Activity Adapter、管理员手动批量采集和
+最新累计指标页面。后续建议：
 
+1. 验证多个生产版本的数据源兼容性，并补充版本白名单。
+2. 增加定时采集任务、保留期限和历史增量聚合。
+3. 增加按产品和时间范围的趋势图及导出。
+
+## 部署与验证
+
+升级前必须备份并迁移 Manager 数据库：
+
+```bash
+python3 scripts/migrate_activity_snapshots.py \
+  --db /data/docker/openclaw-public/manager.db
+
+python3 scripts/migrate_activity_snapshots.py \
+  --db /data/docker/openclaw-public/manager.db \
+  --apply
+```
+
+第一条为 dry-run；第二条会先生成 `manager.db.pre-v7-<timestamp>.bak`，再在事务中创建
+快照表。迁移完成后重建 `manager-control`、`manager-executor-api`、`manager-admin-web`
+和 `manager-user-web`。管理员可从 `/admin/activity` 手动刷新未删除实例。

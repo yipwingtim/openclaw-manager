@@ -82,6 +82,9 @@ class ControlClient:
         request_id = urllib.parse.quote(request_id, safe="")
         return self.request("GET", f"/internal/v1/execution-jobs/{request_id}")["job"]
 
+    def record_activity(self, payload):
+        return self.request("POST", "/internal/v1/activity-snapshots", payload)
+
 
 def resolve_instance_file(instance, root_key, relative_path):
     relative_root = FILE_ROOTS.get(root_key)

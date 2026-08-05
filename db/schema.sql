@@ -270,6 +270,26 @@ ON execution_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_execution_jobs_instance_id
 ON execution_jobs(instance_id);
 
+CREATE TABLE IF NOT EXISTS activity_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
+    source_version TEXT,
+    source_schema TEXT,
+    source_cursor TEXT,
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    error_summary TEXT,
+    collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_snapshots_instance_collected
+ON activity_snapshots(instance_id, collected_at DESC, id DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_snapshots_success_cursor
+ON activity_snapshots(instance_id, source_cursor)
+WHERE status = 'success' AND source_cursor IS NOT NULL;
+
 INSERT OR IGNORE INTO schema_migrations (version, name)
 VALUES (3, 'local_auth_session');
 
@@ -281,5 +301,8 @@ VALUES (5, 'instance_provisioning');
 
 INSERT OR IGNORE INTO schema_migrations (version, name)
 VALUES (6, 'external_session_tokens');
+
+INSERT OR IGNORE INTO schema_migrations (version, name)
+VALUES (7, 'activity_snapshots');
 
 COMMIT;

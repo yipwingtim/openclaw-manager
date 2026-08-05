@@ -84,7 +84,7 @@ def execute_schema(conn, schema_file):
         if sqlite3.complete_statement(statement):
             sql = statement.strip()
             statement = ""
-            if sql:
+            if sql and sql.upper() not in {"BEGIN;", "COMMIT;"}:
                 conn.execute(sql)
     if statement.strip():
         raise RuntimeError("incomplete SQL statement in schema")

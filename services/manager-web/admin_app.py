@@ -718,6 +718,64 @@ def metadata():
     return render_template("admin_metadata.html", error=error, **summary)
 
 
+@app.get("/admin/activity")
+def activity_page():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    product = request.args.get("product", "all").strip().lower()
+    if product not in {"all", "openclaw", "hermes", "evoscientist"}:
+        product = "all"
+    query = request.args.get("q", "").strip()
+    try:
+        snapshots = control_client.get_activity_snapshots(current["public_id"])
+        error = request.args.get("error", "")
+    except control_client.ControlError as exc:
+        snapshots, error = [], str(exc)
+    needle = query.casefold()
+    snapshots = [
+        snapshot for snapshot in snapshots
+        if (product == "all" or snapshot["product"] == product)
+        and (not needle or needle in " ".join(
+            str(snapshot.get(key) or "") for key in (
+                "instance_name", "owner_username", "owner_display_name",
+            )
+        ).casefold())
+    ]
+    return render_template(
+        "admin_activity.html", snapshots=snapshots, product_filter=product,
+        query=query, result=request.args.get("result", ""), error=error,
+    )
+
+
+@app.post("/admin/activity/collect")
+def collect_activity():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        available_ids = [
+            item["public_id"] for item in control_client.list_admin_instances()
+            if item["status"] != "deleted"
+        ]
+        requested_id = request.form.get("instance_public_id", "").strip()
+        if requested_id and requested_id not in available_ids:
+            return redirect(url_for("activity_page", error="实例不存在或已删除。"))
+        instance_ids = [requested_id] if requested_id else available_ids
+        results = []
+        for start in range(0, len(instance_ids), 100):
+            results.extend(executor_client.collect_activity_snapshots(
+                current["public_id"], instance_ids[start:start + 100]
+            ))
+    except (control_client.ControlError, executor_client.ExecutorError) as exc:
+        return redirect(url_for("activity_page", error=str(exc)))
+    failed = sum(item["status"] != "success" for item in results)
+    return redirect(url_for(
+        "activity_page",
+        result=f"采集完成：成功 {len(results) - failed}，失败 {failed}。",
+    ))
+
+
 @app.get("/admin/device-approvals")
 def device_approvals():
     current = web_common.actor()

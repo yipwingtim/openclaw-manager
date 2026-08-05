@@ -58,7 +58,12 @@
                   <span class="badge-status badge-neutral">{{ name }}: {{ value }}</span>
                 {% else %}—{% endfor %}
               </td>
-              <td><div>{{ snapshot.source_version or "—" }}</div><div class="muted-small">{{ snapshot.source_schema or "—" }}</div></td>
+              <td>
+                {% if snapshot.source_version %}
+                  <div title="{{ snapshot.source_version }}">{% if snapshot.source_version.startswith("sha256:") %}{{ snapshot.source_version[:21] }}…{% else %}{{ snapshot.source_version }}{% endif %}</div>
+                {% else %}<div>—</div>{% endif %}
+                <div class="muted-small">{{ snapshot.source_schema or "—" }}</div>
+              </td>
               <td>
                 {% if snapshot.status == "success" %}<span class="badge-status badge-running">success</span>
                 {% elif snapshot.status == "failed" %}<span class="badge-status badge-stopped">failed</span><div class="muted-small">{{ snapshot.error_summary }}</div>

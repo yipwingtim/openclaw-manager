@@ -54,7 +54,7 @@
               <td class="fw-semibold">{{ snapshot.instance_name }}</td>
               <td><span class="badge-status badge-neutral">{{ snapshot.product }}</span></td>
               <td>
-                {% for name, value in snapshot.metrics|dictsort %}
+                {% for name, value in snapshot.metric_items %}
                   <span class="badge-status badge-neutral">{{ name }}: {{ value }}</span>
                 {% else %}—{% endfor %}
               </td>

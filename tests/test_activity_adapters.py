@@ -76,6 +76,34 @@ class ActivityAdapterTests(unittest.TestCase):
             "scheduled_runs": 1, "sessions": 1, "task_runs": 1, "tool_calls": 1,
         })
 
+    def test_hermes_v2026_7_20_accepts_state_schema_22(self):
+        self.database(self.root / "state.db", """
+            CREATE TABLE schema_version (version INTEGER); INSERT INTO schema_version VALUES (22);
+            CREATE TABLE sessions (started_at REAL, ended_at REAL, message_count INTEGER, tool_call_count INTEGER, api_call_count INTEGER);
+        """)
+        self.database(self.root / "kanban.db", """
+            CREATE TABLE task_runs (status TEXT, started_at INTEGER, ended_at INTEGER);
+        """)
+        self.database(self.root / "cron" / "executions.db", """
+            CREATE TABLE executions (status TEXT, started_at TEXT, finished_at TEXT);
+        """)
+
+        result = get_activity_adapter("hermes").collect({
+            "data_path": str(self.root), "version": "v2026.7.20",
+        })
+
+        self.assertEqual(result["source_schema"], "hermes-state-22")
+
+    def test_hermes_version_and_state_schema_must_match(self):
+        self.database(self.root / "state.db", """
+            CREATE TABLE schema_version (version INTEGER); INSERT INTO schema_version VALUES (23);
+        """)
+
+        with self.assertRaisesRegex(ValueError, "unsupported Hermes state schema"):
+            get_activity_adapter("hermes").collect({
+                "data_path": str(self.root), "version": "v2026.7.20",
+            })
+
     def test_evoscientist_never_reads_blob_payloads(self):
         database = self.database(self.root / "evoscientist-data" / "sessions.db", """
             CREATE TABLE checkpoints (thread_id TEXT, checkpoint_ns TEXT, checkpoint_id TEXT, parent_checkpoint_id TEXT, type TEXT, checkpoint BLOB, metadata BLOB);

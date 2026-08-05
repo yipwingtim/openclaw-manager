@@ -127,10 +127,17 @@ class AdminWebTests(unittest.TestCase):
         self.admin.request.args = {"product": "hermes", "q": "张三"}
         with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
             self.admin.control_client, "get_activity_snapshots", return_value=snapshots
-        ) as get_snapshots:
+        ) as get_snapshots, patch.object(
+            self.admin.executor_client, "admin_instance_statuses",
+            return_value=[
+                {"instance_public_id": "instance-1", "status": "running"},
+                {"instance_public_id": "instance-2", "status": "stopped"},
+            ],
+        ):
             template, context = self.admin.activity_page()
         self.assertEqual(template, "admin_activity.html")
         self.assertEqual([item["instance_public_id"] for item in context["snapshots"]], ["instance-1"])
+        self.assertEqual(context["status_filter"], "running")
         get_snapshots.assert_called_once_with("admin-1")
         source = (ROOT_DIR / "services" / "manager-web" / "templates" / "admin_activity.html").read_text(encoding="utf-8")
         for sensitive in ("prompt", "reasoning", "tool_name", "filename", "source_cursor"):
@@ -142,7 +149,7 @@ class AdminWebTests(unittest.TestCase):
             {"public_id": f"instance-{index}", "status": "active"}
             for index in range(101)
         ]
-        self.admin.request.form = {}
+        self.admin.request.form = {"status": "all"}
         with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
             self.admin.control_client, "list_admin_instances", return_value=instances
         ), patch.object(
@@ -154,6 +161,57 @@ class AdminWebTests(unittest.TestCase):
             response = self.admin.collect_activity()
         self.assertEqual(response, "activity-url")
         self.assertEqual([len(call.args[1]) for call in collect.call_args_list], [100, 1])
+
+    def test_activity_page_filters_stopped_instances_and_paginates(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        snapshots = [
+            {
+                "instance_public_id": f"instance-{index}",
+                "instance_name": f"Instance {index:02d}", "owner_username": "owner",
+                "owner_display_name": None, "product": "openclaw", "metrics": {},
+                "status": None,
+            }
+            for index in range(1, 26)
+        ]
+        self.admin.request.args = {"status": "stopped", "page": "2", "per_page": "10"}
+        statuses = [
+            {"instance_public_id": item["instance_public_id"], "status": "stopped"}
+            for item in snapshots
+        ]
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "get_activity_snapshots", return_value=snapshots
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses", return_value=statuses
+        ):
+            _, context = self.admin.activity_page()
+
+        self.assertEqual(len(context["snapshots"]), 10)
+        self.assertEqual(context["snapshots"][0]["instance_public_id"], "instance-11")
+        self.assertEqual(context["status_filter"], "stopped")
+        self.assertEqual(context["pagination"]["page"], 2)
+        self.assertEqual(context["pagination"]["total"], 25)
+
+    def test_activity_collection_defaults_to_running_instances(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        instances = [
+            {"public_id": "instance-1", "status": "active"},
+            {"public_id": "instance-2", "status": "active"},
+        ]
+        self.admin.request.form = {}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "list_admin_instances", return_value=instances
+        ), patch.object(
+            self.admin.executor_client, "admin_instance_statuses", return_value=[
+                {"instance_public_id": "instance-1", "status": "running"},
+                {"instance_public_id": "instance-2", "status": "stopped"},
+            ],
+        ), patch.object(
+            self.admin.executor_client, "collect_activity_snapshots",
+            return_value=[{"instance_public_id": "instance-1", "status": "success"}],
+        ) as collect, patch.object(self.admin, "url_for", return_value="activity-url"):
+            self.admin.collect_activity()
+
+        collect.assert_called_once_with("admin-1", ["instance-1"])
 
     def test_activity_collection_can_target_one_instance(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

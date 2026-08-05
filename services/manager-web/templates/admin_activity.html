@@ -7,9 +7,10 @@
       <h1 class="page-title">智能体使用成效</h1>
       <div class="page-subtitle">展示实例内部低敏累计活动；Owner 表示实例归属，不代表每次活动的实际操作者。</div>
     </div>
-    <form method="post" action="/admin/activity/collect" onsubmit="return confirm('确认只读采集全部未删除实例的活动统计？');">
+    <form method="post" action="/admin/activity/collect" onsubmit="return confirm('确认只读采集当前状态筛选下的全部实例？');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="btn btn-oc" type="submit">刷新全部实例</button>
+      <input type="hidden" name="status" value="{{ status_filter }}">
+      <button class="btn btn-oc" type="submit">刷新该状态全部实例</button>
     </form>
   </div>
 
@@ -18,7 +19,7 @@
 
   <form class="surface p-3 mb-3" method="get" action="/admin/activity">
     <div class="row g-3 align-items-end">
-      <div class="col-12 col-md-4">
+      <div class="col-12 col-md-3">
         <label class="form-label" for="product">产品</label>
         <select class="form-select" id="product" name="product">
           {% for value in ["all", "openclaw", "hermes", "evoscientist"] %}
@@ -26,7 +27,15 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-12 col-md-6">
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="status">运行状态</label>
+        <select class="form-select" id="status" name="status">
+          {% for value, label in [("running", "运行中"), ("stopped", "已停止"), ("all", "全部")] %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
         <label class="form-label" for="q">实例或 Owner</label>
         <input class="form-control" id="q" name="q" type="search" value="{{ query }}">
       </div>
@@ -60,6 +69,7 @@
                 <form method="post" action="/admin/activity/collect">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="instance_public_id" value="{{ snapshot.instance_public_id }}">
+                  <input type="hidden" name="status" value="{{ status_filter }}">
                   <button class="btn btn-sm btn-oc-outline" type="submit">刷新</button>
                 </form>
               </td>
@@ -69,6 +79,17 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
+    <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap p-3 border-top">
+      <div class="muted-small">显示 {{ pagination.start }}-{{ pagination.end }} / {{ pagination.total }} 个实例</div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <a class="btn btn-sm {% if pagination.has_prev %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/activity?product={{ product_filter }}&status={{ status_filter }}&page={{ pagination.prev_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">上一页</a>
+        <span class="muted-small">第 {{ pagination.page }} / {{ pagination.total_pages }} 页</span>
+        <a class="btn btn-sm {% if pagination.has_next %}btn-oc-outline{% else %}btn-outline-secondary disabled{% endif %}" href="/admin/activity?product={{ product_filter }}&status={{ status_filter }}&page={{ pagination.next_page }}&per_page={{ pagination.per_page }}&q={{ query|urlencode }}">下一页</a>
+      </div>
+      <div class="d-flex align-items-center gap-2 flex-wrap"><span class="muted-small">每页</span>
+        {% for option in page_size_options %}<a class="btn btn-sm {% if pagination.per_page == option %}btn-oc{% else %}btn-oc-outline{% endif %}" href="/admin/activity?product={{ product_filter }}&status={{ status_filter }}&page=1&per_page={{ option }}&q={{ query|urlencode }}">{{ option }}</a>{% endfor %}
+      </div>
     </div>
   </div>
 {% endblock %}

@@ -726,25 +726,67 @@ def activity_page():
     product = request.args.get("product", "all").strip().lower()
     if product not in {"all", "openclaw", "hermes", "evoscientist"}:
         product = "all"
+    status_filter = request.args.get("status", "running").strip().lower()
+    if status_filter not in {"running", "stopped", "all"}:
+        status_filter = "running"
     query = request.args.get("q", "").strip()
     try:
         snapshots = control_client.get_activity_snapshots(current["public_id"])
+        runtime_statuses = {}
+        for start in range(0, len(snapshots), 100):
+            runtime_statuses.update({
+                item["instance_public_id"]: item["status"]
+                for item in executor_client.admin_instance_statuses(
+                    current["public_id"], [
+                        item["instance_public_id"]
+                        for item in snapshots[start:start + 100]
+                    ],
+                )
+            })
+        for snapshot in snapshots:
+            snapshot["runtime_status"] = runtime_statuses.get(
+                snapshot["instance_public_id"], "unknown"
+            )
         error = request.args.get("error", "")
-    except control_client.ControlError as exc:
+    except (control_client.ControlError, executor_client.ExecutorError) as exc:
         snapshots, error = [], str(exc)
     needle = query.casefold()
     snapshots = [
         snapshot for snapshot in snapshots
         if (product == "all" or snapshot["product"] == product)
+        and (status_filter == "all" or snapshot["runtime_status"] == status_filter)
         and (not needle or needle in " ".join(
             str(snapshot.get(key) or "") for key in (
                 "instance_name", "owner_username", "owner_display_name",
             )
         ).casefold())
     ]
+    try:
+        per_page = int(request.args.get("per_page", DEFAULT_INSTANCE_PAGE_SIZE))
+    except (TypeError, ValueError):
+        per_page = DEFAULT_INSTANCE_PAGE_SIZE
+    if per_page not in INSTANCE_PAGE_SIZE_OPTIONS:
+        per_page = DEFAULT_INSTANCE_PAGE_SIZE
+    total = len(snapshots)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    page = min(max(page, 1), total_pages)
+    start = (page - 1) * per_page
     return render_template(
-        "admin_activity.html", snapshots=snapshots, product_filter=product,
-        query=query, result=request.args.get("result", ""), error=error,
+        "admin_activity.html", snapshots=snapshots[start:start + per_page],
+        product_filter=product, status_filter=status_filter, query=query,
+        page_size_options=INSTANCE_PAGE_SIZE_OPTIONS,
+        pagination={
+            "page": page, "per_page": per_page, "total": total,
+            "total_pages": total_pages, "start": start + 1 if total else 0,
+            "end": min(start + per_page, total), "has_prev": page > 1,
+            "has_next": page < total_pages, "prev_page": max(1, page - 1),
+            "next_page": min(total_pages, page + 1),
+        },
+        result=request.args.get("result", ""), error=error,
     )
 
 
@@ -754,14 +796,34 @@ def collect_activity():
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
     try:
-        available_ids = [
-            item["public_id"] for item in control_client.list_admin_instances()
+        instances = [
+            item for item in control_client.list_admin_instances()
             if item["status"] != "deleted"
         ]
+        available_ids = [item["public_id"] for item in instances]
         requested_id = request.form.get("instance_public_id", "").strip()
         if requested_id and requested_id not in available_ids:
             return redirect(url_for("activity_page", error="实例不存在或已删除。"))
-        instance_ids = [requested_id] if requested_id else available_ids
+        status_filter = request.form.get("status", "running").strip().lower()
+        if status_filter not in {"running", "stopped", "all"}:
+            status_filter = "running"
+        if requested_id:
+            instance_ids = [requested_id]
+        elif status_filter == "all":
+            instance_ids = available_ids
+        else:
+            runtime_statuses = {}
+            for start in range(0, len(available_ids), 100):
+                runtime_statuses.update({
+                    item["instance_public_id"]: item["status"]
+                    for item in executor_client.admin_instance_statuses(
+                        current["public_id"], available_ids[start:start + 100]
+                    )
+                })
+            instance_ids = [
+                value for value in available_ids
+                if runtime_statuses.get(value) == status_filter
+            ]
         results = []
         for start in range(0, len(instance_ids), 100):
             results.extend(executor_client.collect_activity_snapshots(
@@ -772,6 +834,7 @@ def collect_activity():
     failed = sum(item["status"] != "success" for item in results)
     return redirect(url_for(
         "activity_page",
+        status=status_filter,
         result=f"采集完成：成功 {len(results) - failed}，失败 {failed}。",
     ))
 

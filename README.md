@@ -9,7 +9,11 @@
 
 OpenClaw Manager provisions and operates isolated AI agent instances without modifying the upstream application. Its metadata model separates platform users, authentication identities, and instances, and allows one platform user to own multiple product instances while preserving compatibility with existing OpenClaw deployments.
 
-OpenClaw is the primary managed product today. The adapter layer also supports lifecycle management for registered, existing EvoScientist instances. See the [EvoScientist adapter](docs/evoscientist-adapter.md) for its current scope.
+OpenClaw, Hermes, and EvoScientist are supported managed products. Product
+adapters expose only the capabilities each runtime supports, while all runtime
+operations resolve a server-side instance record. See the [Hermes adapter](docs/hermes-adapter.md)
+and [EvoScientist adapter](docs/evoscientist-adapter.md) for product-specific
+contracts.
 
 ## Highlights
 
@@ -22,6 +26,7 @@ OpenClaw is the primary managed product today. The adapter layer also supports l
 - **Layered access control:** Nginx Basic Auth, application tokens, and device approval.
 - **Recoverable deletion:** deleted data is moved to a recycle directory.
 - **Metadata visibility:** SQLite-backed records with runtime consistency checks.
+- **Usage effectiveness:** read-only Activity snapshots with product data dictionaries and an administrator overview.
 - **Extensible products:** capability-aware adapters for additional agent runtimes.
 
 ## Architecture
@@ -33,7 +38,7 @@ Admins -> Nginx -> manager-admin-web --+-> manager-control -> manager-executor
                                        +-> manager-executor-api -+-> product adapters
                                                                  +-> Docker / Nginx / host data
 
-Instance HTTPS ports -> Nginx -> per-tenant network -> OpenClaw / EvoScientist
+Instance HTTPS ports -> Nginx -> per-tenant network -> OpenClaw / Hermes / EvoScientist
 
 Metadata: manager.db + transitional users.csv / ports.txt
 Runtime:  /data/docker/openclaw-public + /data/docker/nginx
@@ -112,6 +117,8 @@ Runtime paths are configurable in `config/openclaw-manager.env` and intentionall
 - [Runtime Security Checks](docs/deployment/runtime-security-checks.md)
 - [User Self-Service Panel](docs/user-self-service-panel.md)
 - [EvoScientist Adapter](docs/evoscientist-adapter.md)
+- [Hermes Adapter](docs/hermes-adapter.md)
+- [Activity Adapter statistics](docs/activity-adapters/README.md)
 - [Model Proxy Deployment](docs/deployment/model-proxy.md)
 - [Manager Web Authentication](docs/deployment/local-auth.md)
 - [User, Identity, and Instance Migration](docs/architecture/user-identity-instance-migration.md)

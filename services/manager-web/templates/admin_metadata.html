@@ -1,42 +1,52 @@
 {% extends "base.html" %}
-{% block title %}元数据管理 - 容器实例管理与运维平台{% endblock %}
+{% block title %}平台总览 - 容器实例管理与运维平台{% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
       <div class="page-kicker">管理员控制台</div>
-      <h1 class="page-title">元数据与操作记录</h1>
-      <div class="page-subtitle">查看实例摘要和近期平台操作记录。</div>
+      <h1 class="page-title">平台总览</h1>
+      <div class="page-subtitle">查看用户、实例、运行状态、使用成效和近期操作。</div>
     </div>
     <a class="btn btn-oc-outline" href="/admin/instances">实例管理</a>
   </div>
 
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
 
-  <div class="row g-3 mb-3">
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="metric">
+        <div class="metric-label">平台用户</div>
+        <div class="metric-value">{{ overview.users.total | default(0) }}</div>
+        <div class="muted-small">启用 {{ overview.users.active | default(0) }} · 停用 {{ overview.users.disabled | default(0) }} · 锁定 {{ overview.users.locked | default(0) }}</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="metric">
+        <div class="metric-label">身份来源</div>
+        <div class="metric-value">Local {{ overview.identities.local | default(0) }}</div>
+        <div class="muted-small">UIS {{ overview.identities.uis | default(0) }}（可能与 Local 重叠）</div>
+      </div>
+    </div>
     <div class="col-md-3">
       <div class="metric">
         <div class="metric-label">实例</div>
-        <div class="metric-value">{{ counts.instances | default(0) }}</div>
+        <div class="metric-value">{{ overview.instances.total | default(0) }}</div>
+        <div class="muted-small">OpenClaw {{ overview.instances.products.openclaw | default(0) }} · Hermes {{ overview.instances.products.hermes | default(0) }} · EvoScientist {{ overview.instances.products.evoscientist | default(0) }}</div>
       </div>
     </div>
     <div class="col-md-3">
       <div class="metric">
-        <div class="metric-label">端口</div>
-        <div class="metric-value">{{ counts.ports | default(0) }}</div>
+        <div class="metric-label">运行状态</div>
+        <div class="metric-value">运行中 {{ overview.runtime.running | default(0) }}</div>
+        <div class="muted-small">已停止 {{ overview.runtime.stopped | default(0) }} · 未知 {{ overview.runtime.unknown | default(0) }}</div>
       </div>
     </div>
-    <div class="col-md-3">
-      <div class="metric">
-        <div class="metric-label">凭据</div>
-        <div class="metric-value">{{ counts.instance_credentials | default(0) }}</div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="metric">
-        <div class="metric-label">操作记录</div>
-        <div class="metric-value">{{ counts.operation_records | default(0) }}</div>
-      </div>
-    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4"><div class="metric"><div class="metric-label">Activity 成功</div><div class="metric-value">{{ overview.activity.success | default(0) }}</div></div></div>
+    <div class="col-md-4"><div class="metric"><div class="metric-label">Activity 失败</div><div class="metric-value">{{ overview.activity.failed | default(0) }}</div></div></div>
+    <div class="col-md-4"><div class="metric"><div class="metric-label">Activity 未采集</div><div class="metric-value">{{ overview.activity.uncollected | default(0) }}</div></div></div>
   </div>
 
   <div class="surface mb-3">
@@ -78,7 +88,7 @@
 
   <div class="surface">
     <div class="p-3 p-lg-4 border-bottom">
-      <div class="section-title">最近操作</div>
+      <div class="section-title">最近操作（累计 {{ counts.operation_records | default(0) }} 条）</div>
       <div class="muted-small">展示 SQLite 中最近 20 条操作记录。</div>
     </div>
     {% if operations %}

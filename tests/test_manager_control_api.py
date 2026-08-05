@@ -607,6 +607,12 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(invalid.get_json(), {"error": "invalid user status"})
 
     def test_admin_reads_metadata_summary_without_sensitive_fields(self):
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "local", "alice", db_file=self.db_file
+        )
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "uis-alice", db_file=self.db_file
+        )
         instance = self.control.metadata_store.create_instance(
             owner_public_id=self.user["public_id"],
             product="openclaw",
@@ -650,6 +656,16 @@ class ManagerControlApiTests(unittest.TestCase):
             set(payload["counts"]),
             {"instances", "ports", "instance_credentials", "operation_records"},
         )
+        self.assertEqual(payload["overview"], {
+            "users": {"total": 1, "active": 1, "disabled": 0, "locked": 0},
+            "identities": {"local": 1, "uis": 1},
+            "instances": {
+                "total": 1,
+                "products": {"openclaw": 1, "hermes": 0, "evoscientist": 0},
+            },
+            "activity": {"success": 0, "failed": 0, "uncollected": 1},
+        })
+        self.assertEqual(payload["instance_public_ids"], [instance["public_id"]])
         self.assertEqual(payload["instances"][0]["public_id"], instance["public_id"])
         self.assertEqual(payload["instances"][0]["legacy_user_id"], "alice")
         self.assertEqual(payload["instances"][0]["version"], "2026.7.1")

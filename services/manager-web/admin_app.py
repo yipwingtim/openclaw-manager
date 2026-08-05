@@ -730,8 +730,31 @@ def metadata():
         summary = control_client.get_admin_metadata()
         error = ""
     except control_client.ControlError as exc:
-        summary = {"counts": {}, "instances": [], "operations": []}
+        summary = {
+            "counts": {}, "overview": {
+                "users": {}, "identities": {}, "instances": {"products": {}},
+                "activity": {},
+            }, "instance_public_ids": [],
+            "instances": [], "operations": [],
+        }
         error = str(exc)
+    runtime = {"running": 0, "stopped": 0, "unknown": 0}
+    instance_ids = summary.pop("instance_public_ids", [])
+    for start in range(0, len(instance_ids), 100):
+        batch = instance_ids[start:start + 100]
+        try:
+            statuses = executor_client.admin_instance_statuses(
+                current["public_id"], batch
+            )
+        except executor_client.ExecutorError as exc:
+            runtime["unknown"] += len(batch)
+            error = error or f"无法读取实例运行状态：{exc}"
+            continue
+        for item in statuses:
+            status = item["status"] if item["status"] in runtime else "unknown"
+            runtime[status] += 1
+        runtime["unknown"] += len(batch) - len(statuses)
+    summary.setdefault("overview", {})["runtime"] = runtime
     return render_template("admin_metadata.html", error=error, **summary)
 
 

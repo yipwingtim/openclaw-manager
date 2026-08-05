@@ -1101,11 +1101,60 @@ def admin_metadata():
             key: all_counts[key]
             for key in ("instances", "ports", "instance_credentials", "operation_records")
         }
-        instances = metadata_store.list_instances(conn=conn)[:20]
+        all_instances = metadata_store.list_instances(conn=conn)
+        active_instances = [
+            instance for instance in all_instances if instance["status"] != "deleted"
+        ]
+        instances = all_instances[:20]
         operations = metadata_store.list_operation_events(20, conn=conn)
+        user_statuses = {
+            row["status"]: row["count"]
+            for row in conn.execute(
+                "SELECT status, COUNT(*) AS count FROM users "
+                "WHERE status != 'deleted' GROUP BY status"
+            )
+        }
+        identity_users = {
+            row["provider"]: row["count"]
+            for row in conn.execute(
+                """
+                SELECT identity.provider, COUNT(DISTINCT identity.user_id) AS count
+                FROM user_identities identity
+                JOIN users user ON user.id = identity.user_id
+                WHERE user.status != 'deleted'
+                  AND identity.provider IN ('local', 'campus-uis')
+                GROUP BY identity.provider
+                """
+            )
+        }
+        product_counts = {product: 0 for product in ("openclaw", "hermes", "evoscientist")}
+        for instance in active_instances:
+            product_counts[instance["product"]] = product_counts.get(instance["product"], 0) + 1
+        activity_counts = {"success": 0, "failed": 0, "uncollected": 0}
+        for snapshot in metadata_store.list_latest_activity_snapshots(conn=conn):
+            key = snapshot["status"] if snapshot["status"] in {"success", "failed"} else "uncollected"
+            activity_counts[key] += 1
     return jsonify(
         {
             "counts": counts,
+            "overview": {
+                "users": {
+                    "total": sum(user_statuses.values()),
+                    "active": user_statuses.get("active", 0),
+                    "disabled": user_statuses.get("disabled", 0),
+                    "locked": user_statuses.get("locked", 0),
+                },
+                "identities": {
+                    "local": identity_users.get("local", 0),
+                    "uis": identity_users.get("campus-uis", 0),
+                },
+                "instances": {
+                    "total": len(active_instances),
+                    "products": product_counts,
+                },
+                "activity": activity_counts,
+            },
+            "instance_public_ids": [instance["public_id"] for instance in active_instances],
             "instances": [admin_metadata_instance(item) for item in instances],
             "operations": operations,
         }

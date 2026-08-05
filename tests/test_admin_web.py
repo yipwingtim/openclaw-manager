@@ -306,6 +306,15 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn('title="{{ instance.version }}"', template)
         self.assertIn('{{ instance.version[:21] }}…', template)
 
+    def test_activity_page_shortens_source_digest(self):
+        template = (
+            ROOT_DIR / "services" / "manager-web" / "templates" / "admin_activity.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('snapshot.source_version.startswith("sha256:")', template)
+        self.assertIn('title="{{ snapshot.source_version }}"', template)
+        self.assertIn('{{ snapshot.source_version[:21] }}…', template)
+
     def test_admin_instances_fetches_runtime_statuses_in_bounded_batches(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         instances = [

@@ -408,6 +408,29 @@ class ManagerControlApiTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(tuple(operation), ("activity.collect", admin["id"], instance["id"]))
 
+    def test_admin_activity_snapshots_include_owner_uis_user_id(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "uis-12345", db_file=self.db_file
+        )
+        self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        with patch.object(self.control.request, "headers", {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": admin["public_id"],
+        }):
+            response, status = response_parts(self.control.admin_activity_snapshots())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["snapshots"][0]["owner_uis_user_id"], "uis-12345")
+        serialized = repr(response.get_json())
+        self.assertNotIn("profile_json", serialized)
+        self.assertNotIn("external_username", serialized)
+
     def test_activity_snapshot_duplicate_returns_matching_success(self):
         instance = self.control.metadata_store.create_instance(
             owner_public_id=self.user["public_id"], product="openclaw",

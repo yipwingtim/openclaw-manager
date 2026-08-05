@@ -75,7 +75,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
             instance = {"runtime_identifier": "openclaw.project-1"}
 
             with patch.object(adapter, "run_command", return_value=(0, "started")) as run, patch.object(
-                adapter, "enable_nginx_user_conf"
+                adapter, "enable_nginx_conf"
             ) as enable_nginx:
                 result = adapter.start(instance)
 
@@ -88,8 +88,8 @@ class AdapterInstanceModelTests(unittest.TestCase):
             adapter = self.make_adapter(Path(temp_dir))
             instance = {"runtime_identifier": "openclaw_alice", "legacy_user_id": "alice"}
             with patch.object(adapter, "run_command", return_value=(0, "ok")) as run, patch.object(
-                adapter, "enable_nginx_user_conf", return_value=(0, "enabled")
-            ):
+                adapter, "enable_nginx_conf", return_value=(0, "enabled")
+            ) as enable_nginx:
                 code, _ = adapter.start(instance)
 
             self.assertEqual(code, 0)
@@ -97,6 +97,19 @@ class AdapterInstanceModelTests(unittest.TestCase):
             reconnect = run.call_args_list[1].args[0]
             self.assertIn("connect_container_to_network", reconnect[2])
             self.assertEqual(reconnect[-3:], ["openclaw-nginx", "openclaw-model-proxy", network])
+            enable_nginx.assert_called_once_with(instance)
+
+    def test_nginx_paths_require_instance_record(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            instance = {"legacy_user_id": "alice", "runtime_identifier": "custom-target"}
+
+            self.assertEqual(
+                adapter.nginx_active_conf(instance),
+                Path(temp_dir) / "nginx" / "conf" / "alice.conf",
+            )
+            with self.assertRaises(TypeError):
+                adapter.nginx_active_conf("alice")
 
     def test_set_basic_auth_restores_nginx_config_when_reload_fails(self):
         with TemporaryDirectory() as temp_dir:

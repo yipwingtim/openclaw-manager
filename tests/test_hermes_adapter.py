@@ -37,9 +37,9 @@ class HermesAdapterTests(unittest.TestCase):
             with patch.object(
                 adapter, "run_command", return_value=(0, "ok")
             ) as run_command, patch.object(
-                adapter, "enable_nginx_user_conf"
+                adapter, "enable_nginx_conf"
             ) as enable_nginx, patch.object(
-                adapter, "disable_nginx_user_conf"
+                adapter, "disable_nginx_conf"
             ) as disable_nginx:
                 self.assertEqual(adapter.start(self.INSTANCE), (0, "ok"))
                 self.assertEqual(adapter.stop(self.INSTANCE), (0, "ok"))
@@ -53,6 +53,18 @@ class HermesAdapterTests(unittest.TestCase):
             )
             enable_nginx.assert_not_called()
             disable_nginx.assert_not_called()
+
+    def test_nginx_candidates_do_not_include_openclaw_legacy_config(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+
+            self.assertEqual(
+                adapter.nginx_conf_candidates(self.INSTANCE),
+                [
+                    adapter.ingress_conf(self.INSTANCE),
+                    adapter.ingress_conf(self.INSTANCE, disabled=True),
+                ],
+            )
 
     def test_update_version_requires_target_image_to_be_pulled(self):
         with TemporaryDirectory() as temp_dir:

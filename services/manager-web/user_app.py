@@ -203,8 +203,9 @@ def device_action(instance_public_id, action):
     current = web_common.actor()
     if action not in {"approve-latest", "refresh"}:
         return render_template("error.html", message="Invalid action"), 400
-    result = executor_client.device_action(current["public_id"], instance_public_id, action)
-    return redirect(url_for("instance_detail", instance_public_id=instance_public_id, result=result.get("output", "")))
+    executor_client.device_action(current["public_id"], instance_public_id, action)
+    message = "Device approval command completed." if action == "approve-latest" else "Device cache refreshed."
+    return redirect(url_for("instance_detail", instance_public_id=instance_public_id, result=message))
 
 
 @app.post("/instances/<instance_public_id>/wechat-bind")

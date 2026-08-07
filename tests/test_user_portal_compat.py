@@ -28,6 +28,12 @@ class UserPortalCompatibilityTests(unittest.TestCase):
         self.assertNotIn('current_user=current["username"]', source)
         self.assertIn('render_template("my_instances.html", instances=instances)', source)
 
+    def test_device_action_does_not_redirect_with_executor_output(self):
+        source = (WEB_DIR / "user_app.py").read_text(encoding="utf-8")
+
+        self.assertNotIn('result.get("output"', source)
+        self.assertIn('result=message', source)
+
 
 if __name__ == "__main__":
     unittest.main()

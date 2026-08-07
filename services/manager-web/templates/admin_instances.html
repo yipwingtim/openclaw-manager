@@ -81,7 +81,7 @@
       <div class="table-responsive">
         <table class="table table-hover mb-0 align-middle">
           <thead><tr>
-            <th style="width: 52px;"><input class="form-check-input" type="checkbox" id="select-current-page" aria-label="全选当前页"></th>
+            <th style="width: 52px;"><input class="form-check-input" type="checkbox" id="select-current-page" aria-label="全选当前页" {% if not instances|selectattr("status", "ne", "deleted")|list %}disabled{% endif %}></th>
             <th>实例</th><th>类型</th><th>状态</th><th>版本</th><th>访问地址</th><th>访问认证</th><th>操作</th>
           </tr></thead>
           <tbody>

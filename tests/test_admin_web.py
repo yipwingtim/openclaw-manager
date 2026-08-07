@@ -402,6 +402,7 @@ class AdminWebTests(unittest.TestCase):
 
         self.assertIn("data-instance-table", template)
         self.assertIn("select-current-page", template)
+        self.assertIn('not instances|selectattr("status", "ne", "deleted")|list', template)
         self.assertIn("data-instance-actions", template)
         self.assertIn('(\"hermes\", \"Hermes\"), (\"evoscientist\", \"EvoScientist\")', template)
         self.assertIn("product={{ product_filter }}", template)

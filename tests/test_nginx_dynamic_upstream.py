@@ -101,6 +101,14 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         self.assertIn('TENANT_NETWORK="$(tenant_network_name "$USER_ID")"', script)
         self.assertIn('connect_container_to_network "$NGINX_CONTAINER_NAME" "$TENANT_NETWORK"', script)
 
+    def test_create_user_path_mode_is_opt_in_and_scoped_to_openclaw(self):
+        script = CREATE_USER_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('OPENCLAW_INGRESS_MODE="${OPENCLAW_INGRESS_MODE:-port}"', script)
+        self.assertIn('OPENCLAW_CONTROL_UI_BASE_PATH="$OPENCLAW_PATH_PREFIX/$SERVICE_ID"', script)
+        self.assertIn('"basePath": "%s"', script)
+        self.assertIn('OPENCLAW_INGRESS_MODE must be port or path', script)
+
     def test_migrates_ip_and_static_container_upstreams_then_reloads(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

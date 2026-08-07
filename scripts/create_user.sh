@@ -26,6 +26,7 @@ source "$LIB_TENANT_NETWORK"
 USER_ID="${1:-}"
 BASIC_AUTH_PASSWORD="${OPENCLAW_BASIC_AUTH_PASSWORD:-}"
 BASIC_AUTH_ENABLED="true"
+OPENCLAW_INGRESS_MODE="${OPENCLAW_INGRESS_MODE:-port}"
 SKIP_NGINX_RELOAD=0
 SUCCESS=0
 USER_DIR_CREATED=0
@@ -116,6 +117,26 @@ LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
 TEMPLATE="$MANAGER_DIR/templates/docker-compose.tpl.yml"
 SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
 TENANT_NETWORK=""
+
+case "$OPENCLAW_INGRESS_MODE" in
+  port)
+    OPENCLAW_CONTROL_UI_BASE_PATH=""
+    ;;
+  path)
+    OPENCLAW_PATH_PREFIX="${OPENCLAW_PATH_PREFIX:-/openclaw}"
+    OPENCLAW_PATH_PREFIX="/${OPENCLAW_PATH_PREFIX#/}"
+    OPENCLAW_PATH_PREFIX="${OPENCLAW_PATH_PREFIX%/}"
+    if [ -z "$OPENCLAW_PATH_PREFIX" ]; then
+      echo "[ERROR] OPENCLAW_PATH_PREFIX must not be empty in path mode"
+      exit 1
+    fi
+    OPENCLAW_CONTROL_UI_BASE_PATH="$OPENCLAW_PATH_PREFIX/$SERVICE_ID"
+    ;;
+  *)
+    echo "[ERROR] OPENCLAW_INGRESS_MODE must be port or path"
+    exit 1
+    ;;
+esac
 
 # ===== 创建基础目录 =====
 mkdir -p "$BASE_DIR/users"
@@ -280,7 +301,7 @@ cat > "$CONFIG_FILE" <<EOF
         "http://localhost:$PORT",
         "http://127.0.0.1:$PORT",
         "https://$PUBLIC_HOST:$PORT"
-      ]
+      ]$([ -n "$OPENCLAW_CONTROL_UI_BASE_PATH" ] && printf ',\n      "basePath": "%s"' "$OPENCLAW_CONTROL_UI_BASE_PATH")
     }
   }
 }

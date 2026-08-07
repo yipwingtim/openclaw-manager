@@ -18,7 +18,7 @@ OpenClaw Manager 在不修改上游应用代码的前提下开通并管理相互
 - **可切换管理端认证：** 支持 Nginx Basic Auth 或 Local 登录；多个身份可以映射到同一平台用户，但同时只启用一个 Provider。
 - **生命周期管理：** 支持创建、启动、停止、重启、升级、回收和恢复实例。
 - **Web 管理：** 统一管理用户、状态、认证、Skills 和常用运维操作。
-- **稳定反向代理：** 使用独立 HTTPS 端口和基于 Docker DNS 的 Nginx 上游。
+- **稳定反向代理：** 基于产品能力的 Nginx HTTPS 入口；OpenClaw 路径入口与旧版实例独立端口并存。
 - **多层访问控制：** 结合 Nginx Basic Auth、应用 Token 和设备审批。
 - **可恢复删除：** 删除时将实例数据移入回收目录。
 - **元数据可见性：** 使用 SQLite 记录状态，并检查运行数据一致性。
@@ -33,7 +33,7 @@ OpenClaw Manager 在不修改上游应用代码的前提下开通并管理相互
                                        +-> manager-executor-api -+-> 产品 Adapter
                                                                  +-> Docker / Nginx / 宿主机数据
 
-实例 HTTPS 独立端口 -> Nginx -> 每实例独立租户网络 -> OpenClaw / EvoScientist
+OpenClaw 路径入口或实例 HTTPS 独立端口 -> Nginx -> 每实例独立租户网络 -> OpenClaw / EvoScientist
 
 元数据：manager.db + 迁移期 users.csv / ports.txt
 运行数据：/data/docker/openclaw-public + /data/docker/nginx

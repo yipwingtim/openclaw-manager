@@ -235,10 +235,10 @@ finished_at text
 
 建议阶段：
 
-1. `create_user.sh` 仍按 `ports.txt` 分配端口。
-2. 创建成功后写入 SQLite `ports` 表。
-3. 后续新增数据库端口分配器，再逐步替换 `ports.txt`。
-4. 替换完成前，不删除 `ports.txt`。
+1. 创建脚本优先从 SQLite `ports` 表复用 `released` 且宿主机可用的端口。
+2. 没有可复用端口时，使用 `ports.txt` 游标继续分配。
+3. 创建成功后写入 SQLite `ports` 表；永久删除和失败清理会标记端口为 `released`。
+4. `ports.txt` 作为兼容回退指针保留，不作为端口状态的权威来源。
 
 ### 6.3 Nginx 配置
 
@@ -287,9 +287,8 @@ Web 页面应继续从 Docker API 查询：
 
 ### Phase 4: 端口分配迁移
 
-- 新增数据库端口分配器。
-- 分配端口时先检查 SQLite、Nginx compose、监听端口。
-- `ports.txt` 只作为兼容指针。
+- 持续校验 SQLite、Nginx compose 和宿主机监听状态的一致性。
+- `ports.txt` 仅作为无可复用释放端口时的兼容指针。
 
 ### Phase 5: CSV 退化为导出
 

@@ -85,9 +85,35 @@ PY
   rm -rf "$tmp_dir"
 }
 
+test_unavailable_released_port_is_skipped() {
+  local tmp_dir port_file db_file availability allocated
+  tmp_dir="$(mktemp -d)"
+  port_file="$tmp_dir/ports.txt"
+  db_file="$tmp_dir/manager.db"
+  availability="$tmp_dir/port-availability"
+  echo "44010" > "$port_file"
+  python3 - "$db_file" <<'PY'
+import sqlite3
+import sys
+with sqlite3.connect(sys.argv[1]) as conn:
+    conn.execute("CREATE TABLE ports (port INTEGER, status TEXT)")
+    conn.executemany("INSERT INTO ports VALUES (?, 'released')", [(44001,), (44002,)])
+PY
+  cat > "$availability" <<'SH'
+#!/bin/bash
+[ "$1" -ne 44001 ]
+SH
+  chmod +x "$availability"
+  PORT_AVAILABILITY_COMMAND="$availability" METADATA_DB_FILE="$db_file" \
+    allocated="$(allocate_port "$port_file" 44000 44099)"
+  [ "$allocated" = "44002" ] || fail "expected released port 44002, got $allocated"
+  rm -rf "$tmp_dir"
+}
+
 test_concurrent_allocations_are_unique
 test_invalid_port_file_resets_to_start
 test_range_exhaustion_fails
 test_released_port_is_reused
+test_unavailable_released_port_is_skipped
 
 echo "[OK] port allocator tests passed"

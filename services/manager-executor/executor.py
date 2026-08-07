@@ -169,7 +169,9 @@ def openclaw_creation_result(instance):
     htpasswd = os.environ.get("NGINX_HTPASSWD_FILE_IN_CONTAINER", "").strip()
     if not public_host or not version or not token or not htpasswd:
         raise ValueError("created instance metadata is incomplete")
-    access_url = f"https://{public_host}:{port}"
+    base_path = config.get("gateway", {}).get("controlUi", {}).get("basePath", "")
+    base_path = f"/{str(base_path).strip('/')}" if base_path else ""
+    access_url = f"https://{public_host}:{port}{base_path}"
     return {
         "port": port,
         "version": version,

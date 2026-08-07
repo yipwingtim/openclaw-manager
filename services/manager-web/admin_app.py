@@ -145,7 +145,8 @@ def render_instances(*, instances=None, batch_result=None, result="", error="", 
                     )
                 })
         except executor_client.ExecutorError as exc:
-            error = error or f"无法读取实例运行状态：{exc}"
+            if exc.status_code is not None:
+                error = error or f"无法读取实例运行状态：{exc}"
     for instance in instances:
         instance["runtime_status"] = (
             "deleted" if instance["status"] == "deleted"

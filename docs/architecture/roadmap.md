@@ -35,9 +35,11 @@ for completing the multi-product control plane.
 - OpenClaw、Hermes 和 EvoScientist Adapter 已声明能力。运行时生命周期方法接收实例记录，
   并从 `runtime_identifier` 解析目标；旧 OpenClaw 文件系统和 Nginx 路径仅在已解析实例内部
   使用 `legacy_user_id` 兼容数据。
-- Existing instances continue to use per-instance HTTPS ports and Basic Auth
-  while unified ingress and instance access authorization remain future work.
-- 在统一入口和实例访问授权完成前，现有实例继续使用独立 HTTPS 端口和 Basic Auth。
+- Existing instances use product-aware ingress: OpenClaw may expose its configured
+  Control UI base path, while Hermes and EvoScientist retain per-instance HTTPS
+  ports unless their adapters prove path compatibility. Basic Auth remains enabled.
+- 现有实例按产品能力使用入口：OpenClaw 可以暴露其配置的 Control UI 路径；在验证
+  路径兼容性前，Hermes 和 EvoScientist 继续使用实例独立 HTTPS 端口。Basic Auth 仍保留。
 
 ## Completed Foundations | 已完成基础工作
 
@@ -111,9 +113,10 @@ for completing the multi-product control plane.
 - Separate runtime lifecycle behavior from endpoint publication after at least
   two products expose concrete variation.
 - 至少两个产品体现明确差异后，再拆分运行时生命周期与入口发布逻辑。
-- Keep `LegacyPortIngress` for existing instances, then add unified HTTPS with
-  instance subdomains and short-lived access authorization.
-- 现有实例保留 `LegacyPortIngress`，随后增加实例子域名、统一 HTTPS 和短时访问授权。
+- Keep `LegacyPortIngress` for products that require ports, while adding unified
+  HTTPS path/subdomain ingress only for adapters that explicitly support it.
+- 对需要端口的产品保留 `LegacyPortIngress`；仅为明确支持路径或子域名入口的
+  Adapter 增加统一 HTTPS 入口。
 - Serve Manager and instance subdomains through fixed ports `80/443`; instance
   creation and deletion should update routing with a graceful Nginx reload,
   without changing Docker published ports or recreating the shared gateway.

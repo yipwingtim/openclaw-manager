@@ -22,7 +22,7 @@ contracts.
 - **Selectable manager authentication:** use either Nginx Basic Auth or Local login; multiple identities may map to the same platform user, but only one provider is active at a time.
 - **Lifecycle management:** create, start, stop, restart, upgrade, recycle, and restore instances.
 - **Web administration:** manage users, status, authentication, skills, and common operations.
-- **Stable reverse proxying:** dedicated HTTPS ports and Docker DNS-based Nginx upstreams.
+- **Stable reverse proxying:** product-aware HTTPS ingress through Nginx; OpenClaw path URLs and legacy per-instance ports coexist.
 - **Layered access control:** Nginx Basic Auth, application tokens, and device approval.
 - **Recoverable deletion:** deleted data is moved to a recycle directory.
 - **Metadata visibility:** SQLite-backed records with runtime consistency checks.
@@ -38,7 +38,7 @@ Admins -> Nginx -> manager-admin-web --+-> manager-control -> manager-executor
                                        +-> manager-executor-api -+-> product adapters
                                                                  +-> Docker / Nginx / host data
 
-Instance HTTPS ports -> Nginx -> per-tenant network -> OpenClaw / Hermes / EvoScientist
+OpenClaw path or per-instance HTTPS port -> Nginx -> per-tenant network -> OpenClaw / Hermes / EvoScientist
 
 Metadata: manager.db + transitional users.csv / ports.txt
 Runtime:  /data/docker/openclaw-public + /data/docker/nginx

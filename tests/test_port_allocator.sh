@@ -67,8 +67,27 @@ test_range_exhaustion_fails() {
   rm -rf "$tmp_dir"
 }
 
+test_released_port_is_reused() {
+  local tmp_dir port_file db_file allocated
+  tmp_dir="$(mktemp -d)"
+  port_file="$tmp_dir/ports.txt"
+  db_file="$tmp_dir/manager.db"
+  echo "44010" > "$port_file"
+  python3 - "$db_file" <<'PY'
+import sqlite3
+import sys
+with sqlite3.connect(sys.argv[1]) as conn:
+    conn.execute("CREATE TABLE ports (port INTEGER, status TEXT)")
+    conn.execute("INSERT INTO ports VALUES (44001, 'released')")
+PY
+  allocated="$(METADATA_DB_FILE="$db_file" allocate_port "$port_file" 44000 44099)"
+  [ "$allocated" = "44001" ] || fail "expected released port 44001, got $allocated"
+  rm -rf "$tmp_dir"
+}
+
 test_concurrent_allocations_are_unique
 test_invalid_port_file_resets_to_start
 test_range_exhaustion_fails
+test_released_port_is_reused
 
 echo "[OK] port allocator tests passed"

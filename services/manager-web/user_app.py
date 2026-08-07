@@ -203,7 +203,11 @@ def device_action(instance_public_id, action):
     current = web_common.actor()
     if action not in {"approve-latest", "refresh"}:
         return render_template("error.html", message="Invalid action"), 400
-    executor_client.device_action(current["public_id"], instance_public_id, action)
+    try:
+        executor_client.device_action(current["public_id"], instance_public_id, action)
+    except executor_client.ExecutorError:
+        message = "Device approval failed." if action == "approve-latest" else "Device refresh failed."
+        return redirect(url_for("instance_detail", instance_public_id=instance_public_id, error=message))
     message = "Device approval command completed." if action == "approve-latest" else "Device cache refreshed."
     return redirect(url_for("instance_detail", instance_public_id=instance_public_id, result=message))
 

@@ -33,6 +33,7 @@ class UserPortalCompatibilityTests(unittest.TestCase):
 
         self.assertNotIn('result.get("output"', source)
         self.assertIn('result=message', source)
+        self.assertIn('except executor_client.ExecutorError:', source)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+REQUESTED_OPENCLAW_VERSION="${OPENCLAW_VERSION:-}"
 LIB_NGINX_AUTH="$SCRIPT_DIR/lib_nginx_auth.sh"
 LIB_PORT_ALLOCATOR="$SCRIPT_DIR/lib_port_allocator.sh"
 LIB_TENANT_NETWORK="$SCRIPT_DIR/lib_tenant_network.sh"
@@ -21,6 +22,9 @@ source "$CONFIG_FILE"
 source "$LIB_NGINX_AUTH"
 source "$LIB_PORT_ALLOCATOR"
 source "$LIB_TENANT_NETWORK"
+if [ -n "$REQUESTED_OPENCLAW_VERSION" ]; then
+  OPENCLAW_VERSION="$REQUESTED_OPENCLAW_VERSION"
+fi
 
 # ===== 参数 =====
 USER_ID="${1:-}"

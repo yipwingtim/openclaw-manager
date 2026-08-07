@@ -32,6 +32,8 @@ allocate_port() {
   local lock_file="${PORT_LOCK_FILE:-${port_file}.lock}"
   local port
   local next_port
+  local released_ports
+  local metadata_db_file="${METADATA_DB_FILE:-${OPENCLAW_PUBLIC_DIR:-}/manager.db}"
 
   mkdir -p "$(dirname "$port_file")"
   touch "$lock_file"
@@ -43,7 +45,35 @@ allocate_port() {
       echo "$port_start" > "$port_file"
     fi
 
-    port="$(cat "$port_file")"
+    released_ports=""
+    if [ -f "$metadata_db_file" ]; then
+      released_ports="$(python3 - "$metadata_db_file" "$port_start" "$port_end" <<'PY'
+import sqlite3
+import sys
+
+try:
+    with sqlite3.connect(sys.argv[1]) as conn:
+        rows = conn.execute(
+            "SELECT port FROM ports WHERE status = 'released' AND port BETWEEN ? AND ? ORDER BY port",
+            (int(sys.argv[2]), int(sys.argv[3])),
+        )
+        print("\n".join(str(row[0]) for row in rows))
+except (OSError, sqlite3.Error, ValueError):
+    pass
+PY
+)"
+    fi
+
+    port=""
+    for candidate in $released_ports; do
+      if port_is_available "$candidate"; then
+        port="$candidate"
+        break
+      fi
+    done
+    if [ -z "$port" ]; then
+      port="$(cat "$port_file")"
+    fi
     if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt "$port_start" ]; then
       port="$port_start"
     fi

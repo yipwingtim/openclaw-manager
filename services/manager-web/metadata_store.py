@@ -1410,8 +1410,9 @@ def purge_failed_instance(instance_public_id, *, db_file=None, conn=None):
             raise ValueError("only failed instances can be cleaned up")
         now = utc_now()
         active_conn.execute(
-            "UPDATE ports SET instance_id = NULL, status = 'released', released_at = ? WHERE instance_id = ?",
-            (now, row["id"]),
+            "UPDATE ports SET instance_id = NULL, status = 'released', released_at = ? "
+            "WHERE instance_id = ? OR port = (SELECT port FROM instances WHERE id = ?)",
+            (now, row["id"], row["id"]),
         )
         active_conn.execute("DELETE FROM instances WHERE id = ?", (row["id"],))
 
@@ -1430,8 +1431,9 @@ def purge_deleted_instance(instance_public_id, *, db_file=None, conn=None):
             raise ValueError("only restorable deleted instances can be permanently deleted")
         now = utc_now()
         active_conn.execute(
-            "UPDATE ports SET instance_id = NULL, status = 'released', released_at = ? WHERE instance_id = ?",
-            (now, row["id"]),
+            "UPDATE ports SET instance_id = NULL, status = 'released', released_at = ? "
+            "WHERE instance_id = ? OR port = (SELECT port FROM instances WHERE id = ?)",
+            (now, row["id"], row["id"]),
         )
         active_conn.execute("DELETE FROM instances WHERE id = ?", (row["id"],))
 

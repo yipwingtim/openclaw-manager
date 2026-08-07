@@ -23,16 +23,19 @@ class ExecutorError(Exception):
 
 
 def request(method, path, actor_public_id, **kwargs):
-    response = requests.request(
-        method,
-        f"{BASE_URL}{path}",
-        headers={
-            "Authorization": f"Bearer {TOKEN}",
-            "X-Actor-User-Public-Id": actor_public_id,
-        },
-        timeout=TIMEOUT,
-        **kwargs,
-    )
+    try:
+        response = requests.request(
+            method,
+            f"{BASE_URL}{path}",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "X-Actor-User-Public-Id": actor_public_id,
+            },
+            timeout=TIMEOUT,
+            **kwargs,
+        )
+    except requests.RequestException as exc:
+        raise ExecutorError(f"executor unavailable: {exc}") from exc
     if response.status_code >= 400:
         try:
             message = response.json().get("error", response.text)

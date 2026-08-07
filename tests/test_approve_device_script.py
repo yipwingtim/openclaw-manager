@@ -88,6 +88,7 @@ class ApproveDeviceScriptTests(unittest.TestCase):
                 'echo "$*" >> "$DOCKER_LOG"\n'
                 'if [ "$1" = "ps" ]; then echo openclaw.custom-runtime; exit 0; fi\n'
                 'if echo "$*" | grep -q "devices list"; then echo "Pending (1) requestId: req-1"; exit 0; fi\n'
+                'if echo "$*" | grep -q "devices approve --latest"; then echo "Selected pending device request req-1"; exit 1; fi\n'
                 'echo "Approved"\n',
             )
             env["OPENCLAW_EXECUTION_REQUEST_ID"] = "approval-1"
@@ -114,7 +115,8 @@ class ApproveDeviceScriptTests(unittest.TestCase):
                 'echo "$*" >> "$DOCKER_LOG"\n'
                 'if [ "$1" = "ps" ]; then echo openclaw.custom-runtime; exit 0; fi\n'
                 'if echo "$*" | grep -q "devices list"; then echo "Pending (1) requestId: req-1"; exit 0; fi\n'
-                'echo "Selected pending device request req-1"\n',
+                'if echo "$*" | grep -q "devices approve --latest"; then echo "Selected pending device request req-1"; exit 1; fi\n'
+                'echo "Approved"\n',
             )
 
             result = subprocess.run(
@@ -127,8 +129,9 @@ class ApproveDeviceScriptTests(unittest.TestCase):
                 line for line in (root / "docker.log").read_text().splitlines()
                 if "devices approve" in line
             ]
-            self.assertEqual(len(approvals), 1)
+            self.assertEqual(len(approvals), 2)
             self.assertIn("devices approve --latest", approvals[0])
+            self.assertIn("devices approve req-1", approvals[1])
 
 
 if __name__ == "__main__":

@@ -191,7 +191,12 @@ if [ "$TARGET_REQUEST_ID" = "--latest" ]; then
     fi
   fi
   log "Explicit --latest requested. Approving latest pending request."
-  if ! LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" timeout 45s openclaw devices approve --latest 2>&1)"; then
+  LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" timeout 45s openclaw devices approve --latest 2>&1 || true)"
+  LATEST_REQUEST_ID="$(echo "$LATEST_OUTPUT" | sed -nE 's/^Selected pending device request ([A-Za-z0-9._-]+).*/\1/p' | head -n 1)"
+  if [ -z "$LATEST_REQUEST_ID" ]; then
+    fail "Could not determine latest pending device request: $LATEST_OUTPUT"
+  fi
+  if ! LATEST_OUTPUT="$(docker exec "$CONTAINER_NAME" timeout 45s openclaw devices approve "$LATEST_REQUEST_ID" 2>&1)"; then
     fail "Could not approve latest device request: $LATEST_OUTPUT"
   fi
   echo "$LATEST_OUTPUT"

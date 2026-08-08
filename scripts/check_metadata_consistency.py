@@ -595,7 +595,8 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
         legacy_user_id = row.get("legacy_user_id", row.get("user_id"))
         if legacy_user_id is None:
             data_path = row.get("data_path")
-            if row.get("status") != "deleted" and (
+            status = (row.get("status") or "active").strip().lower()
+            if status in {"provisioning", "active", "stopped"} and (
                 not data_path or not Path(data_path).is_dir()
             ):
                 reporter.warn(
@@ -603,9 +604,12 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
                     f"instance {row.get('public_id')}: data path missing: {data_path}",
                 )
             continue
-        if row.get("status") != "deleted" and user_id not in users_dirs:
-            reporter.warn("metadata_dir_missing", f"{user_id}: active metadata row exists but user dir is missing")
-        if row.get("status") != "deleted" and user_id not in users_dirs and user_id in recycle_users:
+        status = (row.get("status") or "active").strip().lower()
+        data_path = row.get("data_path")
+        requires_data_dir = status in {"provisioning", "active", "stopped"}
+        if requires_data_dir and (not data_path or not Path(data_path).is_dir()):
+            reporter.warn("metadata_dir_missing", f"{user_id}: metadata data path is missing: {data_path}")
+        if requires_data_dir and user_id not in users_dirs and user_id in recycle_users:
             reporter.warn("metadata_active_but_only_deleted_recycle", f"{user_id}: metadata status is active but only deleted recycle dir exists")
 
     if NGINX_COMPOSE_FILE.is_file():
@@ -641,6 +645,11 @@ def build_parser():
     parser.add_argument("--user-id", help="check a single user only")
     parser.add_argument("--quiet", action="store_true", help="only print issues and summary")
     parser.add_argument("--verbose", action="store_true", help="print each checked category")
+    parser.add_argument(
+        "--include-history",
+        action="store_true",
+        help="also check deleted recycle directories (historical restore data)",
+    )
     return parser
 
 
@@ -668,7 +677,8 @@ def main():
     else:
         for user_id, user_dir in sorted(users_dirs.items()):
             check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, verbose=args.verbose)
-        check_deleted_recycle_dirs(recycle_dirs, reporter)
+        if args.include_history:
+            check_deleted_recycle_dirs(recycle_dirs, reporter)
         check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter)
 
     if not args.quiet:

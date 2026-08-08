@@ -391,13 +391,19 @@ def check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_de
             "metadata_container_mismatch",
             f"{user_id}: metadata container={db_row.get('container_name')} expected={expected_container}",
         )
-    if nginx["port"] is not None and db_row.get("port") is not None and int(db_row["port"]) != nginx["port"]:
+    external_port = db_row.get("port")
+    if (
+        nginx["port"] is not None
+        and external_port is not None
+        and nginx["port"] != 443
+        and int(external_port) != nginx["port"]
+    ):
         reporter.error(
             "metadata_port_mismatch",
             f"{user_id}: metadata port={db_row['port']} nginx port={nginx['port']}",
         )
 
-    port = nginx["port"] if nginx["port"] is not None else db_row.get("port")
+    port = external_port if external_port is not None else nginx["port"]
     if port is not None:
         port_row = db_ports.get(int(port))
         if port_row is None:
@@ -419,7 +425,14 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     csv_status = (csv_row or {}).get("status")
     db_status = (db_row or {}).get("status")
     is_deleted = csv_status == "deleted" or db_status == "deleted"
-    product = (db_row or {}).get("product") or "openclaw"
+    product = (db_row or {}).get("product")
+    if not product and (
+        (user_dir / "evoscientist-data").is_dir()
+        or (user_dir / "workspace").is_dir()
+        or user_id.lower().startswith(("evo_", "evosci-"))
+    ):
+        product = "evoscientist"
+    product = product or "openclaw"
     if product == "evoscientist":
         check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_deleted=is_deleted)
         return
@@ -609,11 +622,8 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
             for user_id in users_dirs
         ]
         used_ports = [port for port in used_ports if port is not None]
-        if current is not None and used_ports and current <= max(used_ports):
-            reporter.warn(
-                "port_file_not_ahead",
-                f"ports.txt={current} is not greater than max used port={max(used_ports)}",
-            )
+        if current is None:
+            reporter.warn("port_file_invalid", f"ports.txt does not contain an integer: {PORT_FILE}")
     else:
         reporter.warn("port_file_missing", f"ports.txt not found: {PORT_FILE}")
 

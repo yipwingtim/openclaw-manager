@@ -132,12 +132,23 @@ def sanitize_creation_error(output, password=""):
     return "\n".join(lines)[-CREATE_ERROR_OUTPUT_LENGTH:]
 
 
-def _read_openclaw_config(user_id):
+def _read_openclaw_config(instance):
     if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
         raise RuntimeError("secure config read is not supported")
-    fds = [os.open(PUBLIC_DIR / "users", os.O_RDONLY | os.O_DIRECTORY)]
+    data_path = instance.get("data_path")
+    if not isinstance(data_path, str) or not data_path:
+        user_id = instance.get("legacy_user_id")
+        if not isinstance(user_id, str) or not user_id:
+            raise ValueError("instance data path is required")
+        data_path = str(PUBLIC_DIR / "users" / user_id)
+    data_root = Path(data_path).resolve()
     try:
-        for part in (user_id, "config"):
+        data_root.relative_to(PUBLIC_DIR.resolve())
+    except ValueError as exc:
+        raise ValueError("instance data path is outside public directory") from exc
+    fds = [os.open(data_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)]
+    try:
+        for part in ("config",):
             fds.append(os.open(
                 part,
                 os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -157,7 +168,7 @@ def _read_openclaw_config(user_id):
 
 def openclaw_creation_result(instance):
     user_id = instance["legacy_user_id"]
-    config = _read_openclaw_config(user_id)
+    config = _read_openclaw_config(instance)
     nginx_conf = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf")) / f"{user_id}.conf"
     match = re.search(r"^\s*listen\s+([0-9]+)\b", nginx_conf.read_text(encoding="utf-8"), re.MULTILINE)
     if match is None:

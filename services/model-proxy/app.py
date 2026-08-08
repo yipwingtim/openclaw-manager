@@ -22,6 +22,10 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+REGENERATED_RESPONSE_HEADERS = {
+    "content-encoding",
+    "content-length",
+}
 MODEL_GATED_PATHS = {
     "chat/completions",
     "completions",
@@ -142,7 +146,7 @@ def upstream_headers(user_id):
 def response_headers(upstream_response):
     headers = []
     for key, value in upstream_response.headers.items():
-        if key.lower() in HOP_BY_HOP_HEADERS:
+        if key.lower() in HOP_BY_HOP_HEADERS | REGENERATED_RESPONSE_HEADERS:
             continue
         headers.append((key, value))
     return headers

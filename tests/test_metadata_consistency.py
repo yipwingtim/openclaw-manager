@@ -17,6 +17,56 @@ load_db = CHECKER["load_db"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def test_active_hermes_skips_openclaw_resource_checks(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.configure_paths(root)
+            data_dir = root / "hermes" / "Hermes-guwei"
+            data_dir.mkdir(parents=True)
+            reporter = Reporter()
+
+            check_user(
+                "Hermes-guwei",
+                data_dir,
+                {},
+                {
+                    "Hermes-guwei": {
+                        "product": "hermes",
+                        "status": "active",
+                        "container_name": "hermes_Hermes-guwei",
+                    }
+                },
+                {},
+                reporter,
+            )
+
+            self.assertEqual(reporter.issues, [])
+
+    def test_failed_openclaw_skips_runtime_resource_checks(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.configure_paths(root)
+            data_dir = root / "instances" / "openclaw" / "instance-1"
+            data_dir.mkdir(parents=True)
+            reporter = Reporter()
+
+            check_user(
+                "failed-openclaw",
+                data_dir,
+                {},
+                {
+                    "failed-openclaw": {
+                        "product": "openclaw",
+                        "status": "failed",
+                        "container_name": "openclaw_failed-openclaw",
+                    }
+                },
+                {},
+                reporter,
+            )
+
+            self.assertEqual(reporter.issues, [])
+
     def test_global_check_uses_metadata_data_path_for_active_hermes(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

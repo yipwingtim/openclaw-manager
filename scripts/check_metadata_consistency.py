@@ -431,6 +431,8 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
             f"{user_id}: users directory has no metadata instance; skipping product checks",
         )
         return
+    if db_status in {"failed", "deleted"}:
+        return
     product = (db_row or {}).get("product")
     if not product and (
         (user_dir / "evoscientist-data").is_dir()
@@ -439,6 +441,14 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     ):
         product = "evoscientist"
     product = product or "openclaw"
+    if product == "hermes":
+        expected_container = f"hermes_{user_id}"
+        if db_row.get("container_name") != expected_container:
+            reporter.error(
+                "metadata_container_mismatch",
+                f"{user_id}: metadata container={db_row.get('container_name')} expected={expected_container}",
+            )
+        return
     if product == "evoscientist":
         check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_deleted=is_deleted)
         return

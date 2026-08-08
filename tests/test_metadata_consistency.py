@@ -11,11 +11,68 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 CHECKER = runpy.run_path(str(ROOT_DIR / "scripts" / "check_metadata_consistency.py"))
 Reporter = CHECKER["Reporter"]
 check_deleted_recycle_dirs = CHECKER["check_deleted_recycle_dirs"]
+check_global = CHECKER["check_global"]
 check_user = CHECKER["check_user"]
 load_db = CHECKER["load_db"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def test_global_check_uses_metadata_data_path_for_active_hermes(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            data_dir = root / "hermes" / "Hermes-guwei"
+            data_dir.mkdir(parents=True)
+            reporter = Reporter()
+            check_global.__globals__["NGINX_COMPOSE_FILE"] = root / "missing-compose.yml"
+            check_global.__globals__["PORT_FILE"] = root / "missing-ports.txt"
+
+            check_global(
+                {},
+                {},
+                {"Hermes-guwei": {"legacy_user_id": "Hermes-guwei", "status": "active", "data_path": str(data_dir)}},
+                [],
+                reporter,
+            )
+
+            self.assertNotIn("metadata_dir_missing", {issue.code for issue in reporter.issues})
+
+    def test_global_check_ignores_missing_data_for_failed_instances(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            reporter = Reporter()
+            check_global.__globals__["NGINX_COMPOSE_FILE"] = root / "missing-compose.yml"
+            check_global.__globals__["PORT_FILE"] = root / "missing-ports.txt"
+
+            check_global(
+                {},
+                {},
+                {
+                    "failed-openclaw": {"legacy_user_id": "failed-openclaw", "status": "failed", "data_path": str(root / "gone")},
+                    "failed-hermes": {"legacy_user_id": "failed-hermes", "status": "failed", "data_path": None},
+                },
+                [],
+                reporter,
+            )
+
+            self.assertNotIn("metadata_dir_missing", {issue.code for issue in reporter.issues})
+
+    def test_global_check_reports_missing_data_for_active_instance(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            reporter = Reporter()
+            check_global.__globals__["NGINX_COMPOSE_FILE"] = root / "missing-compose.yml"
+            check_global.__globals__["PORT_FILE"] = root / "missing-ports.txt"
+
+            check_global(
+                {},
+                {},
+                {"alice": {"legacy_user_id": "alice", "status": "active", "data_path": str(root / "gone")}},
+                [],
+                reporter,
+            )
+
+            self.assertIn("metadata_dir_missing", {issue.code for issue in reporter.issues})
+
     def test_new_instances_without_legacy_ids_are_not_overwritten(self):
         with TemporaryDirectory() as temp_dir:
             db_file = Path(temp_dir) / "manager.db"

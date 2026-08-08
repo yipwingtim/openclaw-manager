@@ -77,6 +77,21 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
         self.assertEqual(tuple(endpoint), (39119, "https://manager.example.test:39119"))
         self.assertEqual(tuple(port), (hermes["id"], "allocated"))
 
+    def test_create_instance_defaults_to_product_uuid_data_path(self):
+        user = self.store.create_user("Alice", db_file=self.db_file)
+        instance = self.store.create_instance(
+            owner_public_id=user["public_id"],
+            product="hermes",
+            instance_name="Hermes",
+            runtime_identifier="hermes_alice",
+            db_file=self.db_file,
+        )
+
+        self.assertEqual(
+            instance["data_path"],
+            f"/data/docker/openclaw-public/instances/hermes/{instance['public_id']}",
+        )
+
     def test_create_instance_rejects_allocated_port_without_creating_instance(self):
         user = self.store.create_user("Alice", db_file=self.db_file)
         first = self.store.create_instance(

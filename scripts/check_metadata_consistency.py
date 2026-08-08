@@ -660,6 +660,16 @@ def main():
     users_dirs = scan_user_dirs(OPENCLAW_PUBLIC_DIR)
     recycle_dirs = scan_deleted_recycle_dirs(OPENCLAW_PUBLIC_DIR)
     db_instances, db_ports = load_db(METADATA_DB_FILE, reporter)
+    for user_id, row in db_instances.items():
+        status = (row.get("status") or "active").strip().lower()
+        data_path = row.get("data_path")
+        if (
+            status in {"provisioning", "active", "stopped"}
+            and isinstance(data_path, str)
+            and Path(data_path).is_dir()
+            and user_id not in users_dirs
+        ):
+            users_dirs[user_id] = Path(data_path)
 
     if args.user_id:
         if args.user_id not in users_dirs:

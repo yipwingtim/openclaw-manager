@@ -58,7 +58,7 @@ for var in "${required_vars[@]}"; do
 done
 
 BASE_DIR="$OPENCLAW_PUBLIC_DIR"
-USER_DIR="$BASE_DIR/users/$USER_ID"
+USER_DIR="${OPENCLAW_DATA_PATH:-$BASE_DIR/users/$USER_ID}"
 SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
 TENANT_NETWORK="$(tenant_network_name "$USER_ID")"
 DELETED_DIR="$BASE_DIR/deleted"

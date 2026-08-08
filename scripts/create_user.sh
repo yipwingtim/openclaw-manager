@@ -116,7 +116,7 @@ VERSION="$OPENCLAW_VERSION"
 HOST_MANAGER_UID="${HOST_MANAGER_UID:-$(stat -c %u "$BASE_DIR")}"
 HOST_MANAGER_GID="${HOST_MANAGER_GID:-$(stat -c %g "$BASE_DIR")}"
 
-USER_DIR="$BASE_DIR/users/$USER_ID"
+USER_DIR="${OPENCLAW_DATA_PATH:-$BASE_DIR/users/$USER_ID}"
 LOG_FILE="$BASE_DIR/logs/scripts/create_user.log"
 TEMPLATE="$MANAGER_DIR/templates/docker-compose.tpl.yml"
 SERVICE_ID="$(printf '%s' "$USER_ID" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
@@ -621,6 +621,7 @@ if [ "${OPENCLAW_SKIP_METADATA_WRITE:-0}" != "1" ]; then
     --basic-auth-enabled "$BASIC_AUTH_ENABLED" \
     --basic-auth-password-ref "$NGINX_USER_HTPASSWD_REF" \
     --openclaw-token "$TOKEN" \
+    --data-path "$USER_DIR" \
     --message "created from create_user.sh" \
     || echo "[WARN] Metadata update failed for created user: $USER_ID"
 fi

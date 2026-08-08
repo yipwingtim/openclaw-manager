@@ -530,6 +530,8 @@ def create_instance(
                 raise ValueError("port is already allocated")
         now = utc_now()
         public_id = str(uuid.uuid4())
+        if data_path is None:
+            data_path = str(PUBLIC_DIR / "instances" / product / public_id)
         try:
             active_conn.execute(
                 """

@@ -297,6 +297,57 @@ server { listen 40062 ssl; location / { proxy_pass http://evosci_ui_40062; } }
             codes = {issue.code for issue in reporter.issues}
             self.assertNotIn("nginx_conf_missing", codes)
 
+    def test_legacy_evoscientist_layout_is_detected_without_product_metadata(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.configure_paths(root)
+            user_dir = root / "users" / "legacy-evo"
+            (user_dir / "workspace").mkdir(parents=True)
+            (user_dir / "evoscientist-data").mkdir()
+            reporter = Reporter()
+            check_user("legacy-evo", user_dir, {}, {}, {}, reporter)
+            codes = {issue.code for issue in reporter.issues}
+            self.assertNotIn("container_name_mismatch", codes)
+            self.assertNotIn("compose_missing_tenant_net", codes)
+
+    def test_deleted_legacy_evo_name_skips_openclaw_checks(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.configure_paths(root)
+            user_dir = root / "users" / "Evo_jwen_002"
+            user_dir.mkdir(parents=True)
+            reporter = Reporter()
+            check_user(
+                "Evo_jwen_002", user_dir,
+                {"Evo_jwen_002": {"status": "deleted"}}, {}, {}, reporter,
+            )
+            codes = {issue.code for issue in reporter.issues}
+            self.assertNotIn("container_name_mismatch", codes)
+            self.assertNotIn("nginx_conf_missing", codes)
+            self.assertNotIn("htpasswd_missing", codes)
+
+    def test_evo_ingress_443_does_not_override_external_port(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.configure_paths(root)
+            user_dir = root / "users" / "alice"
+            (user_dir / "workspace").mkdir(parents=True)
+            (user_dir / "evoscientist-data").mkdir()
+            ingress = root / "deleted" / "evoscientist" / "evo-public.nginx.conf"
+            ingress.parent.mkdir(parents=True)
+            ingress.write_text("server { listen 443 ssl; }", encoding="utf-8")
+            reporter = Reporter()
+            original = check_user.__globals__["OPENCLAW_PUBLIC_DIR"]
+            check_user.__globals__["OPENCLAW_PUBLIC_DIR"] = root
+            try:
+                check_user("alice", user_dir, {}, {
+                    "alice": {"product": "evoscientist", "status": "active", "public_id": "evo-public",
+                               "port": 40087, "container_name": "evoscientist_alice"}
+                }, {40087: {"status": "allocated", "user_id": "alice"}}, reporter)
+            finally:
+                check_user.__globals__["OPENCLAW_PUBLIC_DIR"] = original
+            self.assertNotIn("metadata_port_mismatch", {issue.code for issue in reporter.issues})
+
 
 if __name__ == "__main__":
     unittest.main()

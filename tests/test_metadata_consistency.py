@@ -254,6 +254,49 @@ class MetadataConsistencyTests(unittest.TestCase):
             self.assertNotIn("compose_missing_agent_net", codes)
             self.assertNotIn("nginx_upstream_not_dynamic", codes)
 
+    def test_deleted_evoscientist_skips_active_resource_checks(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_dir = root / "users" / "deleted-evo"
+            user_dir.mkdir(parents=True)
+            reporter = Reporter()
+            check_user(
+                "deleted-evo", user_dir, {}, {
+                    "deleted-evo": {"product": "evoscientist", "status": "deleted",
+                                    "public_id": "evo-public", "container_name": "evoscientist_deleted-evo"}
+                }, {}, reporter,
+            )
+            self.assertEqual(reporter.issues, [])
+
+    def test_evoscientist_uses_public_id_ingress_config(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            conf_dir = self.configure_paths(root)
+            user_dir = root / "users" / "alice"
+            (user_dir / "workspace").mkdir(parents=True)
+            (user_dir / "evoscientist-data").mkdir()
+            ingress = root / "deleted" / "evoscientist" / "evo-public.nginx.conf"
+            ingress.parent.mkdir(parents=True)
+            ingress.write_text("""upstream evosci_ui_40062 {
+    zone evosci_ui_40062 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    server evoscientist_alice:4716 resolve;
+}
+server { listen 40062 ssl; location / { proxy_pass http://evosci_ui_40062; } }
+""", encoding="utf-8")
+            reporter = Reporter()
+            original_public_dir = check_user.__globals__["OPENCLAW_PUBLIC_DIR"]
+            check_user.__globals__["OPENCLAW_PUBLIC_DIR"] = root
+            try:
+                check_user("alice", user_dir, {}, {
+                    "alice": {"product": "evoscientist", "status": "active", "public_id": "evo-public",
+                               "port": 40062, "container_name": "evoscientist_alice"}
+                }, {40062: {"status": "allocated", "user_id": "alice"}}, reporter)
+            finally:
+                check_user.__globals__["OPENCLAW_PUBLIC_DIR"] = original_public_dir
+            codes = {issue.code for issue in reporter.issues}
+            self.assertNotIn("nginx_conf_missing", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -326,6 +326,19 @@ server { listen 40062 ssl; location / { proxy_pass http://evosci_ui_40062; } }
             self.assertNotIn("nginx_conf_missing", codes)
             self.assertNotIn("htpasswd_missing", codes)
 
+    def test_orphan_user_dir_only_reports_warning(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.configure_paths(root)
+            user_dir = root / "users" / "old-evo"
+            user_dir.mkdir(parents=True)
+            reporter = Reporter()
+            check_user("old-evo", user_dir, {}, {}, {}, reporter)
+            self.assertEqual(
+                [(issue.level, issue.code) for issue in reporter.issues],
+                [("WARN", "metadata_orphan_dir")],
+            )
+
     def test_evo_ingress_443_does_not_override_external_port(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

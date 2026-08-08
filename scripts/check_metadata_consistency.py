@@ -425,6 +425,12 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     csv_status = (csv_row or {}).get("status")
     db_status = (db_row or {}).get("status")
     is_deleted = csv_status == "deleted" or db_status == "deleted"
+    if db_row is None:
+        reporter.warn(
+            "metadata_orphan_dir",
+            f"{user_id}: users directory has no metadata instance; skipping product checks",
+        )
+        return
     product = (db_row or {}).get("product")
     if not product and (
         (user_dir / "evoscientist-data").is_dir()

@@ -357,8 +357,17 @@ def verbose_check(enabled, user_id, label):
 
 
 
-def check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter):
-    nginx_conf = resolve_nginx_user_conf(user_id, reporter)
+def check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_deleted=False):
+    if is_deleted:
+        return
+    nginx_conf = None
+    configured_path = (db_row or {}).get("nginx_conf_path")
+    if configured_path:
+        nginx_conf = Path(configured_path)
+    elif (db_row or {}).get("public_id"):
+        nginx_conf = OPENCLAW_PUBLIC_DIR / "deleted" / "evoscientist" / f"{db_row['public_id']}.nginx.conf"
+    if nginx_conf is None or not nginx_conf.is_file():
+        nginx_conf = resolve_nginx_user_conf(user_id, reporter)
     nginx = detect_nginx_conf(nginx_conf)
     expected_container = f"evoscientist_{user_id}"
 
@@ -407,13 +416,13 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     nginx = detect_nginx_conf(nginx_conf)
     csv_row = users_csv.get(user_id)
     db_row = db_instances.get(user_id)
-    product = (db_row or {}).get("product") or "openclaw"
-    if product == "evoscientist":
-        check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter)
-        return
     csv_status = (csv_row or {}).get("status")
     db_status = (db_row or {}).get("status")
     is_deleted = csv_status == "deleted" or db_status == "deleted"
+    product = (db_row or {}).get("product") or "openclaw"
+    if product == "evoscientist":
+        check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_deleted=is_deleted)
+        return
     expected_service = f"openclaw-{service_id(user_id)}"
     expected_container = f"openclaw_{user_id}"
     expected_htpasswd = container_htpasswd_path(user_id)

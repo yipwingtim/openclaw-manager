@@ -79,6 +79,12 @@ cd /data/docker/openclaw-manager
 bash scripts/deploy_services.sh
 ```
 
+如只更新模型代理，可指定服务名，避免无关服务构建失败阻断部署：
+
+```bash
+bash scripts/deploy_services.sh model-proxy
+```
+
 请使用部署脚本启动或重建 `model-proxy`。脚本会在 Compose 完成后，将
 `openclaw-nginx` 和 `openclaw-model-proxy` 重新连接到现有租户独立网络，
 并将 Nginx 上游迁移为动态 Docker DNS。直接执行 `docker compose up`

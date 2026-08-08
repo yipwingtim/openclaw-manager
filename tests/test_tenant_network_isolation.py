@@ -38,6 +38,13 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             script.index("connect_shared_services_to_tenant_networks"),
         )
 
+    def test_services_deploy_accepts_optional_target_services(self):
+        script = DEPLOY_SERVICES.read_text(encoding="utf-8")
+
+        self.assertIn('services=("$@")', script)
+        self.assertIn('docker compose build "${services[@]}"', script)
+        self.assertIn('docker compose up -d --no-build --wait "${services[@]}"', script)
+
     def test_runtime_check_verifies_shared_services_on_tenant_networks(self):
         script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")
 

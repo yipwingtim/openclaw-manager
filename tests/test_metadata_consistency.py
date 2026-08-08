@@ -17,6 +17,32 @@ load_db = CHECKER["load_db"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def test_stopped_instance_allows_released_port(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            conf_dir = self.configure_paths(root)
+            user_dir = self.write_user(root, "alice")
+            self.write_dynamic_conf(conf_dir / "_disabled" / "alice.conf", "alice", port=30123)
+            reporter = Reporter()
+
+            check_user(
+                "alice",
+                user_dir,
+                {"alice": {"status": "stopped", "port": 30123}},
+                {
+                    "alice": {
+                        "product": "openclaw",
+                        "status": "stopped",
+                        "port": 30123,
+                        "container_name": "openclaw_alice",
+                    }
+                },
+                {30123: {"status": "released", "user_id": None}},
+                reporter,
+            )
+
+            self.assertNotIn("metadata_port_row_mismatch", {issue.code for issue in reporter.issues})
+
     def test_active_hermes_skips_openclaw_resource_checks(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

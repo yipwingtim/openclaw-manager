@@ -538,7 +538,7 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
         port_row = db_ports.get(int(port))
         if port_row is None:
             reporter.warn("metadata_port_row_missing", f"{user_id}: ports table missing port={port}")
-        elif is_deleted and port_row.get("status") == "released":
+        elif db_status in {"stopped", "deleted"} and port_row.get("status") == "released":
             pass
         elif port_row.get("user_id") != user_id or port_row.get("status") != "allocated":
             reporter.warn(

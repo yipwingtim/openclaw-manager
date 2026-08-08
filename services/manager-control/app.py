@@ -855,11 +855,6 @@ def create_admin_instance():
                 instance_name=instance_name.strip(),
                 legacy_user_id=legacy_user_id,
                 runtime_identifier=f"{product}_{legacy_user_id}",
-                data_path=str(
-                    PROVISIONING_SECRET_DIR.parent
-                    / ("hermes" if product == "hermes" else "users")
-                    / legacy_user_id
-                ),
                 status="provisioning",
                 basic_auth_enabled=basic_auth_enabled,
                 conn=conn,
@@ -1035,11 +1030,6 @@ def create_instance_batch():
                     instance_name=row["instance_name"].strip(),
                     legacy_user_id=row["legacy_user_id"],
                     runtime_identifier=f"{row['product']}_{row['legacy_user_id']}",
-                    data_path=str(
-                        PROVISIONING_SECRET_DIR.parent
-                        / ("hermes" if row["product"] == "hermes" else "users")
-                        / row["legacy_user_id"]
-                    ),
                     status="provisioning", basic_auth_enabled=row["basic_auth_enabled"],
                     conn=conn,
                 )

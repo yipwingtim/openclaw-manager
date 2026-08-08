@@ -57,6 +57,12 @@ class OpenClawDockerAdapter:
     def user_dir(self, user_id):
         return self.public_dir / "users" / user_id
 
+    def data_dir(self, instance):
+        value = instance.get("data_path")
+        if isinstance(value, str) and value.strip():
+            return Path(value)
+        return self.user_dir(self.get_legacy_user_id(instance))
+
     def run_command(self, command, timeout=30, cwd=None, env=None):
         result = subprocess.run(
             command,
@@ -323,7 +329,11 @@ class OpenClawDockerAdapter:
         ]
         if skip_nginx_reload:
             command.append("--skip-nginx-reload")
-        env = {**os.environ, "OPENCLAW_BASIC_AUTH_PASSWORD": basic_auth_password}
+        env = {
+            **os.environ,
+            "OPENCLAW_BASIC_AUTH_PASSWORD": basic_auth_password,
+            "OPENCLAW_DATA_PATH": str(self.data_dir(instance)),
+        }
         if version:
             env["OPENCLAW_VERSION"] = version
         if skip_metadata_write:
@@ -347,12 +357,14 @@ class OpenClawDockerAdapter:
         return self._run_interruptible_command(
             [str(self.manager_dir / "scripts" / "delete_user.sh"), self.get_legacy_user_id(instance)],
             timeout=180,
+            env={"OPENCLAW_DATA_PATH": str(self.data_dir(instance))},
         )
 
     def restore(self, instance):
         return self._run_interruptible_command(
             [str(self.manager_dir / "scripts" / "restore_user.sh"), self.get_legacy_user_id(instance)],
             timeout=240,
+            env={"OPENCLAW_DATA_PATH": str(self.data_dir(instance))},
         )
 
     def purge_deleted(self, instance):
@@ -378,7 +390,7 @@ class OpenClawDockerAdapter:
 
     def update_version(self, instance, version, restore_model_provider=False, timeout=600):
         user_id = self.get_legacy_user_id(instance)
-        user_dir = self.user_dir(user_id)
+        user_dir = self.data_dir(instance)
         compose_file = user_dir / "docker-compose.yml"
         if not compose_file.is_file():
             return 1, f"Compose file not found: {compose_file}"
@@ -403,7 +415,7 @@ class OpenClawDockerAdapter:
             process = subprocess.Popen(
                 command,
                 cwd=str(self.manager_dir),
-                env={**os.environ, "OPENCLAW_SKIP_METADATA_WRITE": "1"},
+                env={**os.environ, "OPENCLAW_DATA_PATH": str(user_dir), "OPENCLAW_SKIP_METADATA_WRITE": "1"},
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -443,7 +455,7 @@ class OpenClawDockerAdapter:
         )
         if validation_code != 0:
             return validation_code, validation_output
-        user_dir = self.user_dir(self.get_legacy_user_id(instance))
+        user_dir = self.data_dir(instance)
         skills_dir = user_dir / "skills"
         backup_parent = user_dir / "backups" / "skill-installs"
         backup_parent.mkdir(parents=True, exist_ok=True)
@@ -536,6 +548,7 @@ class OpenClawDockerAdapter:
             env={
                 **(env or {}),
                 "OPENCLAW_RUNTIME_TARGET": self.get_runtime_target(instance),
+                "OPENCLAW_DATA_PATH": str(self.data_dir(instance)),
             },
         )
 
@@ -712,8 +725,11 @@ while True:
 
     def _data_paths(self, instance):
         user_dir = Path(instance.get("data_path") or "")
-        expected = self.user_dir(self.get_legacy_user_id(instance))
-        if user_dir != expected:
+        expected_paths = {
+            self.user_dir(self.get_legacy_user_id(instance)),
+            self.public_dir / "instances" / "evoscientist" / str(instance.get("public_id") or ""),
+        }
+        if user_dir not in expected_paths:
             raise ValueError("EvoScientist data path is invalid")
         return user_dir, user_dir / "workspace", user_dir / "evoscientist-data", user_dir / "tcp_proxy.py"
 
@@ -1344,7 +1360,11 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
 
     def _hermes_data_path(self, instance):
         data_path = Path(instance.get("data_path") or "")
-        if data_path.parent != self.public_dir / "hermes":
+        valid_parents = {
+            self.public_dir / "hermes",
+            self.public_dir / "instances" / "hermes",
+        }
+        if data_path.parent not in valid_parents:
             raise ValueError("Hermes data path is invalid")
         return data_path
 
@@ -1644,7 +1664,10 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             basic_auth_enabled != "true"
             or not basic_auth_password
             or not self._SAFE_DOCKER_NAME.fullmatch(runtime_target)
-            or data_path.parent != self.public_dir / "hermes"
+            or data_path.parent not in {
+                self.public_dir / "hermes",
+                self.public_dir / "instances" / "hermes",
+            }
         ):
             return 1, "Invalid Hermes creation parameters."
         if data_path.exists():
@@ -1719,7 +1742,10 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         except ValueError as exc:
             return 1, str(exc)
         recycle_dir = self.hermes_recycle_dir(instance)
-        if data_path.parent != self.public_dir / "hermes" or not data_path.is_dir():
+        if data_path.parent not in {
+            self.public_dir / "hermes",
+            self.public_dir / "instances" / "hermes",
+        } or not data_path.is_dir():
             return 1, f"Hermes data path not found or invalid: {data_path}"
         if recycle_dir.exists():
             return 1, f"Hermes recycle path already exists: {recycle_dir}"

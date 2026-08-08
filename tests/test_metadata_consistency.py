@@ -73,6 +73,40 @@ class MetadataConsistencyTests(unittest.TestCase):
 
             self.assertIn("metadata_dir_missing", {issue.code for issue in reporter.issues})
 
+    def test_new_instance_data_path_is_checked_as_instance_directory(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            conf_dir = self.configure_paths(root)
+            instance_dir = root / "instances" / "openclaw" / "instance-1"
+            self.write_user(root, "alice")
+            instance_dir.mkdir(parents=True)
+            (instance_dir / "docker-compose.yml").write_text(
+                "services:\n  openclaw-alice:\n"
+                "    container_name: openclaw_alice\n"
+                "    networks:\n      - tenant-net\n"
+                "networks:\n  tenant-net:\n",
+                encoding="utf-8",
+            )
+            reporter = Reporter()
+            check_user(
+                "alice",
+                instance_dir,
+                {},
+                {
+                    "alice": {
+                        "legacy_user_id": "alice",
+                        "public_id": "instance-1",
+                        "product": "openclaw",
+                        "status": "active",
+                        "container_name": "openclaw_alice",
+                    }
+                },
+                {},
+                reporter,
+            )
+
+            self.assertNotIn("metadata_orphan_dir", {issue.code for issue in reporter.issues})
+
     def test_new_instances_without_legacy_ids_are_not_overwritten(self):
         with TemporaryDirectory() as temp_dir:
             db_file = Path(temp_dir) / "manager.db"

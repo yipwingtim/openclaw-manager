@@ -51,7 +51,7 @@ if ! [[ "$TARGET_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
   exit 1
 fi
 
-USER_DIR="$OPENCLAW_PUBLIC_DIR/users/$USER_ID"
+USER_DIR="${OPENCLAW_DATA_PATH:-$OPENCLAW_PUBLIC_DIR/users/$USER_ID}"
 COMPOSE_FILE="$USER_DIR/docker-compose.yml"
 CONTAINER_NAME="openclaw_${USER_ID}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"

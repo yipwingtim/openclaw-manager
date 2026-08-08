@@ -145,7 +145,9 @@ def upsert_instance(
         container_name=container_name or existing.get("container_name") or f"openclaw_{user_id}",
         access_url=access_url,
         admin_url=admin_url,
-        data_path=data_path or existing.get("data_path") or str(OPENCLAW_PUBLIC_DIR / "users" / user_id),
+        data_path=data_path or existing.get("data_path") or os.environ.get(
+            "OPENCLAW_DATA_PATH", str(OPENCLAW_PUBLIC_DIR / "users" / user_id)
+        ),
         nginx_conf_path=existing.get("nginx_conf_path") or str(NGINX_USERS_CONF_DIR / f"{user_id}.conf"),
         deleted_at=deleted_at if deleted_at is not None else existing.get("deleted_at"),
         restore_state=restore_state,
@@ -175,6 +177,7 @@ def create_instance(args):
             port=args.port,
             openclaw_version=args.openclaw_version,
             basic_auth_enabled=args.basic_auth_enabled,
+            data_path=args.data_path,
             deleted_at=None,
             conn=conn,
         )
@@ -394,6 +397,7 @@ def build_parser():
     create.add_argument("--basic-auth-enabled", type=bool_arg, default=True)
     create.add_argument("--basic-auth-password-ref")
     create.add_argument("--openclaw-token")
+    create.add_argument("--data-path")
     create.add_argument("--actor")
     create.add_argument("--message")
     create.set_defaults(func=create_instance)

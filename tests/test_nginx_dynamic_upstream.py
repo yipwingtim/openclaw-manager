@@ -109,6 +109,12 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         self.assertIn('"basePath": "%s"', script)
         self.assertIn('OPENCLAW_INGRESS_MODE must be port or path', script)
 
+    def test_create_user_compose_uses_instance_data_path(self):
+        template = (ROOT_DIR / "templates" / "docker-compose.tpl.yml").read_text(encoding="utf-8")
+        script = CREATE_USER_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("{{DATA_PATH}}/config:/home/node/.openclaw", template)
+        self.assertIn('sed -i "s#{{DATA_PATH}}#$USER_DIR#g"', script)
+
     def test_create_user_preserves_requested_version_over_config_default(self):
         script = CREATE_USER_SCRIPT.read_text(encoding="utf-8")
 

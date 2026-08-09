@@ -867,9 +867,9 @@ while True:
                 f'    auth_basic "OpenClaw Login";\n    auth_basic_user_file /etc/nginx/auth/users/{self.get_legacy_user_id(instance)}/.htpasswd;\n'
                 "    location = /api/workspace/upload { proxy_pass http://evosci_ui_"
                 f"{port}; proxy_set_header Host $host:$server_port; proxy_set_header Origin \"\"; }}\n"
-                f"    location /api/memory {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \\\"\\\"; }}\n"
-                f"    location /api/workspace {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \\\"\\\"; }}\n"
-                f"    location /api/skills {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \\\"\\\"; }}\n"
+                f"    location /api/memory {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
+                f"    location /api/workspace {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
+                f"    location /api/skills {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
                 f"    location /api/ {{ proxy_pass http://evosci_api_{port}/; proxy_http_version 1.1; proxy_buffering off; }}\n"
                 f"    location / {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }}\n"
                 "}\n"

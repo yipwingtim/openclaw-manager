@@ -17,9 +17,13 @@ source "$SCRIPT_DIR/lib_tenant_network.sh"
 echo "==> Deploying services..."
 
 cd "$MANAGER_DIR/services"
-docker compose build
+services=("$@")
+if [ "${#services[@]}" -gt 0 ]; then
+  echo "==> Target services: ${services[*]}"
+fi
+docker compose build "${services[@]}"
 
-if ! docker compose up -d --no-build --wait; then
+if ! docker compose up -d --no-build --wait "${services[@]}"; then
   echo "[ERROR] New services did not become ready; Nginx configuration was not changed" >&2
   exit 1
 fi

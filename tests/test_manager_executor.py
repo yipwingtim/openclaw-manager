@@ -65,6 +65,18 @@ class ManagerExecutorTests(unittest.TestCase):
         self.assertTrue(adapter.supports("restore"))
         self.assertTrue(adapter.supports("update_version"))
 
+    def test_all_product_adapters_expose_one_auth_contract(self):
+        expected = {
+            "openclaw": ("token", None),
+            "hermes": ("session", None),
+            "evoscientist": ("none", None),
+        }
+        for product, (product_auth, identity_header) in expected.items():
+            contract = self.executor.get_adapter(product).instance_auth_contract()
+            self.assertEqual(contract["edge_authorization"], "uis")
+            self.assertEqual(contract["product_auth"], product_auth)
+            self.assertEqual(contract["identity_header"], identity_header)
+
     def test_run_once_creates_instance_once_and_consumes_secret(self):
         control = Mock()
         instance = {

@@ -12,14 +12,22 @@ import threading
 from pathlib import Path
 
 
-from product_capabilities import product_capabilities
+from product_capabilities import product_auth_contract, product_capabilities
 
 
 class OpenClawDockerAdapter:
     CAPABILITIES = product_capabilities("openclaw")
+    AUTH_PRODUCT = "openclaw"
 
     def supports(self, action):
         return action in self.CAPABILITIES
+
+    def instance_auth_contract(self, instance=None):
+        del instance
+        contract = product_auth_contract(self.AUTH_PRODUCT)
+        if contract is None:
+            raise ValueError(f"unsupported instance auth product: {self.AUTH_PRODUCT}")
+        return contract
 
     def get_runtime_target(self, instance):
         if not isinstance(instance, dict):
@@ -697,6 +705,7 @@ class OpenClawDockerAdapter:
 
 class EvoScientistDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities("evoscientist")
+    AUTH_PRODUCT = "evoscientist"
     IMAGE_REPOSITORY = "ghcr.io/evoscientist/evoscientist"
     DEFAULT_DIGEST = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
     _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -1374,6 +1383,7 @@ while True:
 
 class HermesDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities("hermes")
+    AUTH_PRODUCT = "hermes"
     IMAGE = "nousresearch/hermes-agent:v2026.7.20"
 
     _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")

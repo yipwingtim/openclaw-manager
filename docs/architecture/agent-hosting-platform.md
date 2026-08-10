@@ -385,6 +385,21 @@
 
 平台不应强行统一这些机制，而应负责平台入口认证和平台动作授权。必要时，平台可以为用户提供受控跳转、代执行或状态展示，但不应简单把产品内部权限与平台权限混为一谈。
 
+### 9.3 统一实例认证契约
+
+所有产品适配器都通过同一个 `instance_auth_contract()` 接口声明实例入口认证，
+但不把只读认证契约混入可执行的产品 capability，也不伪造产品内部认证能力。
+契约分为两层：
+
+- `edge_authorization`：平台入口是否要求 UIS 实例授权；当前三种产品均为 `uis`。
+- `product_auth`：下游产品当前实际使用的认证方式。OpenClaw 当前为 `token`，
+  Hermes 为官方 `session`，EvoScientist 为 `none`。
+
+因此，适配器的生命周期动作和认证契约入口保持统一，产品差异只存在于契约值及其内部实现。
+OpenClaw 后续认证代理 PR 完成并验证后，才会将其契约切换为 `trusted_proxy`；
+Hermes 的官方 session 不能被 Nginx 的 Basic `Authorization` Header 直接替代，
+后续若要免登录，必须接入 Hermes 支持的认证 provider 或 OIDC 流程。
+
 ## 10. 文件与数据路径设计
 
 当前项目中已有的路径命名明显偏向 `OpenClaw` 专属结构。未来如果要支持多产品，不应继续扩大这种命名绑定。

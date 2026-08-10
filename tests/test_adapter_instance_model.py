@@ -43,6 +43,16 @@ class AdapterInstanceModelTests(unittest.TestCase):
                 "openclaw_alice_custom",
             )
 
+    def test_instance_auth_contract_is_explicit_and_product_specific(self):
+        self.assertEqual(
+            self.make_adapter(Path("/tmp")).instance_auth_contract(),
+            {
+                "edge_authorization": "uis",
+                "product_auth": "token",
+                "identity_header": None,
+            },
+        )
+
     def test_status_uses_instance_runtime_identifier(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
@@ -442,6 +452,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
         self.assertTrue(product_supports("hermes", "update_version"))
         self.assertFalse(product_supports("evoscientist", "file_upload"))
         self.assertFalse(product_supports("unknown", "restart"))
+
         self.assertEqual(
             execution_action_capability("instance.wechat_bind"),
             "device_pairing",

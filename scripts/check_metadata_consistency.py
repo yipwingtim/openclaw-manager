@@ -366,11 +366,34 @@ def check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_de
     if is_deleted:
         return
     nginx_conf = None
-    configured_path = (db_row or {}).get("nginx_conf_path")
-    if configured_path:
-        nginx_conf = Path(configured_path)
-    elif (db_row or {}).get("public_id"):
-        nginx_conf = OPENCLAW_PUBLIC_DIR / "deleted" / "evoscientist" / f"{db_row['public_id']}.nginx.conf"
+    public_id = (db_row or {}).get("public_id")
+    canonical = NGINX_USERS_CONF_DIR / f"evoscientist-{public_id}.conf" if public_id else None
+    legacy = (
+        OPENCLAW_PUBLIC_DIR / "deleted" / "evoscientist" / f"{public_id}.nginx.conf"
+        if public_id else None
+    )
+    configured_path = Path(db_row["nginx_conf_path"]) if (db_row or {}).get("nginx_conf_path") else None
+    if canonical and canonical.is_file():
+        nginx_conf = canonical
+    elif configured_path and configured_path.is_file():
+        nginx_conf = configured_path
+    elif legacy and legacy.is_file():
+        nginx_conf = legacy
+    if canonical and legacy and canonical.is_file() and legacy.is_file():
+        reporter.error(
+            "nginx_conf_multiple_locations",
+            f"{user_id}: EvoScientist config exists in canonical and legacy locations",
+        )
+    elif nginx_conf == legacy:
+        reporter.warn(
+            "nginx_conf_legacy_path",
+            f"{user_id}: EvoScientist ingress uses legacy config path; migrate to {canonical}",
+        )
+    if canonical and canonical.is_file() and configured_path and configured_path != canonical:
+        reporter.error(
+            "nginx_conf_metadata_mismatch",
+            f"{user_id}: metadata nginx_conf_path={configured_path} expected {canonical}",
+        )
     if nginx_conf is None or not nginx_conf.is_file():
         nginx_conf = resolve_nginx_user_conf(user_id, reporter)
     nginx = detect_nginx_conf(nginx_conf)

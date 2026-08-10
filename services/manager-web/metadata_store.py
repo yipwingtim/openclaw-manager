@@ -628,10 +628,18 @@ def finish_instance_provisioning(
             SET status = ?, port = COALESCE(?, port),
                 openclaw_version = COALESCE(?, openclaw_version),
                 access_url = COALESCE(?, access_url),
-                admin_url = COALESCE(?, admin_url), updated_at = ?
+                admin_url = COALESCE(?, admin_url),
+                nginx_conf_path = CASE WHEN product = 'evoscientist'
+                    THEN ? ELSE nginx_conf_path END,
+                updated_at = ?
             WHERE public_id = ?
             """,
-            (status, port, openclaw_version, access_url, admin_url, now, instance_public_id),
+            (
+                status, port, openclaw_version, access_url, admin_url,
+                str(Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf"))
+                    / f"evoscientist-{instance_public_id}.conf"),
+                now, instance_public_id,
+            ),
         )
         if status == "active":
             instance = get_instance_by_public_id(instance_public_id, conn=active_conn)

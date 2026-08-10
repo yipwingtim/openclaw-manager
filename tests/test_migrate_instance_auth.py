@@ -67,13 +67,15 @@ class MigrateInstanceAuthTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self.module.PUBLIC_DIR = root
+            self.module.NGINX_CONF_DIR = root / "nginx"
             path = root / "deleted" / "evoscientist" / "instance-1.nginx.conf"
             path.parent.mkdir(parents=True)
             old = "server {\n    location / { proxy_pass http://evo; }\n}\n"
             path.write_text(old, encoding="utf-8")
             instance = {
                 "public_id": "instance-1", "product": "evoscientist",
-                "runtime_identifier": "evoscientist_alice", "status": "active",
+                "runtime_identifier": "evoscientist_alice", "status": "active", "port": 40062,
+                "legacy_user_id": "alice",
             }
             commands = []
 
@@ -81,7 +83,7 @@ class MigrateInstanceAuthTests(unittest.TestCase):
                 commands.append(command)
                 if command[:2] == ["docker", "inspect"]:
                     return 0, "running|tenant-net"
-                if command[-2:] == ["nginx", "-t"] and len(commands) < 5:
+                if command[-2:] == ["nginx", "-t"] and commands.count(command) == 1:
                     return 1, "invalid"
                 return 0, "ok"
 
@@ -96,20 +98,22 @@ class MigrateInstanceAuthTests(unittest.TestCase):
                 ["docker", "network", "disconnect", "instance-auth-net", "evoscientist_alice-ingress"],
                 commands,
             )
-            self.assertGreaterEqual(
-                commands.count(["docker", "restart", "evoscientist_alice-ingress"]), 2
-            )
+            ingress_runs = [command for command in commands if command[:3] == ["docker", "run", "-d"]]
+            self.assertEqual(len(ingress_runs), 2)
+            self.assertTrue(any(str(path) in part for part in ingress_runs[-1]))
 
     def test_apply_restarts_running_evoscientist_ingress_and_verifies_state(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self.module.PUBLIC_DIR = root
-            path = root / "deleted" / "evoscientist" / "instance-1.nginx.conf"
+            self.module.NGINX_CONF_DIR = root / "nginx"
+            path = self.module.NGINX_CONF_DIR / "evoscientist-instance-1.conf"
             path.parent.mkdir(parents=True)
             path.write_text("server {\n    location / { proxy_pass http://evo; }\n}\n", encoding="utf-8")
             instance = {
                 "public_id": "instance-1", "product": "evoscientist",
-                "runtime_identifier": "evoscientist_alice", "status": "active",
+                "runtime_identifier": "evoscientist_alice", "status": "active", "port": 40062,
+                "legacy_user_id": "alice",
             }
             commands = []
 
@@ -123,7 +127,9 @@ class MigrateInstanceAuthTests(unittest.TestCase):
 
             backup = root / "backup"
             backup.mkdir()
-            with patch.object(self.module, "run", side_effect=run):
+            with patch.object(self.module, "run", side_effect=run), patch.object(
+                self.module, "update_metadata_config_path"
+            ):
                 self.module.apply_one(instance, backup)
 
             self.assertIn(["docker", "restart", "evoscientist_alice-ingress"], commands)
@@ -146,6 +152,41 @@ class MigrateInstanceAuthTests(unittest.TestCase):
                 commands,
             )
             self.assertFalse(any(command[-2:] == ["nginx", "-s"] for command in commands))
+
+    def test_apply_migrates_legacy_evoscientist_bind_mount_to_canonical_path(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.module.PUBLIC_DIR = root / "public"
+            self.module.NGINX_CONF_DIR = root / "nginx" / "conf"
+            legacy = self.module.PUBLIC_DIR / "deleted" / "evoscientist" / "instance-1.nginx.conf"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("server {\n    location / { proxy_pass http://evo; }\n}\n", encoding="utf-8")
+            instance = {
+                "public_id": "instance-1", "product": "evoscientist",
+                "runtime_identifier": "evoscientist_alice", "status": "active", "port": 40062,
+                "legacy_user_id": "alice",
+            }
+            commands = []
+
+            def run(command):
+                commands.append(command)
+                if command[:2] == ["docker", "inspect"]:
+                    return 0, "running|tenant-net"
+                return 0, "ok"
+
+            backup = root / "backup"
+            backup.mkdir()
+            with patch.object(self.module, "run", side_effect=run), patch.object(
+                self.module, "update_metadata_config_path"
+            ) as update_path:
+                result = self.module.apply_one(instance, backup)
+
+            canonical = self.module.NGINX_CONF_DIR / "evoscientist-instance-1.conf"
+            self.assertEqual(result, "updated")
+            self.assertTrue(canonical.is_file())
+            self.assertFalse(legacy.exists())
+            update_path.assert_called_once_with(instance, canonical)
+            self.assertTrue(any(command[:3] == ["docker", "run", "-d"] for command in commands))
 
     def test_hermes_apply_keeps_shared_nginx_reload(self):
         with TemporaryDirectory() as temp_dir:

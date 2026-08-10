@@ -767,11 +767,28 @@ while True:
             raise ValueError("EvoScientist instance public_id is invalid")
         return self.public_dir / "deleted" / "evoscientist" / public_id
 
+    def legacy_ingress_conf(self, instance):
+        public_id = instance.get("public_id")
+        if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
+            raise ValueError("EvoScientist instance public_id is invalid")
+        return self.public_dir / "deleted" / "evoscientist" / f"{public_id}.nginx.conf"
+
     def ingress_conf(self, instance, disabled=False):
-        return self.nginx_disabled_conf(instance) if disabled else self.nginx_active_conf(instance)
+        directory = self.nginx_disabled_conf_dir() if disabled else self.nginx_users_conf_dir
+        public_id = instance.get("public_id")
+        if not isinstance(public_id, str) or not self._SAFE_DOCKER_NAME.fullmatch(public_id):
+            raise ValueError("EvoScientist instance public_id is invalid")
+        return directory / f"evoscientist-{public_id}.conf"
 
     def _existing_ingress_conf(self, instance, disabled=False):
-        return self.ingress_conf(instance, disabled=disabled)
+        canonical = self.ingress_conf(instance, disabled=disabled)
+        if canonical.is_file():
+            return canonical
+        if not disabled:
+            legacy = self.legacy_ingress_conf(instance)
+            if legacy.is_file():
+                return legacy
+        return canonical
 
     def _allocate_port(self):
         port_file = os.environ.get("PORT_FILE", str(self.public_dir / "ports.txt"))
@@ -903,7 +920,7 @@ while True:
                 f"    location / {{ auth_request /_instance_auth; proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }}\n"
                 "}\n"
             )
-            config_file = self.public_dir / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
+            config_file = self.ingress_conf(instance)
             config_file.parent.mkdir(parents=True, exist_ok=True)
             config_file.write_text(config_text, encoding="utf-8")
             network = self.tenant_network(instance)
@@ -1208,8 +1225,7 @@ while True:
                     shutil.move(str(path), str(recycle / path.name))
             self.run_command(["docker", "rm", "-f", self.ingress_container_name(instance)], timeout=60)
             self._existing_ingress_conf(instance).unlink(missing_ok=True)
-            config_file = self.public_dir / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
-            config_file.unlink(missing_ok=True)
+            self.legacy_ingress_conf(instance).unlink(missing_ok=True)
             (recycle / "manifest.json").write_text(json.dumps({
                 "image": image, "network": network, "was_running": was_running,
                 "port": instance.get("port"),

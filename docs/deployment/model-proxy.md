@@ -85,10 +85,15 @@ bash scripts/deploy_services.sh
 bash scripts/deploy_services.sh model-proxy
 ```
 
-请使用部署脚本启动或重建 `model-proxy`。脚本会在 Compose 完成后，将
+生产环境必须使用部署脚本启动或重建 `model-proxy`，禁止手工执行
+`docker compose up`、`docker compose up --build` 或
+`docker compose up -d --force-recreate`。脚本会在 Compose 完成后，将
 `openclaw-nginx` 和 `openclaw-model-proxy` 重新连接到现有租户独立网络，
 并将 Nginx 上游迁移为动态 Docker DNS。直接执行 `docker compose up`
 重建容器会丢失运行时网络连接，也可能让 Nginx 继续使用旧容器 IP。
+
+本地开发环境不受此生产约束。生产环境如因故必须手工重建，完成后应立即
+执行 `bash scripts/check_runtime_security.sh`，确认共享服务已恢复全部租户网络。
 
 如果自定义了 `MODEL_PROXY_TOKEN_DIR`，需要确保 Docker Compose 渲染 volume 时也能读取该变量。可在执行前导入环境变量：
 

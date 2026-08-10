@@ -17,6 +17,8 @@ COMPOSE_TEMPLATE = ROOT_DIR / "templates" / "docker-compose.tpl.yml"
 SERVICES_COMPOSE = ROOT_DIR / "services" / "docker-compose.yml"
 DEPLOY_SERVICES = ROOT_DIR / "scripts" / "deploy_services.sh"
 RUNTIME_SECURITY_CHECK = ROOT_DIR / "scripts" / "check_runtime_security.sh"
+MODEL_PROXY_DEPLOYMENT_DOC = ROOT_DIR / "docs" / "deployment" / "model-proxy.md"
+BOOTSTRAP_DOC = ROOT_DIR / "docs" / "deployment" / "bootstrap.md"
 
 
 class TenantNetworkIsolationTests(unittest.TestCase):
@@ -37,6 +39,25 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             script.index("docker compose up -d --no-build"),
             script.index("connect_shared_services_to_tenant_networks"),
         )
+
+    def test_services_deploy_reports_success_only_after_shared_reconnect(self):
+        script = DEPLOY_SERVICES.read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index("connect_shared_services_to_tenant_networks"),
+            script.index('echo "==> Services deployed successfully!"'),
+        )
+        self.assertIn("set -euo pipefail", script)
+
+    def test_production_docs_require_deployment_script_for_shared_rebuilds(self):
+        for path in (MODEL_PROXY_DEPLOYMENT_DOC, BOOTSTRAP_DOC):
+            text = path.read_text(encoding="utf-8")
+            self.assertTrue(
+                "生产环境禁止手工执行" in text
+                or "生产环境必须使用部署脚本" in text
+            )
+            self.assertIn("scripts/deploy_services.sh", text)
+            self.assertIn("check_runtime_security.sh", text)
 
     def test_services_deploy_accepts_optional_target_services(self):
         script = DEPLOY_SERVICES.read_text(encoding="utf-8")

@@ -41,16 +41,21 @@ bash scripts/deploy_services.sh manager-control instance-auth-proxy
 Preview historical instances. This command does not modify files or containers:
 
 ```bash
-python3 scripts/migrate_instance_auth.py
+cd /data/docker/openclaw-manager/services
+
+docker compose exec manager-executor \
+  python3 /opt/openclaw-manager/scripts/migrate_instance_auth.py
 ```
 
 Apply only after reviewing the plan:
 
 ```bash
-python3 scripts/migrate_instance_auth.py --apply
+docker compose exec manager-executor \
+  python3 /opt/openclaw-manager/scripts/migrate_instance_auth.py --apply
 ```
 
-The apply step backs up changed ingress files, updates the shared Nginx Compose
+The apply step first checks every target and dependency before writing anything,
+then backs up changed ingress files, updates the shared Nginx Compose
 network for Hermes, attaches only EvoScientist ingress containers to
 `instance-auth-net`, validates Nginx, and rolls back a failed instance. It does
 not attach tenant application containers to `manager-net`, modify Hermes

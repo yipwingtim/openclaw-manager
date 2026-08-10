@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -119,7 +120,7 @@ def instances():
         connection.row_factory = sqlite3.Row
         return connection.execute(
             """
-            SELECT public_id, legacy_user_id, product, runtime_identifier, status
+            SELECT public_id, legacy_user_id, product, runtime_identifier, status, port, nginx_conf_path
             FROM instances
             WHERE product IN ('hermes', 'evoscientist')
               AND status IN ('active', 'stopped')
@@ -130,7 +131,11 @@ def instances():
 
 def config_path(instance):
     if instance["product"] == "evoscientist":
-        return PUBLIC_DIR / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
+        canonical = NGINX_CONF_DIR / f"evoscientist-{instance['public_id']}.conf"
+        legacy = PUBLIC_DIR / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
+        if canonical.is_file() and legacy.is_file():
+            raise RuntimeError(f"multiple EvoScientist configs found: {canonical}, {legacy}")
+        return canonical if canonical.is_file() else legacy
     active = NGINX_CONF_DIR / f"hermes-{instance['public_id']}.conf"
     disabled = NGINX_CONF_DIR / "_disabled" / active.name
     return active if active.is_file() else disabled
@@ -166,6 +171,45 @@ def refresh_nginx(instance, container):
         reload_nginx(container)
 
 
+def recreate_evoscientist_ingress(instance, config_file):
+    container = instance_container(instance)
+    port = instance["port"]
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        raise RuntimeError(f"invalid EvoScientist ingress port: {port}")
+    network = "openclaw-user-" + hashlib.sha256(
+        instance["legacy_user_id"].encode()
+    ).hexdigest()
+    auth_dir = os.environ.get("NGINX_AUTH_DIR", "/data/docker/nginx/auth")
+    cert_dir = os.environ.get("NGINX_CERTS_DIR", "/data/docker/nginx/certs")
+    run(["docker", "rm", "-f", container])
+    code, output = run([
+        "docker", "run", "-d", "--name", container, "--restart", "unless-stopped",
+        "--network", network, "-p", f"{port}:443",
+        "-v", f"{config_file}:/etc/nginx/conf.d/default.conf:ro",
+        "-v", f"{cert_dir}:/etc/nginx/certs:ro",
+        "-v", f"{auth_dir}:/etc/nginx/auth:ro", "nginx:alpine",
+    ])
+    if code != 0:
+        raise RuntimeError(output or f"could not recreate {container}")
+    code, output = run(["docker", "network", "connect", AUTH_NETWORK, container])
+    if code != 0 and "already exists" not in output.lower():
+        raise RuntimeError(output or f"could not connect {container}")
+    code, output = run(["docker", "exec", container, "nginx", "-t"])
+    if code != 0:
+        raise RuntimeError(output or f"{container}: nginx -t failed")
+
+
+def update_metadata_config_path(instance, path):
+    if instance["product"] != "evoscientist":
+        return
+    with sqlite3.connect(DB_FILE) as connection:
+        connection.execute(
+            "UPDATE instances SET nginx_conf_path = ?, updated_at = datetime('now') WHERE public_id = ?",
+            (str(path), instance["public_id"]),
+        )
+        connection.commit()
+
+
 def instance_container(instance):
     if instance["product"] == "evoscientist":
         return f"{instance['runtime_identifier']}-ingress"
@@ -187,6 +231,10 @@ def preflight_apply(pending):
             errors.append(f"config is not readable and writable: {path}")
         if not os.access(path.parent, os.W_OK | os.X_OK):
             errors.append(f"config directory is not writable: {path.parent}")
+        if instance["product"] == "evoscientist":
+            canonical_dir = NGINX_CONF_DIR
+            if not os.access(canonical_dir, os.W_OK | os.X_OK):
+                errors.append(f"canonical config directory is not writable: {canonical_dir}")
 
         container = instance_container(instance)
         code, output = run(["docker", "inspect", container])
@@ -222,18 +270,23 @@ def preflight_apply(pending):
 
 
 def apply_one(instance, backup_dir):
-    path = config_path(instance)
-    if not path.is_file():
-        raise RuntimeError(f"config missing: {path}")
-    old = path.read_text(encoding="utf-8")
+    source = config_path(instance)
+    if not source.is_file():
+        raise RuntimeError(f"config missing: {source}")
+    target = (
+        NGINX_CONF_DIR / f"evoscientist-{instance['public_id']}.conf"
+        if instance["product"] == "evoscientist" else source
+    )
+    old = source.read_text(encoding="utf-8")
     new = migrate_config(old, instance["public_id"], instance["product"])
-    if new == old:
+    if new == old and source == target:
         return "unchanged"
-    backup = backup_dir / path.name
-    shutil.copy2(path, backup)
-    temporary = path.with_name(f".{path.name}.instance-auth.tmp")
+    backup = backup_dir / source.name
+    shutil.copy2(source, backup)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.instance-auth.tmp")
     temporary.write_text(new, encoding="utf-8")
-    temporary.replace(path)
+    temporary.replace(target)
     container = instance_container(instance)
     connected = False
     try:
@@ -245,15 +298,21 @@ def apply_one(instance, backup_dir):
             ])
             if code != 0:
                 if instance["status"] == "stopped":
-                    return "updated-stopped"
-                raise RuntimeError(inspection or f"container missing: {container}")
-            state, _, networks = inspection.partition("|")
-            if AUTH_NETWORK not in networks.split():
+                    state = "stopped"
+                    networks = ""
+                else:
+                    raise RuntimeError(inspection or f"container missing: {container}")
+            else:
+                state, _, networks = inspection.partition("|")
+            if state == "running" and AUTH_NETWORK not in networks.split():
                 code, output = run(["docker", "network", "connect", AUTH_NETWORK, container])
                 if code != 0:
                     raise RuntimeError(output or f"could not connect {container}")
                 connected = True
             if state != "running":
+                if source != target:
+                    source.unlink()
+                    update_metadata_config_path(instance, target)
                 return "updated-stopped"
         else:
             code, networks = run([
@@ -268,14 +327,27 @@ def apply_one(instance, backup_dir):
                 if code != 0:
                     raise RuntimeError(output or f"could not connect {container}")
                 connected = True
-        refresh_nginx(instance, container)
+        if instance["product"] == "evoscientist" and source != target and state == "running":
+            recreate_evoscientist_ingress(instance, target)
+        else:
+            refresh_nginx(instance, container)
+        if source != target:
+            source.unlink()
+            update_metadata_config_path(instance, target)
+        elif instance["product"] == "evoscientist" and instance.get("nginx_conf_path") != str(target):
+            update_metadata_config_path(instance, target)
         return "updated"
     except Exception:
-        path.write_text(old, encoding="utf-8")
+        if source != target:
+            target.unlink(missing_ok=True)
+        source.write_text(old, encoding="utf-8")
         if connected:
             run(["docker", "network", "disconnect", AUTH_NETWORK, container])
         try:
-            refresh_nginx(instance, container)
+            if instance["product"] == "evoscientist" and source != target and state == "running":
+                recreate_evoscientist_ingress(instance, source)
+            else:
+                refresh_nginx(instance, container)
         except Exception:
             pass
         raise
@@ -290,7 +362,11 @@ def main():
     rows = instances()
     pending = []
     for instance in rows:
-        path = config_path(instance)
+        try:
+            path = config_path(instance)
+        except RuntimeError as exc:
+            print(f"[ERROR] {instance['product']} {instance['public_id']}: {exc}")
+            continue
         if not path.is_file():
             print(f"[ERROR] missing {instance['product']} config: {path}")
             continue

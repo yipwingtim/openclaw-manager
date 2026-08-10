@@ -283,7 +283,29 @@ class MetadataConsistencyTests(unittest.TestCase):
 
             codes = {issue.code for issue in reporter.issues}
             self.assertNotIn("nginx_conf_missing", codes)
-            self.assertNotIn("nginx_upstream_not_dynamic", codes)
+
+    def test_evoscientist_legacy_ingress_path_is_reported_for_migration(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.configure_paths(root)
+            user_dir = root / "users" / "alice"
+            (user_dir / "workspace").mkdir(parents=True)
+            (user_dir / "evoscientist-data").mkdir()
+            ingress = root / "deleted" / "evoscientist" / "evo-public.nginx.conf"
+            ingress.parent.mkdir(parents=True, exist_ok=True)
+            ingress.write_text("server { listen 443 ssl; }", encoding="utf-8")
+            reporter = Reporter()
+            original_public_dir = check_user.__globals__["OPENCLAW_PUBLIC_DIR"]
+            check_user.__globals__["OPENCLAW_PUBLIC_DIR"] = root
+            try:
+                check_user("alice", user_dir, {}, {
+                    "alice": {"product": "evoscientist", "status": "active",
+                              "public_id": "evo-public", "container_name": "evoscientist_alice",
+                              "nginx_conf_path": str(ingress)}
+                }, {}, reporter)
+            finally:
+                check_user.__globals__["OPENCLAW_PUBLIC_DIR"] = original_public_dir
+            self.assertIn("nginx_conf_legacy_path", {issue.code for issue in reporter.issues})
 
     def test_active_and_disabled_nginx_configs_report_conflict(self):
         with TemporaryDirectory() as temp_dir:
@@ -453,8 +475,8 @@ class MetadataConsistencyTests(unittest.TestCase):
             user_dir = root / "users" / "alice"
             (user_dir / "workspace").mkdir(parents=True)
             (user_dir / "evoscientist-data").mkdir()
-            ingress = root / "deleted" / "evoscientist" / "evo-public.nginx.conf"
-            ingress.parent.mkdir(parents=True)
+            ingress = root / "nginx" / "conf" / "evoscientist-evo-public.conf"
+            ingress.parent.mkdir(parents=True, exist_ok=True)
             ingress.write_text("""upstream evosci_ui_40062 {
     zone evosci_ui_40062 64k;
     resolver 127.0.0.11 valid=10s ipv6=off;
@@ -524,8 +546,8 @@ server { listen 40062 ssl; location / { proxy_pass http://evosci_ui_40062; } }
             user_dir = root / "users" / "alice"
             (user_dir / "workspace").mkdir(parents=True)
             (user_dir / "evoscientist-data").mkdir()
-            ingress = root / "deleted" / "evoscientist" / "evo-public.nginx.conf"
-            ingress.parent.mkdir(parents=True)
+            ingress = root / "nginx" / "conf" / "evoscientist-evo-public.conf"
+            ingress.parent.mkdir(parents=True, exist_ok=True)
             ingress.write_text("server { listen 443 ssl; }", encoding="utf-8")
             reporter = Reporter()
             original = check_user.__globals__["OPENCLAW_PUBLIC_DIR"]

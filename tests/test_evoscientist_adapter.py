@@ -44,6 +44,28 @@ class EvoScientistAdapterTests(unittest.TestCase):
             nginx_container_name="openclaw-nginx",
         )
 
+    def test_new_ingress_path_is_outside_deleted_recycle_tree(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            self.assertEqual(
+                adapter.ingress_conf(self.INSTANCE),
+                Path(temp_dir) / "nginx" / "conf" / "evoscientist-instance-1.conf",
+            )
+            self.assertEqual(
+                adapter.legacy_ingress_conf(self.INSTANCE),
+                Path(temp_dir) / "public" / "deleted" / "evoscientist" / "instance-1.nginx.conf",
+            )
+
+    def test_existing_ingress_uses_legacy_path_only_for_compatibility(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            legacy = adapter.legacy_ingress_conf(self.INSTANCE)
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("server {}\n", encoding="utf-8")
+            self.assertEqual(adapter._existing_ingress_conf(self.INSTANCE), legacy)
+            self.assertEqual(adapter.ingress_conf(self.INSTANCE).parent, root / "nginx" / "conf")
+
     def test_restart_restarts_main_then_proxy(self):
         with TemporaryDirectory() as temp_dir:
             adapter = self.make_adapter(Path(temp_dir))
@@ -239,7 +261,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 commands,
             )
             self.assertFalse(any("docker compose" in " ".join(command) for command in commands))
-            config_file = root / "public" / "deleted" / "evoscientist" / "instance-1.nginx.conf"
+            config_file = root / "nginx" / "conf" / "evoscientist-instance-1.conf"
             config_text = config_file.read_text(encoding="utf-8")
             self.assertIn("zone evosci_ui_40062 64k;", config_text)
             self.assertIn("zone evosci_api_40062 64k;", config_text)

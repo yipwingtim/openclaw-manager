@@ -66,6 +66,25 @@ reload and is not restarted by this migration. It does not attach tenant
 application containers to `manager-net`, modify Hermes authentication files,
 or change the database schema.
 
+EvoScientist ingress configuration uses the following lifecycle paths:
+
+- Active and stopped instances: `NGINX_USERS_CONF_DIR/evoscientist-<public_id>.conf`.
+  Stopped status is represented by the instance/container state; the file is not
+  moved to the recycle tree because the ingress container bind-mounts this file.
+- Deleted instances: `OPENCLAW_PUBLIC_DIR/deleted/evoscientist/<public_id>/`,
+  containing recycle data only.
+- Historical compatibility: `deleted/evoscientist/<public_id>.nginx.conf` is
+  read only by migration and consistency checks. New instances never write or
+  resolve their ingress from this path.
+
+When a running historical instance is migrated, the script writes the canonical
+file, recreates that instance's ingress container with the canonical bind mount,
+validates its network and Nginx configuration, then removes the legacy file and
+updates `instances.nginx_conf_path`. Any failure restores the legacy file and
+recreates the ingress using the old mount. Stopped instances are migrated without
+starting them. If both paths exist, migration stops with an explicit conflict
+instead of guessing which file is authoritative.
+
 After application, run:
 
 ```bash

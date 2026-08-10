@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY user_app.py .
 COPY admin_app.py .
+COPY instance_auth_app.py .
 COPY web_common.py .
 COPY auth_providers.py .
 COPY product_capabilities.py .

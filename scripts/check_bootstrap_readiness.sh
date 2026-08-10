@@ -283,6 +283,7 @@ check_containerd_paths
 
 check_network agent-net
 check_network manager-net
+check_network instance-auth-net
 
 echo "[SUMMARY] missing=$MISSING warnings=$WARNINGS"
 

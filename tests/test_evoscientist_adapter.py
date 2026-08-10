@@ -28,6 +28,13 @@ class EvoScientistAdapterTests(unittest.TestCase):
         "port": 40062,
     }
 
+    def setUp(self):
+        self.public_host = patch.dict(os.environ, {"PUBLIC_HOST": "manager.example.test"})
+        self.public_host.start()
+
+    def tearDown(self):
+        self.public_host.stop()
+
     def make_adapter(self, root):
         return EvoScientistDockerAdapter(
             manager_dir=root,
@@ -223,26 +230,34 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 code, output = adapter.configure_ingress(self.INSTANCE)
 
             network = adapter.tenant_network(self.INSTANCE)
-            self.assertEqual((code, output), (0, "ok"))
+            self.assertEqual((code, output), (0, "ok\nok"))
             ingress_run = next(command for command in commands if command[:4] == ["docker", "run", "-d", "--name"])
             self.assertIn(network, ingress_run)
             self.assertIn("40062:443", ingress_run)
+            self.assertIn(
+                ["docker", "network", "connect", "instance-auth-net", "evoscientist_alice-ingress"],
+                commands,
+            )
             self.assertFalse(any("docker compose" in " ".join(command) for command in commands))
             config_file = root / "public" / "deleted" / "evoscientist" / "instance-1.nginx.conf"
             config_text = config_file.read_text(encoding="utf-8")
             self.assertIn("zone evosci_ui_40062 64k;", config_text)
             self.assertIn("zone evosci_api_40062 64k;", config_text)
             self.assertIn("listen 443 ssl;", config_text)
+            self.assertIn("auth_request /_instance_auth;", config_text)
+            self.assertIn("upstream instance_auth_instance_1 {", config_text)
+            self.assertIn("openclaw-instance-auth-proxy:8084 resolve;", config_text)
+            self.assertNotIn('auth_basic "OpenClaw Login";', config_text)
             self.assertIn(
-                'location /api/memory { proxy_pass http://evosci_ui_40062; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin ""; }',
+                'location /api/memory { auth_request /_instance_auth; proxy_pass http://evosci_ui_40062; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin ""; }',
                 config_text,
             )
             self.assertIn(
-                'location /api/workspace { proxy_pass http://evosci_ui_40062; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin ""; }',
+                'location /api/workspace { auth_request /_instance_auth; proxy_pass http://evosci_ui_40062; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin ""; }',
                 config_text,
             )
             self.assertIn(
-                'location /api/skills { proxy_pass http://evosci_ui_40062; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin ""; }',
+                'location /api/skills { auth_request /_instance_auth; proxy_pass http://evosci_ui_40062; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin ""; }',
                 config_text,
             )
             self.assertNotIn("listen 40062 ssl;", config_text)

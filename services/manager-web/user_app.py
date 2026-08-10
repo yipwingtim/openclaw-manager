@@ -181,6 +181,24 @@ def instance_detail(instance_public_id):
     )
 
 
+@app.get("/instances/<instance_public_id>/open")
+def open_instance(instance_public_id):
+    current = web_common.actor()
+    if not current:
+        return redirect(url_for("login", instance=instance_public_id))
+    try:
+        instance = control_client.get_instance_entry(
+            current["public_id"], instance_public_id
+        )
+    except control_client.ControlError:
+        return render_template("error.html", message="Forbidden"), 403
+    if not instance.get("access_url"):
+        return render_template(
+            "error.html", message="Instance access URL is unavailable."
+        ), 404
+    return redirect(instance["access_url"])
+
+
 @app.post("/instances/<instance_public_id>/members")
 def add_member(instance_public_id):
     current = web_common.actor()

@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,8 @@ LOCAL_AUTH_ENABLED = os.environ.get(
     "MANAGER_LOCAL_AUTH_ENABLED", "false"
 ).lower() in {"1", "true", "yes", "on"}
 COOKIE_NAME = "openclaw_manager_session"
+INSTANCE_RETURN_COOKIE = "openclaw_manager_instance_return"
+INSTANCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 COOKIE_SECURE = os.environ.get("MANAGER_COOKIE_SECURE", "true").lower() not in {
     "0", "false", "no"
 }
@@ -106,18 +109,34 @@ def external_callback(app):
         )
     except Exception:
         return render_template("error.html", message="External authentication failed."), 401
-    response = app.make_response(redirect("/admin" if user["role"] == "admin" else url_for("index")))
+    instance_id = request.cookies.get(INSTANCE_RETURN_COOKIE, "")
+    destination = (
+        url_for("open_instance", instance_public_id=instance_id)
+        if INSTANCE_ID_RE.fullmatch(instance_id)
+        else "/admin" if user["role"] == "admin" else url_for("index")
+    )
+    response = app.make_response(redirect(destination))
     response.set_cookie(
         COOKIE_NAME, raw_token, secure=COOKIE_SECURE, httponly=True,
         samesite="Lax", max_age=SESSION_HOURS * 3600,
     )
+    response.delete_cookie(INSTANCE_RETURN_COOKIE)
     return response
 
 
 def login_page(app, action="/login"):
+    instance_id = request.args.get("instance", "")
+    if instance_id and not INSTANCE_ID_RE.fullmatch(instance_id):
+        return render_template("error.html", message="Invalid instance return target."), 400
     if external_auth_enabled() and not local_auth_enabled():
         client, config = external_client(app)
-        return client.authorize_redirect(config["redirect_uri"])
+        response = app.make_response(client.authorize_redirect(config["redirect_uri"]))
+        if instance_id:
+            response.set_cookie(
+                INSTANCE_RETURN_COOKIE, instance_id, secure=COOKIE_SECURE,
+                httponly=True, samesite="Lax", max_age=600,
+            )
+        return response
     login_csrf = secrets.token_urlsafe(32)
     response = render_template(
         "login.html", error="", login_csrf=login_csrf, login_action=action,
@@ -128,6 +147,11 @@ def login_page(app, action="/login"):
         "openclaw_manager_login_csrf", login_csrf, secure=COOKIE_SECURE,
         httponly=True, samesite="Lax", max_age=600,
     )
+    if instance_id:
+        response.set_cookie(
+            INSTANCE_RETURN_COOKIE, instance_id, secure=COOKIE_SECURE,
+            httponly=True, samesite="Lax", max_age=600,
+        )
     return response
 
 
@@ -160,12 +184,19 @@ def local_login(app, login_action="/login"):
             login_csrf=cookie_csrf, login_action=login_action,
             external_login_url="/auth/uis/login" if external_auth_enabled() else "",
         ), 401
-    response = app.make_response(redirect(url_for("index")))
+    instance_id = request.cookies.get(INSTANCE_RETURN_COOKIE, "")
+    destination = (
+        url_for("open_instance", instance_public_id=instance_id)
+        if INSTANCE_ID_RE.fullmatch(instance_id)
+        else url_for("index")
+    )
+    response = app.make_response(redirect(destination))
     response.set_cookie(
         COOKIE_NAME, raw_token, secure=COOKIE_SECURE, httponly=True,
         samesite="Lax", max_age=SESSION_HOURS * 3600,
     )
     response.delete_cookie("openclaw_manager_login_csrf")
+    response.delete_cookie(INSTANCE_RETURN_COOKIE)
     return response
 
 

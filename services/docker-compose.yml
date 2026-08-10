@@ -115,6 +115,25 @@ services:
     networks:
       - manager-net
 
+  instance-auth-proxy:
+    build: ./manager-web
+    container_name: openclaw-instance-auth-proxy
+    restart: unless-stopped
+    depends_on:
+      manager-control:
+        condition: service_healthy
+    env_file:
+      - ../config/openclaw-manager.env
+    command: ["python", "instance_auth_app.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8084/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - manager-net
+      - instance-auth-net
+
   pdf-extract-text:
     build: ./pdf-extract-text
     container_name: pdf-extract-text
@@ -137,4 +156,6 @@ services:
 
 networks:
   manager-net:
+    external: true
+  instance-auth-net:
     external: true

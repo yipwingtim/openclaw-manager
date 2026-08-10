@@ -141,6 +141,13 @@ def config_path(instance):
     return active if active.is_file() else disabled
 
 
+def needs_path_migration(instance, path):
+    return (
+        instance["product"] == "evoscientist"
+        and path == PUBLIC_DIR / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
+    )
+
+
 def reload_nginx(container):
     code, output = run(["docker", "exec", container, "nginx", "-t"])
     if code != 0:
@@ -375,7 +382,7 @@ def main():
         except ValueError as exc:
             print(f"[ERROR] {path}: {exc}")
             continue
-        if changed != path.read_text(encoding="utf-8"):
+        if changed != path.read_text(encoding="utf-8") or needs_path_migration(instance, path):
             pending.append(instance)
             print(f"[PLAN] {instance['product']} {instance['public_id']}: {path}")
     if not args.apply:

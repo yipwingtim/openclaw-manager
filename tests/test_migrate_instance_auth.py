@@ -96,6 +96,87 @@ class MigrateInstanceAuthTests(unittest.TestCase):
                 ["docker", "network", "disconnect", "instance-auth-net", "evoscientist_alice-ingress"],
                 commands,
             )
+            self.assertGreaterEqual(
+                commands.count(["docker", "restart", "evoscientist_alice-ingress"]), 2
+            )
+
+    def test_apply_restarts_running_evoscientist_ingress_and_verifies_state(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.module.PUBLIC_DIR = root
+            path = root / "deleted" / "evoscientist" / "instance-1.nginx.conf"
+            path.parent.mkdir(parents=True)
+            path.write_text("server {\n    location / { proxy_pass http://evo; }\n}\n", encoding="utf-8")
+            instance = {
+                "public_id": "instance-1", "product": "evoscientist",
+                "runtime_identifier": "evoscientist_alice", "status": "active",
+            }
+            commands = []
+
+            def run(command):
+                commands.append(command)
+                if command[:2] == ["docker", "inspect"] and "State.Status" not in " ".join(command):
+                    return 0, "true"
+                if command[:2] == ["docker", "inspect"]:
+                    return 0, "running|tenant-net"
+                return 0, "ok"
+
+            backup = root / "backup"
+            backup.mkdir()
+            with patch.object(self.module, "run", side_effect=run):
+                self.module.apply_one(instance, backup)
+
+            self.assertIn(["docker", "restart", "evoscientist_alice-ingress"], commands)
+            self.assertIn(
+                ["docker", "exec", "evoscientist_alice-ingress", "nginx", "-t"],
+                commands,
+            )
+            self.assertIn(
+                [
+                    "docker", "inspect", "--format", "{{.State.Running}}",
+                    "evoscientist_alice-ingress",
+                ],
+                commands,
+            )
+            self.assertNotIn(
+                [
+                    "docker", "network", "disconnect", "instance-auth-net",
+                    "evoscientist_alice-ingress",
+                ],
+                commands,
+            )
+            self.assertFalse(any(command[-2:] == ["nginx", "-s"] for command in commands))
+
+    def test_hermes_apply_keeps_shared_nginx_reload(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.module.PUBLIC_DIR = root / "public"
+            self.module.NGINX_CONF_DIR = root / "nginx"
+            path = self.module.NGINX_CONF_DIR / "hermes-hermes-1.conf"
+            path.parent.mkdir(parents=True)
+            path.write_text("server {\n    location / { proxy_pass http://hermes; }\n}\n", encoding="utf-8")
+            instance = {
+                "public_id": "hermes-1", "product": "hermes",
+                "runtime_identifier": "hermes", "status": "active",
+            }
+            commands = []
+
+            def run(command):
+                commands.append(command)
+                if command[:2] == ["docker", "inspect"]:
+                    return 0, "tenant-net\n"
+                return 0, "ok"
+
+            backup = root / "backup"
+            backup.mkdir()
+            with patch.object(self.module, "run", side_effect=run):
+                self.module.apply_one(instance, backup)
+
+            self.assertNotIn(["docker", "restart", "openclaw-nginx"], commands)
+            self.assertIn(
+                ["docker", "exec", "openclaw-nginx", "nginx", "-s", "reload"],
+                commands,
+            )
 
     def test_apply_preflight_failure_makes_no_changes(self):
         with TemporaryDirectory() as temp_dir:

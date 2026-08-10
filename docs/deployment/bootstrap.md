@@ -276,6 +276,7 @@ Example commands:
 
 ```bash
 cd /data/docker/nginx/compose
+# 仅用于首次初始化 Nginx；生产环境后续重建必须通过 openclaw-manager 部署脚本。
 docker compose up -d
 docker exec openclaw-nginx nginx -t
 docker exec openclaw-nginx nginx -s reload
@@ -286,6 +287,13 @@ bash scripts/deploy_services.sh
 cd /data/docker/openclaw-manager
 ./scripts/check_metadata_consistency.py
 ```
+
+生产环境禁止手工执行 `docker compose up`、`docker compose up --build` 或
+`docker compose up -d --force-recreate` 来重建共享的 `openclaw-nginx`、
+`openclaw-model-proxy` 或 Manager 服务；请使用
+`bash scripts/deploy_services.sh [service...]`，以便在 Compose 重建后恢复
+动态租户网络并执行后续校验。紧急手工重建后必须运行
+`bash scripts/check_runtime_security.sh`。
 
 ## Notes | 注意事项
 

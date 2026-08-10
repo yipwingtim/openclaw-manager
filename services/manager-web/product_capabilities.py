@@ -20,6 +20,24 @@ PRODUCT_CAPABILITIES = {
     ),
 }
 
+INSTANCE_AUTH_CONTRACTS = {
+    "openclaw": {
+        "edge_authorization": "uis",
+        "product_auth": "token",
+        "identity_header": None,
+    },
+    "hermes": {
+        "edge_authorization": "uis",
+        "product_auth": "session",
+        "identity_header": None,
+    },
+    "evoscientist": {
+        "edge_authorization": "uis",
+        "product_auth": "none",
+        "identity_header": None,
+    },
+}
+
 EXECUTION_ACTION_CAPABILITIES = {
     "instance.create": "create",
     "instance.start": "start",
@@ -45,6 +63,13 @@ def product_capabilities(product):
 
 def product_supports(product, capability):
     return capability in product_capabilities(product)
+
+
+def product_auth_contract(product):
+    contract = INSTANCE_AUTH_CONTRACTS.get(product)
+    if contract is None:
+        return None
+    return dict(contract)
 
 
 def execution_action_capability(action):

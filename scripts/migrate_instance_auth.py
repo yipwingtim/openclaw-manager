@@ -145,6 +145,61 @@ def reload_nginx(container):
         raise RuntimeError(output or f"{container}: nginx reload failed")
 
 
+def instance_container(instance):
+    if instance["product"] == "evoscientist":
+        return f"{instance['runtime_identifier']}-ingress"
+    return os.environ.get("NGINX_CONTAINER_NAME", "openclaw-nginx")
+
+
+def preflight_apply(pending):
+    errors = []
+    backup_parent = PUBLIC_DIR / ".manager-auth-backups"
+    existing_backup_parent = backup_parent
+    while not existing_backup_parent.exists():
+        existing_backup_parent = existing_backup_parent.parent
+    if not os.access(existing_backup_parent, os.W_OK | os.X_OK):
+        errors.append(f"backup directory is not writable: {existing_backup_parent}")
+
+    for instance in pending:
+        path = config_path(instance)
+        if not os.access(path, os.R_OK | os.W_OK):
+            errors.append(f"config is not readable and writable: {path}")
+        if not os.access(path.parent, os.W_OK | os.X_OK):
+            errors.append(f"config directory is not writable: {path.parent}")
+
+        container = instance_container(instance)
+        code, output = run(["docker", "inspect", container])
+        if code != 0 and not (
+            instance["product"] == "evoscientist"
+            and instance["status"] == "stopped"
+        ):
+            errors.append(output or f"container is not available: {container}")
+
+    if any(instance["product"] == "hermes" for instance in pending):
+        if not NGINX_COMPOSE_FILE.is_file():
+            errors.append(f"Nginx compose file is missing: {NGINX_COMPOSE_FILE}")
+        else:
+            if not os.access(NGINX_COMPOSE_FILE, os.R_OK | os.W_OK):
+                errors.append(
+                    f"Nginx compose file is not readable and writable: {NGINX_COMPOSE_FILE}"
+                )
+            if not os.access(NGINX_COMPOSE_FILE.parent, os.W_OK | os.X_OK):
+                errors.append(
+                    f"Nginx compose directory is not writable: {NGINX_COMPOSE_FILE.parent}"
+                )
+            try:
+                ensure_compose_network(NGINX_COMPOSE_FILE.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                errors.append(f"Nginx compose cannot be migrated: {exc}")
+
+    if errors:
+        raise RuntimeError(
+            "Migration preflight failed before any changes:\n- "
+            + "\n- ".join(errors)
+            + "\nRun this command through manager-executor."
+        )
+
+
 def apply_one(instance, backup_dir):
     path = config_path(instance)
     if not path.is_file():
@@ -158,11 +213,7 @@ def apply_one(instance, backup_dir):
     temporary = path.with_name(f".{path.name}.instance-auth.tmp")
     temporary.write_text(new, encoding="utf-8")
     temporary.replace(path)
-    container = (
-        f"{instance['runtime_identifier']}-ingress"
-        if instance["product"] == "evoscientist"
-        else os.environ.get("NGINX_CONTAINER_NAME", "openclaw-nginx")
-    )
+    container = instance_container(instance)
     connected = False
     try:
         if instance["product"] == "evoscientist":
@@ -239,6 +290,10 @@ def main():
     code, output = run(["docker", "network", "inspect", AUTH_NETWORK])
     if code != 0:
         raise SystemExit(output or f"{AUTH_NETWORK} is not available")
+    try:
+        preflight_apply(pending)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     backup_dir = PUBLIC_DIR / ".manager-auth-backups" / f"instance-auth-{stamp}"
     backup_dir.mkdir(parents=True, exist_ok=False)

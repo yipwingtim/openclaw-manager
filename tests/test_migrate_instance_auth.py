@@ -3,6 +3,7 @@
 import importlib.util
 import os
 import sqlite3
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -95,6 +96,63 @@ class MigrateInstanceAuthTests(unittest.TestCase):
                 ["docker", "network", "disconnect", "instance-auth-net", "evoscientist_alice-ingress"],
                 commands,
             )
+
+    def test_apply_preflight_failure_makes_no_changes(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.module.PUBLIC_DIR = root / "public"
+            self.module.NGINX_CONF_DIR = root / "nginx"
+            self.module.NGINX_COMPOSE_FILE = root / "compose" / "docker-compose.yml"
+            evo = self.module.PUBLIC_DIR / "deleted" / "evoscientist" / "evo.nginx.conf"
+            hermes = self.module.NGINX_CONF_DIR / "hermes-hermes.conf"
+            evo.parent.mkdir(parents=True)
+            hermes.parent.mkdir(parents=True)
+            self.module.NGINX_COMPOSE_FILE.parent.mkdir(parents=True)
+            config = "server {\n    location / { proxy_pass http://agent; }\n}\n"
+            compose = (
+                "services:\n  nginx:\n    networks:\n      - manager-net\n"
+                "networks:\n  manager-net:\n    external: true\n"
+            )
+            evo.write_text(config, encoding="utf-8")
+            hermes.write_text(config, encoding="utf-8")
+            self.module.NGINX_COMPOSE_FILE.write_text(compose, encoding="utf-8")
+            rows = [
+                {
+                    "public_id": "evo", "product": "evoscientist",
+                    "runtime_identifier": "evoscientist_evo", "status": "active",
+                },
+                {
+                    "public_id": "hermes", "product": "hermes",
+                    "runtime_identifier": "hermes", "status": "active",
+                },
+            ]
+            commands = []
+
+            def run(command):
+                commands.append(command)
+                return 0, "ok"
+
+            real_access = os.access
+
+            def access(path, mode):
+                return False if Path(path) == evo else real_access(path, mode)
+
+            with (
+                patch.object(self.module, "instances", return_value=rows),
+                patch.object(self.module, "run", side_effect=run),
+                patch.object(self.module.os, "access", side_effect=access),
+                patch.object(sys, "argv", [str(SCRIPT), "--apply"]),
+                self.assertRaisesRegex(SystemExit, "Run this command through manager-executor"),
+            ):
+                self.module.main()
+
+            self.assertEqual(evo.read_text(encoding="utf-8"), config)
+            self.assertEqual(hermes.read_text(encoding="utf-8"), config)
+            self.assertEqual(self.module.NGINX_COMPOSE_FILE.read_text(encoding="utf-8"), compose)
+            self.assertFalse((self.module.PUBLIC_DIR / ".manager-auth-backups").exists())
+            self.assertFalse(any(command[:2] == ["docker", "compose"] for command in commands))
+            self.assertFalse(any(command[:3] == ["docker", "network", "connect"] for command in commands))
+            self.assertFalse(any(command[-3:] == ["nginx", "-s", "reload"] for command in commands))
 
 
 if __name__ == "__main__":

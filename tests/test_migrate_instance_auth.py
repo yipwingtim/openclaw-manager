@@ -42,6 +42,29 @@ class MigrateInstanceAuthTests(unittest.TestCase):
         self.assertIn("/login?instance=instance-1", updated)
         self.assertNotIn("auth_basic_user_file", updated)
 
+    def test_legacy_evoscientist_config_is_planned_even_when_auth_is_current(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.module.PUBLIC_DIR = root / "public"
+            self.module.NGINX_CONF_DIR = root / "nginx" / "conf"
+            legacy = self.module.PUBLIC_DIR / "deleted" / "evoscientist" / "instance-1.nginx.conf"
+            legacy.parent.mkdir(parents=True)
+            current = (
+                "upstream instance_auth_instance_1 { server openclaw-instance-auth-proxy:8084; }\n"
+                "server {\n    location = /_instance_auth { internal; }\n"
+                "    location / { auth_request /_instance_auth; proxy_pass http://evo; }\n}\n"
+            )
+            legacy.write_text(current, encoding="utf-8")
+            instance = {
+                "public_id": "instance-1", "product": "evoscientist",
+                "runtime_identifier": "evoscientist_alice", "status": "active",
+            }
+            path = self.module.config_path(instance)
+            changed = self.module.migrate_config(current, "instance-1", "evoscientist")
+            self.assertEqual(path, legacy)
+            self.assertEqual(changed, current)
+            self.assertTrue(self.module.needs_path_migration(instance, path))
+
     def test_hermes_migration_keeps_dashboard_auth_out_of_scope(self):
         old = (
             "upstream hermes_backend_39119 { server hermes:9119; }\n"

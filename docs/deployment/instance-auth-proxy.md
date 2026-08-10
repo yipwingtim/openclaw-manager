@@ -57,9 +57,14 @@ docker compose exec manager-executor \
 The apply step first checks every target and dependency before writing anything,
 then backs up changed ingress files, updates the shared Nginx Compose
 network for Hermes, attaches only EvoScientist ingress containers to
-`instance-auth-net`, validates Nginx, and rolls back a failed instance. It does
-not attach tenant application containers to `manager-net`, modify Hermes
-authentication files, or change the database schema.
+`instance-auth-net`, validates Nginx, and rolls back a failed instance. For
+EvoScientist, the ingress container is restarted after its single-file bind
+mount configuration is replaced so Docker remounts the new file inode; Docker
+restart preserves the container's existing tenant and `instance-auth-net`
+attachments. Hermes continues to use `nginx -t` followed by a shared Nginx
+reload and is not restarted by this migration. It does not attach tenant
+application containers to `manager-net`, modify Hermes authentication files,
+or change the database schema.
 
 After application, run:
 

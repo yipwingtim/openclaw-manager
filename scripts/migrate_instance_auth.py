@@ -145,6 +145,27 @@ def reload_nginx(container):
         raise RuntimeError(output or f"{container}: nginx reload failed")
 
 
+def restart_nginx(container):
+    code, output = run(["docker", "restart", container])
+    if code != 0:
+        raise RuntimeError(output or f"{container}: restart failed")
+    code, output = run(["docker", "exec", container, "nginx", "-t"])
+    if code != 0:
+        raise RuntimeError(output or f"{container}: nginx -t failed")
+    code, output = run([
+        "docker", "inspect", "--format", "{{.State.Running}}", container,
+    ])
+    if code != 0 or output.strip() != "true":
+        raise RuntimeError(output or f"{container}: container is not running")
+
+
+def refresh_nginx(instance, container):
+    if instance["product"] == "evoscientist":
+        restart_nginx(container)
+    else:
+        reload_nginx(container)
+
+
 def instance_container(instance):
     if instance["product"] == "evoscientist":
         return f"{instance['runtime_identifier']}-ingress"
@@ -247,14 +268,14 @@ def apply_one(instance, backup_dir):
                 if code != 0:
                     raise RuntimeError(output or f"could not connect {container}")
                 connected = True
-        reload_nginx(container)
+        refresh_nginx(instance, container)
         return "updated"
     except Exception:
         path.write_text(old, encoding="utf-8")
         if connected:
             run(["docker", "network", "disconnect", AUTH_NETWORK, container])
         try:
-            reload_nginx(container)
+            refresh_nginx(instance, container)
         except Exception:
             pass
         raise

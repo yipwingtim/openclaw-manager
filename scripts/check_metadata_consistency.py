@@ -205,6 +205,7 @@ def detect_nginx_conf(path):
         "admin_htpasswd": None,
         "root_proxy": None,
         "dynamic_upstream": False,
+        "instance_auth": False,
     }
     if not path.is_file():
         return result
@@ -259,6 +260,10 @@ def detect_nginx_conf(path):
         and re.search(r"proxy_pass\s+http://[A-Za-z0-9_.-]+(?:[/;])", text)
     )
     result["dynamic_upstream"] = bool(generic_dynamic_user or variable_dynamic or generic_dynamic)
+    result["instance_auth"] = bool(
+        "auth_request /_instance_auth;" in text
+        and "openclaw-instance-auth-proxy:8084 resolve;" in text
+    )
     if root_block is not None:
         if "auth_basic off;" in root_block:
             result["basic_auth_enabled"] = False
@@ -382,6 +387,11 @@ def check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_de
             "nginx_upstream_not_dynamic",
             f"{user_id}: nginx upstream does not use runtime Docker DNS",
         )
+    if os.environ.get("MANAGER_CONTROL_INSTANCE_AUTH_TOKEN", "").strip() and not nginx["instance_auth"]:
+        reporter.error(
+            "instance_auth_missing",
+            f"{user_id}: EvoScientist ingress lacks UIS authorization; run scripts/migrate_instance_auth.py --apply",
+        )
 
     if db_row is None:
         reporter.warn("metadata_missing_user", f"{user_id}: EvoScientist user dir exists but metadata has no instance row")
@@ -448,6 +458,13 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
                 "metadata_container_mismatch",
                 f"{user_id}: metadata container={db_row.get('container_name')} expected={expected_container}",
             )
+        if os.environ.get("MANAGER_CONTROL_INSTANCE_AUTH_TOKEN", "").strip():
+            hermes_conf = NGINX_USERS_CONF_DIR / f"hermes-{db_row['public_id']}.conf"
+            if not detect_nginx_conf(hermes_conf)["instance_auth"]:
+                reporter.error(
+                    "instance_auth_missing",
+                    f"{user_id}: Hermes ingress lacks UIS authorization; run scripts/migrate_instance_auth.py --apply",
+                )
         return
     if product == "evoscientist":
         check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_deleted=is_deleted)

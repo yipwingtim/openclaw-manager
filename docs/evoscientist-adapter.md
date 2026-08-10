@@ -25,6 +25,10 @@ The proxy shares the main container network namespace. Lifecycle ordering is the
 - Start and restart: main, then proxy.
 - Stop: proxy, then main.
 
+The dedicated ingress also joins `instance-auth-net` and requires the Manager
+UIS session plus instance owner/member authorization. It does not attach the
+EvoScientist application containers to `manager-net`.
+
 ## Register An Existing Instance
 
 Load the manager environment and register the existing instance:

@@ -13,6 +13,7 @@ class WebServiceSplitTests(unittest.TestCase):
 
         self.assertIn("  manager-user-web:\n", compose)
         self.assertIn("  manager-admin-web:\n", compose)
+        self.assertIn("  instance-auth-proxy:\n", compose)
         self.assertNotIn("  manager-web:\n", compose)
         self.assertNotIn("container_name: openclaw-manager-web", compose)
         self.assertNotIn("dockerfile: Dockerfile.legacy", compose)

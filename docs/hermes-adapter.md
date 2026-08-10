@@ -13,8 +13,9 @@ support the legacy two-container topology.
   exactly one dedicated Docker network.
 - `openclaw-nginx` publishes one external TLS port per instance and joins that
   network persistently through its Compose configuration.
-- Nginx provides TLS and routing only. Hermes Dashboard authentication remains
-  responsible for username/password, Nous OAuth, or self-hosted OIDC. The
+- Nginx requires Manager UIS instance authorization before routing. Hermes
+  Dashboard authentication remains as a second layer for username/password,
+  Nous OAuth, or self-hosted OIDC. The
   OpenAI-compatible API on `8642` uses a separate `API_SERVER_KEY`.
 - Creation runs `gateway run` with `HERMES_DASHBOARD=1`, mounts a dedicated
   instance directory at `/opt/data`, and publishes no host ports directly.

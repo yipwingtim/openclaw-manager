@@ -22,6 +22,13 @@ class HermesAdapterTests(unittest.TestCase):
         "runtime_identifier": "hermes-alice",
     }
 
+    def setUp(self):
+        self.public_host = patch.dict(os.environ, {"PUBLIC_HOST": "manager.example.test"})
+        self.public_host.start()
+
+    def tearDown(self):
+        self.public_host.stop()
+
     def make_adapter(self, root):
         return HermesDockerAdapter(
             manager_dir=root,
@@ -268,6 +275,9 @@ class HermesAdapterTests(unittest.TestCase):
             compose_text = compose.read_text(encoding="utf-8")
             self.assertIn('      - "39119:39119"', compose_text)
             self.assertIn("      - hermes-net", compose_text)
+            self.assertIn("      - instance-auth-net", compose_text)
+            self.assertIn("auth_request /_instance_auth;", nginx)
+            self.assertIn("openclaw-instance-auth-proxy:8084 resolve;", nginx)
             self.assertEqual(run_command.call_count, 2)
             reconnect = run_command.call_args_list[1].args[0]
             self.assertIn("connect_shared_services_to_tenant_networks", reconnect[2])

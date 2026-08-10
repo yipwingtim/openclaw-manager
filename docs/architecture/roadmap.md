@@ -125,9 +125,11 @@ for completing the multi-product control plane.
 - Plan wildcard DNS/TLS, access authorization, migration, and rollback before
   moving existing `LegacyPortIngress` instances to subdomains.
 - 迁移既有 `LegacyPortIngress` 实例前，先完成通配符 DNS/TLS、访问授权、迁移与回滚方案。
-- Remove per-instance Basic Auth only after gateway authorization is deployed
-  and verified.
-- 仅在网关授权上线并验证后，逐步取消实例 Basic Auth。
+- EvoScientist dedicated-port ingress uses the UIS instance authorization proxy;
+  Hermes keeps its built-in authentication as a second layer until upstream
+  support for disabling it is verified.
+- EvoScientist 独立端口入口使用 UIS 实例授权代理；Hermes 在确认官方支持关闭认证前，
+  继续保留内置认证作为第二层。
 
 ## Ongoing Rules | 持续规则
 

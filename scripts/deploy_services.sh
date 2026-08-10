@@ -16,6 +16,10 @@ source "$SCRIPT_DIR/lib_tenant_network.sh"
 
 echo "==> Deploying services..."
 
+if ! docker network inspect instance-auth-net >/dev/null 2>&1; then
+  docker network create instance-auth-net >/dev/null
+fi
+
 cd "$MANAGER_DIR/services"
 services=("$@")
 if [ "${#services[@]}" -gt 0 ]; then

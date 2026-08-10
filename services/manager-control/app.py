@@ -36,6 +36,7 @@ TOKEN_ENV = {
     "manager-admin-web": "MANAGER_CONTROL_ADMIN_WEB_TOKEN",
     "manager-executor": "MANAGER_CONTROL_EXECUTOR_TOKEN",
 }
+INSTANCE_AUTH_TOKEN_ENV = "MANAGER_CONTROL_INSTANCE_AUTH_TOKEN"
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-fA-F]{64})$")
@@ -112,6 +113,19 @@ def portal_instance(instance):
         "created_at": instance["created_at"],
         "updated_at": instance["updated_at"],
     }
+
+
+def instance_for_entry(instance_public_id, user):
+    if user["role"] == "admin":
+        instance = metadata_store.get_instance_by_public_id(
+            instance_public_id, db_file=DB_FILE
+        )
+        if instance is not None:
+            instance["access_role"] = "admin"
+        return instance
+    return metadata_store.get_instance_for_user(
+        instance_public_id, user["public_id"], db_file=DB_FILE
+    )
 
 
 def admin_metadata_instance(instance):
@@ -345,6 +359,20 @@ def require_services(*allowed_services):
     return decorator
 
 
+def require_instance_auth(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        expected = os.environ.get(INSTANCE_AUTH_TOKEN_ENV, "").strip()
+        provided = bearer_token()
+        if not expected:
+            return jsonify({"error": "instance auth token is not configured"}), 503
+        if not provided or not hmac.compare_digest(provided, expected):
+            return jsonify({"error": "invalid service token"}), 401
+        g.source_service = "instance-auth-proxy"
+        return view(*args, **kwargs)
+    return wrapped
+
+
 @app.get("/health")
 def health():
     tokens_valid = service_tokens_valid(configured_tokens())
@@ -389,6 +417,40 @@ def resolve_auth_session():
     if g.source_service == "manager-admin-web" and user["role"] != "admin":
         return jsonify({"error": "administrator role is required"}), 403
     return jsonify({"user": authenticated_user_payload(user)})
+
+
+@app.get("/internal/v1/instance-access/<instance_public_id>")
+@require_instance_auth
+def authorize_instance_access(instance_public_id):
+    token_hash = request.args.get("token_hash", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", token_hash):
+        return jsonify({"error": "valid token_hash is required"}), 400
+    user = metadata_store.get_session(token_hash, db_file=DB_FILE)
+    required_provider = os.environ.get("MANAGER_AUTH_PROVIDER", "").strip()
+    if (
+        user is None
+        or user["status"] != "active"
+        or required_provider in {"", "local", "nginx-basic"}
+        or user["provider"] != required_provider
+    ):
+        return jsonify({"error": "active session not found"}), 401
+    instance = instance_for_entry(instance_public_id, user)
+    if instance is None or instance["status"] not in {"active", "stopped"}:
+        return jsonify({"error": "instance access is forbidden"}), 403
+    return jsonify({"allowed": True})
+
+
+@app.get("/internal/v1/instances/<instance_public_id>/entry")
+@require_services("manager-user-web")
+def get_instance_entry(instance_public_id):
+    actor_id = actor_public_id()
+    user = metadata_store.get_user_by_public_id(actor_id, db_file=DB_FILE) if actor_id else None
+    if user is None or user["status"] != "active":
+        return jsonify({"error": "active actor is required"}), 403
+    instance = instance_for_entry(instance_public_id, user)
+    if instance is None or instance["status"] not in {"active", "stopped"}:
+        return jsonify({"error": "instance access is forbidden"}), 403
+    return jsonify({"instance": portal_instance(instance)})
 
 
 @app.delete("/internal/v1/auth/session")

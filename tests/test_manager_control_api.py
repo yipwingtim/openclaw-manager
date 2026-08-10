@@ -105,6 +105,8 @@ class ManagerControlApiTests(unittest.TestCase):
                 "MANAGER_CONTROL_USER_WEB_TOKEN": "user-token",
                 "MANAGER_CONTROL_ADMIN_WEB_TOKEN": "admin-token",
                 "MANAGER_CONTROL_EXECUTOR_TOKEN": "executor-token",
+                "MANAGER_CONTROL_INSTANCE_AUTH_TOKEN": "instance-auth-token",
+                "MANAGER_AUTH_PROVIDER": "campus-uis",
             },
             clear=False,
         )
@@ -168,6 +170,86 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(resolved.get_json()["user"]["username"], "alice")
         self.assertEqual(denied_status, 403)
         self.assertEqual(denied.get_json(), {"error": "administrator role is required"})
+
+    def test_instance_auth_resolves_session_and_enforces_membership(self):
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        self.control.metadata_store.create_session(
+            "a" * 64, self.user["id"], "campus-uis", "csrf", expires_at,
+            db_file=self.db_file,
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], legacy_user_id="alice-evo",
+            product="evoscientist", instance_name="Evo",
+            runtime_identifier="runtime-evo", status="active", db_file=self.db_file,
+        )
+        stranger = self.control.metadata_store.create_user("mallory", db_file=self.db_file)
+        self.control.metadata_store.create_session(
+            "b" * 64, stranger["id"], "campus-uis", "csrf", expires_at,
+            db_file=self.db_file,
+        )
+
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer instance-auth-token"}
+        ), patch.object(self.control.request, "args", {"token_hash": "a" * 64}):
+            allowed, allowed_status = response_parts(
+                self.control.authorize_instance_access(instance["public_id"])
+            )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer instance-auth-token"}
+        ), patch.object(self.control.request, "args", {"token_hash": "b" * 64}):
+            denied, denied_status = response_parts(
+                self.control.authorize_instance_access(instance["public_id"])
+            )
+
+        self.assertEqual(allowed_status, 200)
+        self.assertEqual(allowed.get_json(), {"allowed": True})
+        self.assertEqual(denied_status, 403)
+
+    def test_instance_auth_token_cannot_call_user_web_endpoints(self):
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer instance-auth-token"}
+        ), patch.object(self.control.request, "args", {}):
+            response, status = response_parts(self.control.resolve_auth_session())
+
+        self.assertEqual(status, 401)
+        self.assertEqual(response.get_json(), {"error": "invalid service token"})
+
+    def test_instance_auth_rejects_local_fallback_session(self):
+        self.control.metadata_store.create_session(
+            "c" * 64, self.user["id"], "local", "csrf",
+            (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            db_file=self.db_file,
+        )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer instance-auth-token"}
+        ), patch.object(self.control.request, "args", {"token_hash": "c" * 64}):
+            response, status = response_parts(
+                self.control.authorize_instance_access("instance-1")
+            )
+
+        self.assertEqual(status, 401)
+
+    def test_admin_can_resolve_instance_entry_without_membership(self):
+        owner = self.control.metadata_store.create_user("owner", db_file=self.db_file)
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=owner["public_id"], product="hermes",
+            instance_name="Hermes", runtime_identifier="hermes_owner",
+            status="active", access_url="https://manager.example.test:39119",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        with patch.object(
+            self.control.request, "headers",
+            {"Authorization": "Bearer user-token", "X-Actor-User-Public-Id": self.user["public_id"]},
+        ):
+            response, status = response_parts(
+                self.control.get_instance_entry(instance["public_id"])
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["instance"]["access_role"], "admin")
 
     def test_local_login_creates_session_without_exposing_password_hash(self):
         self.control.metadata_store.upsert_identity(

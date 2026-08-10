@@ -76,6 +76,31 @@ class OpenClawDockerAdapter:
         output = (result.stdout + "\n" + result.stderr).strip()
         return result.returncode, output
 
+    @staticmethod
+    def instance_auth_nginx(instance_public_id):
+        public_host = os.environ.get("PUBLIC_HOST", "").strip()
+        if not public_host:
+            raise ValueError("PUBLIC_HOST is required for instance authentication")
+        upstream = "instance_auth_" + re.sub(r"[^A-Za-z0-9_]", "_", instance_public_id)
+        return (
+            f"upstream {upstream} {{\n"
+            f"    zone {upstream} 64k;\n"
+            "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
+            "    server openclaw-instance-auth-proxy:8084 resolve;\n"
+            "}\n\n",
+            "    location = /_instance_auth {\n"
+            "        internal;\n"
+            f"        proxy_pass http://{upstream}/authorize/{instance_public_id};\n"
+            "        proxy_pass_request_body off;\n"
+            "        proxy_set_header Content-Length \"\";\n"
+            "        proxy_set_header Cookie $http_cookie;\n"
+            "    }\n"
+            "    error_page 401 = @instance_login;\n"
+            "    location @instance_login {\n"
+            f"        return 302 https://{public_host}:30015/login?instance={instance_public_id};\n"
+            "    }\n",
+        )
+
     def reload_nginx(self):
         test_code, test_output = self.run_command(["docker", "exec", self.nginx_container_name, "nginx", "-t"], timeout=30)
         if test_code != 0:
@@ -855,8 +880,11 @@ while True:
         cert = os.environ.get("NGINX_SSL_CERT", "/etc/nginx/certs/fullchain.pem")
         key = os.environ.get("NGINX_SSL_KEY", "/etc/nginx/certs/privkey.pem")
         try:
+            auth_upstream, auth_locations = self.instance_auth_nginx(instance["public_id"])
             conf.parent.mkdir(parents=True, exist_ok=True)
             config_text = (
+                auth_upstream
+                +
                 f"upstream evosci_ui_{port} {{\n    zone evosci_ui_{port} 64k;\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
                 f"    server {runtime_target}:4716 resolve;\n}}\n\n"
                 f"upstream evosci_api_{port} {{\n    zone evosci_api_{port} 64k;\n    resolver 127.0.0.11 valid=10s ipv6=off;\n"
@@ -864,14 +892,15 @@ while True:
                 "server {\n"
                 "    listen 443 ssl;\n    server_name _;\n"
                 f"    ssl_certificate {cert};\n    ssl_certificate_key {key};\n"
-                f'    auth_basic "OpenClaw Login";\n    auth_basic_user_file /etc/nginx/auth/users/{self.get_legacy_user_id(instance)}/.htpasswd;\n'
+                + auth_locations
+                +
                 "    location = /api/workspace/upload { proxy_pass http://evosci_ui_"
-                f"{port}; proxy_set_header Host $host:$server_port; proxy_set_header Origin \"\"; }}\n"
-                f"    location /api/memory {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
-                f"    location /api/workspace {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
-                f"    location /api/skills {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
-                f"    location /api/ {{ proxy_pass http://evosci_api_{port}/; proxy_http_version 1.1; proxy_buffering off; }}\n"
-                f"    location / {{ proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }}\n"
+                f"{port}; auth_request /_instance_auth; proxy_set_header Host $host:$server_port; proxy_set_header Origin \"\"; }}\n"
+                f"    location /api/memory {{ auth_request /_instance_auth; proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
+                f"    location /api/workspace {{ auth_request /_instance_auth; proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
+                f"    location /api/skills {{ auth_request /_instance_auth; proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_buffering off; proxy_set_header Origin \"\"; }}\n"
+                f"    location /api/ {{ auth_request /_instance_auth; proxy_pass http://evosci_api_{port}/; proxy_http_version 1.1; proxy_buffering off; }}\n"
+                f"    location / {{ auth_request /_instance_auth; proxy_pass http://evosci_ui_{port}; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"upgrade\"; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; }}\n"
                 "}\n"
             )
             config_file = self.public_dir / "deleted" / "evoscientist" / f"{instance['public_id']}.nginx.conf"
@@ -896,7 +925,16 @@ while True:
             )
             if code != 0:
                 config_file.unlink(missing_ok=True)
-            return code, output
+                return code, output
+            code, network_output = self.run_command(
+                ["docker", "network", "connect", "instance-auth-net", ingress_container],
+                timeout=30,
+            )
+            if code != 0 and "already exists" not in network_output.lower():
+                self.run_command(["docker", "rm", "-f", ingress_container], timeout=60)
+                config_file.unlink(missing_ok=True)
+                return code, network_output
+            return 0, "\n".join(part for part in (output, network_output) if part)
         except Exception as exc:
             return 1, f"EvoScientist ingress configuration failed: {exc}"
 
@@ -1540,8 +1578,10 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         cert = os.environ.get("NGINX_SSL_CERT", "/etc/nginx/ssl/fullchain.pem")
         key = os.environ.get("NGINX_SSL_KEY", "/etc/nginx/ssl/privkey.pem")
         try:
+            auth_upstream, auth_locations = self.instance_auth_nginx(public_id)
             conf.write_text(
-                f"upstream hermes_backend_{port} {{\n"
+                auth_upstream
+                + f"upstream hermes_backend_{port} {{\n"
                 f"    zone hermes_backend_{port} 64k;\n"
                 "    resolver 127.0.0.11 valid=10s ipv6=off;\n"
                 "    resolver_timeout 5s;\n"
@@ -1552,7 +1592,10 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 "    server_name _;\n"
                 f"    ssl_certificate {cert};\n"
                 f"    ssl_certificate_key {key};\n\n"
+                + auth_locations
+                +
                 "    location / {\n"
+                "        auth_request /_instance_auth;\n"
                 f"        proxy_pass http://hermes_backend_{port};\n"
                 "        proxy_http_version 1.1;\n"
                 "        proxy_set_header Upgrade $http_upgrade;\n"
@@ -1569,7 +1612,11 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             )
             compose_file.write_text(
                 self._add_ingress_to_nginx_compose(
-                    old_compose.decode("utf-8"), port, target_network
+                    self._add_ingress_to_nginx_compose(
+                        old_compose.decode("utf-8"), port, target_network
+                    ),
+                    port,
+                    "instance-auth-net",
                 ),
                 encoding="utf-8",
             )

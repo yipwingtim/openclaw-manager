@@ -17,6 +17,17 @@ load_db = CHECKER["load_db"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def test_detect_nginx_conf_reports_instance_auth(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "evo.conf"
+            path.write_text(
+                "upstream auth { server openclaw-instance-auth-proxy:8084 resolve; }\n"
+                "server { location / { auth_request /_instance_auth; proxy_pass http://evo; } }\n",
+                encoding="utf-8",
+            )
+
+            self.assertTrue(CHECKER["detect_nginx_conf"](path)["instance_auth"])
+
     def test_stopped_instance_allows_released_port(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

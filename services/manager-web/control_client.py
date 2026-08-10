@@ -75,6 +75,15 @@ def get_instance(user_public_id, instance_public_id):
     return response["instance"]
 
 
+def get_instance_entry(user_public_id, instance_public_id):
+    instance_id = urllib.parse.quote(instance_public_id, safe="")
+    response = request_json(
+        "GET", f"/internal/v1/instances/{instance_id}/entry",
+        actor_public_id=user_public_id,
+    )
+    return response["instance"]
+
+
 def list_members(user_public_id, instance_public_id):
     instance_id = urllib.parse.quote(instance_public_id, safe="")
     response = request_json(

@@ -249,6 +249,7 @@ if [ "$BOOTSTRAP_SKIP_DOCKER" = "1" ]; then
 else
   create_network "agent-net"
   create_network "manager-net"
+  create_network "instance-auth-net"
 fi
 
 init_sqlite

@@ -27,7 +27,7 @@ class UISAuthFlowTests(unittest.TestCase):
                 pass
 
         cls.request = types.SimpleNamespace(
-            cookies={}, headers={}, form={}, method="GET", path="/"
+            cookies={}, headers={}, form={}, args={}, method="GET", path="/"
         )
         flask_stub.redirect = Response
         flask_stub.render_template = lambda *args, **kwargs: ""
@@ -82,6 +82,20 @@ class UISAuthFlowTests(unittest.TestCase):
         )
         self.assertNotIn("uis-access-token", repr(payload))
         self.assertEqual(response.status_code, 302)
+
+    def test_login_accepts_only_instance_id_as_return_target(self):
+        client = Mock()
+        client.authorize_redirect.return_value = self.web_common.redirect("/uis")
+        with patch.object(self.request, "args", {"instance": "instance-123"}), patch.object(
+            self.web_common, "AUTH_PROVIDER", "campus-uis"
+        ), patch.object(
+            self.web_common, "external_client", return_value=(client, {"redirect_uri": "/callback"})
+        ):
+            response = self.web_common.login_page(self.app)
+        self.assertEqual(response.status_code, 302)
+
+        with patch.object(self.request, "args", {"instance": "https://evil.test/"}):
+            self.assertEqual(self.web_common.login_page(self.app)[1], 400)
 
     def test_passive_logout_hashes_internal_header_token(self):
         with patch.object(

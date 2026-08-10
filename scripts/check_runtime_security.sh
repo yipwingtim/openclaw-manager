@@ -137,6 +137,7 @@ NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
 MANAGER_USER_WEB_CONTAINER_NAME="${MANAGER_USER_WEB_CONTAINER_NAME:-openclaw-manager-user-web}"
 MANAGER_ADMIN_WEB_CONTAINER_NAME="${MANAGER_ADMIN_WEB_CONTAINER_NAME:-openclaw-manager-admin-web}"
 MODEL_PROXY_CONTAINER_NAME="${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
+INSTANCE_AUTH_CONTAINER_NAME="${INSTANCE_AUTH_CONTAINER_NAME:-openclaw-instance-auth-proxy}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 OPENCLAW_TENANT_NETWORK_PREFIX="${OPENCLAW_TENANT_NETWORK_PREFIX:-openclaw-user}"
 USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
@@ -200,6 +201,44 @@ else
 fi
 
 if has_cmd docker; then
+  if [ -n "${MANAGER_CONTROL_INSTANCE_AUTH_TOKEN:-}" ]; then
+    if docker inspect "$INSTANCE_AUTH_CONTAINER_NAME" >/dev/null 2>&1; then
+      ok "container exists: $INSTANCE_AUTH_CONTAINER_NAME"
+      for network in manager-net instance-auth-net; do
+        if container_has_network "$INSTANCE_AUTH_CONTAINER_NAME" "$network"; then
+          ok "$INSTANCE_AUTH_CONTAINER_NAME is attached to $network"
+        else
+          error "$INSTANCE_AUTH_CONTAINER_NAME is not attached to $network"
+        fi
+      done
+    else
+      error "instance auth container not found: $INSTANCE_AUTH_CONTAINER_NAME"
+    fi
+    if docker inspect "$NGINX_CONTAINER_NAME" >/dev/null 2>&1; then
+      if container_has_network "$NGINX_CONTAINER_NAME" instance-auth-net; then
+        ok "$NGINX_CONTAINER_NAME is attached to instance-auth-net"
+      else
+        error "$NGINX_CONTAINER_NAME is not attached to instance-auth-net"
+      fi
+    fi
+    evo_ingresses="$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep '^evoscientist_.*-ingress$' || true)"
+    if [ -n "$evo_ingresses" ]; then
+      while IFS= read -r container; do
+        if container_has_network "$container" instance-auth-net; then
+          ok "$container is attached to instance-auth-net"
+        else
+          error "$container is not attached to instance-auth-net"
+        fi
+        if container_has_network "$container" manager-net; then
+          error "user ingress is attached to manager-net: $container"
+        else
+          ok "$container is not attached to manager-net"
+        fi
+      done <<EOF
+$evo_ingresses
+EOF
+    fi
+  fi
   for manager_container in "$MANAGER_USER_WEB_CONTAINER_NAME" "$MANAGER_ADMIN_WEB_CONTAINER_NAME"; do
     if docker inspect "$manager_container" >/dev/null 2>&1; then
       ok "container exists: $manager_container"

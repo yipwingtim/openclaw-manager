@@ -23,8 +23,8 @@ PRODUCT_CAPABILITIES = {
 INSTANCE_AUTH_CONTRACTS = {
     "openclaw": {
         "edge_authorization": "uis",
-        "product_auth": "token",
-        "identity_header": None,
+        "product_auth": "trusted_proxy",
+        "identity_header": "x-forwarded-user",
     },
     "hermes": {
         "edge_authorization": "uis",

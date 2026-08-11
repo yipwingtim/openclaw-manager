@@ -38,6 +38,9 @@ run_tenant_network_allocator() {
   if [ "$mode" != "plan" ]; then
     command+=(--lock-file "$lock_file")
   fi
+  if [ "${OPENCLAW_INSTANCE_AUTH_MODE:-token}" = "trusted-proxy" ]; then
+    command+=(--trusted-proxy)
+  fi
   while IFS= read -r exclusion; do
     [ -n "$exclusion" ] && command+=(--exclude "$exclusion")
   done < <(printf '%s' "$exclusions" | tr ',' '\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
@@ -89,6 +92,31 @@ connect_container_to_network() {
   if ! container_has_network "$container" "$network"; then
     docker network connect "$network" "$container"
   fi
+}
+
+tenant_proxy_ip() {
+  local network="$1"
+  docker network inspect "$network" --format '{{json .IPAM.Config}}' | \
+    python3 -c 'import ipaddress,json,sys; cfg=json.load(sys.stdin); nets=[ipaddress.ip_network(x["Subnet"]) for x in cfg if x.get("Subnet") and x["Subnet"].count(":") == 0]; assert len(nets)==1, "tenant network must have one IPv4 subnet"; print(nets[0].network_address + 2)'
+}
+
+connect_container_to_network_at_ip() {
+  local container="$1"
+  local network="$2"
+  local ip_address="$3"
+  if ! docker inspect "$container" >/dev/null 2>&1; then
+    return 0
+  fi
+  local current
+  current="$(docker inspect "$container" --format "{{with index .NetworkSettings.Networks \"$network\"}}{{.IPAddress}}{{end}}" 2>/dev/null || true)"
+  if [ "$current" = "$ip_address" ]; then
+    return 0
+  fi
+  if [ -n "$current" ]; then
+    echo "[ERROR] $container already uses $current on $network; trusted proxy requires $ip_address" >&2
+    return 1
+  fi
+  docker network connect --ip "$ip_address" "$network" "$container"
 }
 
 disconnect_container_from_network() {
@@ -220,13 +248,40 @@ for _ in range(3):
     }
     if not missing:
         break
+    def connect(pair):
+        service, network = pair
+        labels = subprocess.run(
+            ["docker", "network", "inspect", network, "--format", "{{json .Labels}}"],
+            capture_output=True, text=True, check=False,
+        )
+        try:
+            trusted_proxy = json.loads(labels.stdout or "null") or {}
+            trusted_proxy = trusted_proxy.get("com.openclaw.trusted-proxy") == "true"
+        except json.JSONDecodeError:
+            trusted_proxy = False
+        if service == nginx and trusted_proxy:
+            subnet = subprocess.run(
+                ["docker", "network", "inspect", network, "--format", "{{json .IPAM.Config}}"],
+                capture_output=True, text=True, check=False,
+            )
+            try:
+                import ipaddress
+                configs = json.loads(subnet.stdout)
+                ipv4 = [ipaddress.ip_network(x["Subnet"]) for x in configs if x.get("Subnet") and ":" not in x["Subnet"]]
+                if len(ipv4) != 1:
+                    return subprocess.CompletedProcess([], 1, stderr="invalid tenant IPv4 subnet")
+                return subprocess.run(
+                    ["docker", "network", "connect", "--ip", str(ipv4[0].network_address + 2), network, service],
+                    capture_output=True, text=True, check=False,
+                )
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+                return subprocess.CompletedProcess([], 1, stderr="invalid tenant IPv4 subnet")
+        return subprocess.run(
+            ["docker", "network", "connect", network, service],
+            capture_output=True, text=True, check=False,
+        )
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(lambda pair: subprocess.run(
-            ["docker", "network", "connect", pair[1], pair[0]],
-            capture_output=True,
-            text=True,
-            check=False,
-        ), missing))
+        list(pool.map(connect, missing))
 
 actual = inspect(sorted({service for service, _ in missing}))
 missing = {

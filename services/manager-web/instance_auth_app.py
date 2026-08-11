@@ -1,8 +1,10 @@
 import hashlib
+import json
 import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 from flask import Flask, request
 
@@ -35,7 +37,15 @@ def authorize(instance_public_id):
     )
     try:
         with urllib.request.urlopen(upstream, timeout=5) as response:
-            return "", 204 if response.status == 200 else response.status
+            if response.status != 200:
+                return "", response.status
+            try:
+                payload = json.loads(response.read())
+                identity = payload.get("identity") if payload.get("allowed") is True else None
+                identity = str(uuid.UUID(identity))
+            except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+                return "", 503
+            return "", 204, {"X-OpenClaw-Authenticated-User": identity}
     except urllib.error.HTTPError as exc:
         return "", exc.code if exc.code in {401, 403} else 503
     except (urllib.error.URLError, TimeoutError):

@@ -437,7 +437,7 @@ def authorize_instance_access(instance_public_id):
     instance = instance_for_entry(instance_public_id, user)
     if instance is None or instance["status"] not in {"active", "stopped"}:
         return jsonify({"error": "instance access is forbidden"}), 403
-    return jsonify({"allowed": True})
+    return jsonify({"allowed": True, "identity": user["public_id"]})
 
 
 @app.get("/internal/v1/instances/<instance_public_id>/entry")
@@ -2282,7 +2282,7 @@ def update_execution_job(request_id):
         product = created_instance["product"]
         required = {
             "port", "version", "access_url", "admin_url",
-            "basic_auth_password_ref", "openclaw_token",
+            "basic_auth_password_ref", "openclaw_token", "auth_mode",
         }
         if not isinstance(result, dict) or set(result) != required:
             return jsonify({"error": "invalid instance creation result"}), 400
@@ -2292,8 +2292,15 @@ def update_execution_job(request_id):
             or any(
                 not isinstance(result[field], str)
                 or (field != "openclaw_token" and not result[field])
-                or (field == "openclaw_token" and product == "openclaw" and not result[field])
-                for field in required - {"port"}
+                or (
+                    field == "openclaw_token" and product == "openclaw"
+                    and result.get("auth_mode") == "token" and not result[field]
+                )
+                for field in required - {"port", "openclaw_token"}
+            )
+            or not isinstance(result["openclaw_token"], str)
+            or result["auth_mode"] not in (
+                {"token", "trusted-proxy"} if product == "openclaw" else {"session", "none"}
             )
         ):
             return jsonify({"error": "invalid instance creation result"}), 400

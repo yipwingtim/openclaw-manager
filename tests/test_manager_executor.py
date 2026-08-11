@@ -67,7 +67,7 @@ class ManagerExecutorTests(unittest.TestCase):
 
     def test_all_product_adapters_expose_one_auth_contract(self):
         expected = {
-            "openclaw": ("token", None),
+            "openclaw": ("trusted_proxy", "x-forwarded-user"),
             "hermes": ("session", None),
             "evoscientist": ("none", None),
         }
@@ -221,6 +221,28 @@ class ManagerExecutorTests(unittest.TestCase):
                     "legacy_user_id": "alice", "_creation_version": "2026.6.6"
                 })
             self.assertEqual(result["access_url"], "https://example.test:41001")
+
+    def test_openclaw_trusted_proxy_creation_result_does_not_require_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            public_dir = Path(directory)
+            config_dir = public_dir / "users" / "alice" / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "openclaw.json").write_text(json.dumps(
+                {"gateway": {"auth": {"mode": "trusted-proxy"}}}
+            ))
+            nginx_dir = public_dir / "nginx"
+            nginx_dir.mkdir()
+            (nginx_dir / "alice.conf").write_text("listen 41001 ssl;\n")
+            with patch.object(self.executor, "PUBLIC_DIR", public_dir), patch.dict(
+                self.executor.os.environ,
+                {"NGINX_USERS_CONF_DIR": str(nginx_dir), "PUBLIC_HOST": "example.test",
+                 "NGINX_HTPASSWD_FILE_IN_CONTAINER": "/etc/nginx/auth/.htpasswd"},
+            ):
+                result = self.executor.openclaw_creation_result({
+                    "legacy_user_id": "alice", "_creation_version": "2026.6.6"
+                })
+            self.assertEqual(result["auth_mode"], "trusted-proxy")
+            self.assertEqual(result["openclaw_token"], "")
 
     def test_run_once_creates_hermes_and_configures_ingress(self):
         control = Mock()

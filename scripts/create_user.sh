@@ -31,6 +31,8 @@ USER_ID="${1:-}"
 BASIC_AUTH_PASSWORD="${OPENCLAW_BASIC_AUTH_PASSWORD:-}"
 BASIC_AUTH_ENABLED="true"
 OPENCLAW_INGRESS_MODE="${OPENCLAW_INGRESS_MODE:-port}"
+OPENCLAW_INSTANCE_AUTH_MODE="${OPENCLAW_INSTANCE_AUTH_MODE:-token}"
+OPENCLAW_INSTANCE_PUBLIC_ID="${OPENCLAW_INSTANCE_PUBLIC_ID:-}"
 SKIP_NGINX_RELOAD=0
 SUCCESS=0
 USER_DIR_CREATED=0
@@ -77,6 +79,10 @@ done
 
 if [ -z "$USER_ID" ]; then
   echo "Usage: $0 <user_id> [--password <basic_auth_password>] [--basic-auth-enabled true|false] [--skip-nginx-reload]"
+  exit 1
+fi
+if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ] && [[ ! "$OPENCLAW_INSTANCE_PUBLIC_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+  echo "[ERROR] trusted-proxy mode requires a valid instance public ID"
   exit 1
 fi
 
@@ -267,6 +273,8 @@ if [ -z "$SERVICE_ID" ]; then
 fi
 
 TENANT_NETWORK="$(tenant_network_name "$USER_ID")"
+log "Ensuring isolated tenant network: $TENANT_NETWORK"
+ensure_tenant_network "$TENANT_NETWORK"
 
 # ===== 检查模板 =====
 if [ ! -f "$TEMPLATE" ]; then
@@ -290,16 +298,29 @@ mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions,uploads}
 USER_DIR_CREATED=1
 
 CONFIG_FILE="$USER_DIR/config/openclaw.json"
+TRUSTED_PROXY_IP=""
+if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  if [ "$(docker network inspect "$TENANT_NETWORK" --format '{{index .Labels "com.openclaw.trusted-proxy"}}' 2>/dev/null || true)" != "true" ]; then
+    fail "Tenant network $TENANT_NETWORK is not reserved for trusted-proxy; refusing unsafe configuration"
+    exit 1
+  fi
+  TRUSTED_PROXY_IP="$(tenant_proxy_ip "$TENANT_NETWORK")"
+fi
 
 # ===== 写入 OpenClaw 基础配置 =====
+if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
 cat > "$CONFIG_FILE" <<EOF
 {
   "gateway": {
     "mode": "local",
     "bind": "lan",
     "auth": {
-      "token": "$GATEWAY_TOKEN"
+      "mode": "trusted-proxy",
+      "trustedProxy": {
+        "userHeader": "x-forwarded-user"
+      }
     },
+    "trustedProxies": ["$TRUSTED_PROXY_IP"],
     "controlUi": {
       "allowedOrigins": [
         "http://localhost:$PORT",
@@ -310,6 +331,24 @@ cat > "$CONFIG_FILE" <<EOF
   }
 }
 EOF
+else
+cat > "$CONFIG_FILE" <<EOF
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "auth": {"mode": "token", "token": "$GATEWAY_TOKEN"},
+    "controlUi": {
+      "allowedOrigins": [
+        "http://localhost:$PORT",
+        "http://127.0.0.1:$PORT",
+        "https://$PUBLIC_HOST:$PORT"
+      ]$([ -n "$OPENCLAW_CONTROL_UI_BASE_PATH" ] && printf ',\n      "basePath": "%s"' "$OPENCLAW_CONTROL_UI_BASE_PATH")
+    }
+  }
+}
+EOF
+fi
 
 # ===== 注入默认 skills =====
 if [ -d "$MANAGER_DIR/templates/skills" ]; then
@@ -331,9 +370,6 @@ sed -i "s#{{TZ}}#$TZ#g" "$TARGET_COMPOSE"
 sed -i "s#{{GATEWAY_TOKEN}}#$GATEWAY_TOKEN#g" "$TARGET_COMPOSE"
 sed -i "s#{{TENANT_NETWORK}}#$TENANT_NETWORK#g" "$TARGET_COMPOSE"
 
-log "Ensuring isolated tenant network: $TENANT_NETWORK"
-ensure_tenant_network "$TENANT_NETWORK"
-
 # ===== 生成 nginx 用户配置 =====
 mkdir -p "$NGINX_USERS_CONF_DIR"
 
@@ -342,6 +378,14 @@ NGINX_USER_HTPASSWD_FILE="$(nginx_user_htpasswd_file "$USER_ID" "$NGINX_HTPASSWD
 NGINX_USER_HTPASSWD_FILE_IN_CONTAINER="$(nginx_user_htpasswd_file_in_container "$USER_ID" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 NGINX_USER_HTPASSWD_REF="$(nginx_user_htpasswd_ref "$USER_ID" "$NGINX_HTPASSWD_FILE_IN_CONTAINER")"
 NGINX_AUTH_BLOCK="$(render_nginx_auth_lines "$BASIC_AUTH_ENABLED" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
+if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  NGINX_AUTH_BLOCK='        auth_request /_instance_auth;
+        auth_request_set $authenticated_user $upstream_http_x_openclaw_authenticated_user;
+        proxy_set_header X-Forwarded-User $authenticated_user;
+        proxy_set_header X-OpenClaw-Authenticated-By "openclaw-manager";
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;'
+fi
 NGINX_ADMIN_AUTH_BLOCK="$(render_nginx_auth_lines "true" "$NGINX_USER_HTPASSWD_FILE_IN_CONTAINER")"
 NGINX_ADMIN_PROVIDER_GUARD="$(render_instance_admin_provider_guard "${MANAGER_AUTH_PROVIDER:-nginx-basic}" "$PUBLIC_HOST" "${MANAGER_AUTH_TYPE:-}")" || fail "Unsupported manager authentication configuration"
 NGINX_INTERNAL_TOKEN_HEADER=""
@@ -350,6 +394,9 @@ if [ -n "${OPENCLAW_INTERNAL_TOKEN:-}" ]; then
 fi
 
 cat > "$NGINX_USER_CONF" <<EOF
+$(if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  render_instance_auth_upstream "$OPENCLAW_INSTANCE_PUBLIC_ID"
+fi)
 upstream openclaw_backend_${PORT} {
     zone openclaw_backend_${PORT} 64k;
     resolver 127.0.0.11 valid=10s ipv6=off;
@@ -372,6 +419,10 @@ server {
     ssl_certificate_key $NGINX_SSL_KEY;
 
     client_max_body_size 10M;
+
+$(if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  render_instance_auth_location "$OPENCLAW_INSTANCE_PUBLIC_ID"
+fi)
 
     location = /admin {
         return 302 /admin/;
@@ -400,6 +451,9 @@ $NGINX_INTERNAL_TOKEN_HEADER
 
     location / {
 $NGINX_AUTH_BLOCK
+$(if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  printf '        error_page 401 = @instance_login;\n'
+fi)
         proxy_pass http://openclaw_backend_${PORT};
 
         proxy_buffering off;
@@ -529,6 +583,10 @@ fi
 
 # ===== 启动用户容器 =====
 cd "$USER_DIR"
+
+if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  connect_container_to_network_at_ip "$NGINX_CONTAINER_NAME" "$TENANT_NETWORK" "$TRUSTED_PROXY_IP"
+fi
 
 if ! docker compose up -d; then
   fail "Failed to start container for user $USER_ID"

@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 TENANT_NETWORK_LABEL_KEY = "com.openclaw.tenant-network"
+TRUSTED_PROXY_LABEL_KEY = "com.openclaw.trusted-proxy"
 
 
 class AllocationError(RuntimeError):
@@ -214,6 +215,7 @@ def prepare_networks(args):
                         "--driver", "bridge",
                         "--subnet", str(subnet),
                         "--label", f"{TENANT_NETWORK_LABEL_KEY}={network}",
+                        *(["--label", f"{TRUSTED_PROXY_LABEL_KEY}=true"] if args.trusted_proxy else []),
                         network,
                     ]
                 )
@@ -242,6 +244,7 @@ def add_common_arguments(parser):
     parser.add_argument("--pool", required=True)
     parser.add_argument("--subnet-prefix", type=int, default=28)
     parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument("--trusted-proxy", action="store_true")
 
 
 def build_parser():

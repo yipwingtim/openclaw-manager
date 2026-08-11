@@ -2,10 +2,14 @@
 
 import argparse
 import csv
+import hashlib
+import json
 import os
 import re
 import sqlite3
 import sys
+import subprocess
+import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -196,6 +200,28 @@ def detect_compose(path):
     return result
 
 
+def detect_openclaw_auth(path):
+    if not path.is_file():
+        return {}
+    try:
+        import json
+        return json.loads(read_text(path)).get("gateway", {})
+    except (ValueError, AttributeError):
+        return {}
+
+
+def expected_tenant_proxy_ip(user_id):
+    network = f"{os.environ.get('OPENCLAW_TENANT_NETWORK_PREFIX', 'openclaw-user')}-{hashlib.sha256(user_id.encode()).hexdigest()}"
+    result = subprocess.run(
+        ["docker", "network", "inspect", network, "--format", "{{json .IPAM.Config}}"],
+        capture_output=True, text=True, check=False,
+    )
+    try:
+        configs = json.loads(result.stdout)
+        subnets = [ipaddress.ip_network(item["Subnet"]) for item in configs if item.get("Subnet") and ":" not in item["Subnet"]]
+        return str(subnets[0].network_address + 2) if len(subnets) == 1 else None
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
 def detect_nginx_conf(path):
     result = {
         "exists": path.is_file(),
@@ -206,6 +232,7 @@ def detect_nginx_conf(path):
         "root_proxy": None,
         "dynamic_upstream": False,
         "instance_auth": False,
+        "trusted_identity_headers": False,
     }
     if not path.is_file():
         return result
@@ -263,6 +290,11 @@ def detect_nginx_conf(path):
     result["instance_auth"] = bool(
         "auth_request /_instance_auth;" in text
         and "openclaw-instance-auth-proxy:8084 resolve;" in text
+    )
+    result["trusted_identity_headers"] = bool(
+        "auth_request_set $authenticated_user $upstream_http_x_openclaw_authenticated_user;" in text
+        and "proxy_set_header X-Forwarded-User $authenticated_user;" in root_text
+        and 'proxy_set_header X-OpenClaw-Authenticated-By "openclaw-manager";' in root_text
     )
     if root_block is not None:
         if "auth_basic off;" in root_block:
@@ -495,6 +527,8 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     expected_service = f"openclaw-{service_id(user_id)}"
     expected_container = f"openclaw_{user_id}"
     expected_htpasswd = container_htpasswd_path(user_id)
+    gateway = detect_openclaw_auth(user_dir / "config" / "openclaw.json")
+    auth_mode = gateway.get("auth", {}).get("mode", "token")
 
     if not service_id(user_id):
         reporter.error("invalid_service_id", f"{user_id}: could not derive compose service id")
@@ -528,8 +562,25 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
             "admin_htpasswd_mismatch",
             f"{user_id}: admin htpasswd={nginx['admin_htpasswd']} expected={expected_htpasswd}",
         )
-    if not host_htpasswd_path(user_id).is_file() and not is_deleted:
+    if auth_mode != "trusted-proxy" and not host_htpasswd_path(user_id).is_file() and not is_deleted:
         reporter.error("htpasswd_missing", f"{user_id}: htpasswd missing: {host_htpasswd_path(user_id)}")
+    if auth_mode == "trusted-proxy" and (
+        not nginx["instance_auth"] or not nginx["trusted_identity_headers"]
+        or "x-forwarded-user" != gateway.get("auth", {}).get("trustedProxy", {}).get("userHeader")
+        or len(gateway.get("trustedProxies", [])) != 1
+    ):
+        reporter.error(
+            "openclaw_trusted_proxy_mismatch",
+            f"{user_id}: trusted-proxy config and active Nginx authorization are inconsistent",
+        )
+    if auth_mode == "trusted-proxy" and nginx["exists"]:
+        expected_proxy = expected_tenant_proxy_ip(user_id)
+        configured_proxy = (gateway.get("trustedProxies") or [None])[0]
+        if expected_proxy and configured_proxy != expected_proxy:
+            reporter.error(
+                "openclaw_trusted_proxy_ip_mismatch",
+                f"{user_id}: trustedProxies={configured_proxy} expected tenant proxy IP={expected_proxy}",
+            )
 
     verbose_check(verbose, user_id, "users.csv row")
     if csv_row is None:

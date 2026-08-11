@@ -176,9 +176,15 @@ def openclaw_creation_result(instance):
     port = int(match.group(1))
     public_host = os.environ.get("PUBLIC_HOST", "").strip()
     version = instance.get("_creation_version") or os.environ.get("OPENCLAW_VERSION", "").strip()
-    token = config.get("gateway", {}).get("auth", {}).get("token", "")
+    auth = config.get("gateway", {}).get("auth", {})
+    auth_mode = auth.get("mode", "token")
+    token = auth.get("token", "")
     htpasswd = os.environ.get("NGINX_HTPASSWD_FILE_IN_CONTAINER", "").strip()
-    if not public_host or not version or not token or not htpasswd:
+    if (
+        not public_host or not version or not htpasswd
+        or auth_mode not in {"token", "trusted-proxy"}
+        or (auth_mode == "token" and not token)
+    ):
         raise ValueError("created instance metadata is incomplete")
     base_path = config.get("gateway", {}).get("controlUi", {}).get("basePath", "")
     base_path = f"/{str(base_path).strip('/')}" if base_path else ""
@@ -190,6 +196,7 @@ def openclaw_creation_result(instance):
         "admin_url": f"{access_url}/admin/",
         "basic_auth_password_ref": f"nginx-auth:{Path(htpasswd).parent}/users/{user_id}/.htpasswd",
         "openclaw_token": token,
+        "auth_mode": auth_mode,
     }
 
 
@@ -206,6 +213,7 @@ def hermes_creation_result(instance):
         "admin_url": access_url,
         "basic_auth_password_ref": f"hermes-env:{instance['data_path']}/.env",
         "openclaw_token": "",
+        "auth_mode": "session",
     }
 
 
@@ -231,6 +239,7 @@ def evoscientist_creation_result(instance):
         "admin_url": f"https://{public_host}:{port}",
         "basic_auth_password_ref": f"nginx-auth:/etc/nginx/auth/users/{instance['legacy_user_id']}/.htpasswd",
         "openclaw_token": "",
+        "auth_mode": "none",
     }
 
 
@@ -331,6 +340,8 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             control.update(request_id, "running", current_step="creating instance")
             password = consume_provisioning_secret(job["params"]["secret_path"])
             instance["_creation_version"] = job["params"].get("version")
+            if instance["product"] == "openclaw":
+                instance["_creation_auth_mode"] = "trusted-proxy"
             create_kwargs = {
                 "skip_nginx_reload": True,
                 "skip_metadata_write": True,

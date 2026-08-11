@@ -23,10 +23,17 @@ class OpenClawDockerAdapter:
         return action in self.CAPABILITIES
 
     def instance_auth_contract(self, instance=None):
-        del instance
         contract = product_auth_contract(self.AUTH_PRODUCT)
         if contract is None:
             raise ValueError(f"unsupported instance auth product: {self.AUTH_PRODUCT}")
+        if instance and self.AUTH_PRODUCT == "openclaw":
+            config = self.data_dir(instance) / "config" / "openclaw.json"
+            try:
+                auth = json.loads(config.read_text(encoding="utf-8"))["gateway"]["auth"]
+            except (OSError, ValueError, KeyError, TypeError):
+                return contract
+            if auth.get("mode", "token") == "token":
+                contract.update(product_auth="token", identity_header=None)
         return contract
 
     def get_runtime_target(self, instance):
@@ -367,6 +374,9 @@ class OpenClawDockerAdapter:
             "OPENCLAW_BASIC_AUTH_PASSWORD": basic_auth_password,
             "OPENCLAW_DATA_PATH": str(self.data_dir(instance)),
         }
+        if instance.get("_creation_auth_mode") == "trusted-proxy":
+            env["OPENCLAW_INSTANCE_AUTH_MODE"] = "trusted-proxy"
+            env["OPENCLAW_INSTANCE_PUBLIC_ID"] = str(instance["public_id"])
         if version:
             env["OPENCLAW_VERSION"] = version
         if skip_metadata_write:

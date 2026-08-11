@@ -1,6 +1,6 @@
 # UIS Instance Authentication Proxy
 
-Hermes and EvoScientist keep their dedicated HTTPS ports because their official
+OpenClaw, Hermes and EvoScientist currently keep dedicated HTTPS ports. Their
 UIs do not support a shared path prefix. Their ingress authenticates access
 through the Manager UIS session before proxying the request.
 
@@ -21,6 +21,14 @@ EvoScientist no longer uses Nginx Basic Auth after migration. Existing
 Hermes keeps its official Dashboard authentication, so users pass UIS first and
 then the Hermes login until the upstream product has a verified way to disable
 its built-in authentication.
+
+New OpenClaw instances created through Manager use OpenClaw's official
+`trusted-proxy` mode. Shared Nginx receives the authenticated UIS user UUID,
+overwrites the trusted identity headers, and forwards them from a fixed address
+on that instance's tenant network. Existing token instances are unchanged and
+remain valid until a separate migration is performed. The same trusted-proxy
+configuration can later sit behind a shared domain-and-path route; this change
+does not implement that routing.
 
 ## Deployment and migration
 

@@ -109,6 +109,16 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         self.assertIn('"basePath": "%s"', script)
         self.assertIn('OPENCLAW_INGRESS_MODE must be port or path', script)
 
+    def test_managed_openclaw_uses_trusted_proxy_headers(self):
+        script = CREATE_USER_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('"mode": "trusted-proxy"', script)
+        self.assertIn('"userHeader": "x-forwarded-user"', script)
+        self.assertIn('"trustedProxies": ["$TRUSTED_PROXY_IP"]', script)
+        self.assertIn("auth_request /_instance_auth;", script)
+        self.assertIn("X-OpenClaw-Authenticated-By", script)
+        self.assertIn("connect_container_to_network_at_ip", script)
+
     def test_create_user_compose_uses_instance_data_path(self):
         template = (ROOT_DIR / "templates" / "docker-compose.tpl.yml").read_text(encoding="utf-8")
         script = CREATE_USER_SCRIPT.read_text(encoding="utf-8")

@@ -66,7 +66,7 @@ class HermesAdapterTests(unittest.TestCase):
             enable_nginx.assert_not_called()
             disable_nginx.assert_not_called()
 
-    def test_host_access_retries_until_acl_is_stable(self):
+    def test_host_access_retries_when_acl_changes_after_initial_stability(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             adapter = self.make_adapter(root)
@@ -79,7 +79,7 @@ class HermesAdapterTests(unittest.TestCase):
                 nonlocal checks
                 if command[:2] == ["bash", "-lc"]:
                     checks += 1
-                    return (1, "ACL changed") if checks == 1 else (0, "stable")
+                    return (1, "ACL changed") if checks == 6 else (0, "stable")
                 return 0, "applied"
 
             with patch.object(adapter, "run_command", side_effect=run) as run_command:
@@ -87,7 +87,7 @@ class HermesAdapterTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertIn("stable", output)
-            self.assertEqual(checks, 6)
+            self.assertEqual(checks, 21)
             self.assertEqual(
                 len([call for call in run_command.call_args_list if call.args[0][0] == "find"]),
                 4,

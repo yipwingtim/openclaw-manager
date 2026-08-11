@@ -1486,6 +1486,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             return 1, f"Could not resolve host manager UID: {exc}"
         outputs = []
         stable_checks = 0
+        required_stable_checks = 15
         last_error = ""
         for _ in range(5):
             applied = True
@@ -1508,7 +1509,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                     break
             if not applied:
                 continue
-            for _ in range(5):
+            for _ in range(required_stable_checks):
                 code, output = self.run_command(
                     [
                         "bash", "-lc",
@@ -1537,7 +1538,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                     last_error = output
                     break
                 stable_checks += 1
-            if stable_checks == 5:
+            if stable_checks == required_stable_checks:
                 return 0, "\n".join(part for part in outputs if part)
         detail = f"\n{last_error}" if last_error else ""
         return 1, f"Hermes host manager ACL did not become stable after startup.{detail}"

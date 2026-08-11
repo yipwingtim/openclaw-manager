@@ -52,18 +52,85 @@ class HermesAdapterTests(unittest.TestCase):
             ) as enable_nginx, patch.object(
                 adapter, "disable_nginx_conf"
             ) as disable_nginx:
-                self.assertEqual(adapter.start(instance), (0, "ok\nok\nok\nok"))
+                self.assertEqual(adapter.start(instance)[0], 0)
                 self.assertEqual(adapter.stop(instance), (0, "ok"))
 
             commands = [call.args[0] for call in run_command.call_args_list]
             self.assertEqual(commands[0], ["docker", "start", "hermes-alice"])
             self.assertEqual(commands[-1], ["docker", "stop", "hermes-alice"])
             acl_commands = [command for command in commands if command[0] == "find"]
-            self.assertEqual([command[4] for command in acl_commands], ["d", "f"])
+            self.assertEqual(len(acl_commands), 2)
+            self.assertEqual([command[4] for command in acl_commands[:2]], ["d", "f"])
             self.assertIn("d:u:", acl_commands[0][8])
             self.assertNotIn("d:u:", acl_commands[1][8])
             enable_nginx.assert_not_called()
             disable_nginx.assert_not_called()
+
+    def test_host_access_retries_until_acl_is_stable(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            checks = 0
+
+            def run(command, **kwargs):
+                nonlocal checks
+                if command[:2] == ["bash", "-lc"]:
+                    checks += 1
+                    return (1, "ACL changed") if checks == 1 else (0, "stable")
+                return 0, "applied"
+
+            with patch.object(adapter, "run_command", side_effect=run) as run_command:
+                code, output = adapter._grant_host_manager_access(instance)
+
+            self.assertEqual(code, 0)
+            self.assertIn("stable", output)
+            self.assertEqual(checks, 6)
+            self.assertEqual(
+                len([call for call in run_command.call_args_list if call.args[0][0] == "find"]),
+                4,
+            )
+
+    def test_host_access_retries_when_a_dynamic_file_disappears(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            calls = 0
+
+            def run(command, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return 1, "file disappeared"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run):
+                code, output = adapter._grant_host_manager_access(instance)
+
+            self.assertEqual(code, 0)
+            self.assertIn("ok", output)
+
+    def test_host_access_fails_when_acl_never_stabilizes(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+
+            def run(command, **kwargs):
+                return (1, "ACL changed") if command[:2] == ["bash", "-lc"] else (0, "applied")
+
+            with patch.object(adapter, "run_command", side_effect=run):
+                code, output = adapter._grant_host_manager_access(instance)
+
+            self.assertEqual(code, 1)
+            self.assertIn("did not become stable", output)
 
     def test_nginx_candidates_do_not_include_openclaw_legacy_config(self):
         with TemporaryDirectory() as temp_dir:

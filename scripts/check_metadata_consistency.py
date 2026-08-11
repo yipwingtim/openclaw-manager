@@ -580,6 +580,11 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
             "openclaw_trusted_proxy_token_conflict",
             f"{user_id}: trusted-proxy instance still configures OPENCLAW_GATEWAY_TOKEN",
         )
+    if auth_mode == "trusted-proxy" and not gateway.get("auth", {}).get("password"):
+        reporter.error(
+            "openclaw_trusted_proxy_password_missing",
+            f"{user_id}: trusted-proxy instance has no local Gateway control password",
+        )
     if auth_mode == "trusted-proxy" and nginx["exists"]:
         expected_proxy = expected_tenant_proxy_ip(user_id)
         configured_proxy = (gateway.get("trustedProxies") or [None])[0]

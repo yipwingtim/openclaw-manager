@@ -292,6 +292,12 @@ import secrets
 print(secrets.token_hex(24))
 PY
 )"
+GATEWAY_PASSWORD="$(python3 - <<'PY'
+import secrets
+
+print(secrets.token_hex(24))
+PY
+)"
 if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
   GATEWAY_AUTH_ENV=""
 else
@@ -321,6 +327,7 @@ cat > "$CONFIG_FILE" <<EOF
     "bind": "lan",
     "auth": {
       "mode": "trusted-proxy",
+      "password": "$GATEWAY_PASSWORD",
       "trustedProxy": {
         "userHeader": "x-forwarded-user"
       }
@@ -639,7 +646,7 @@ fi
 log "User $USER_ID created successfully"
 log "Port: $PORT"
 
-# ===== 等待 OpenClaw 自动生成 token =====
+# ===== 读取 OpenClaw token（仅 token 模式；trusted-proxy 使用 password） =====
 TOKEN=""
 
 for i in $(seq 1 20); do
@@ -716,7 +723,9 @@ else
 fi
 
 echo "Login Token:"
-if [ -z "$TOKEN" ]; then
+if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  echo "👉 trusted-proxy enabled; no Gateway token is configured"
+elif [ -z "$TOKEN" ]; then
   echo "👉 Token not generated yet. Check: $CONFIG_FILE"
 else
   echo "👉 $TOKEN"

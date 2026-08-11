@@ -25,7 +25,7 @@ class MetadataConsistencyTests(unittest.TestCase):
             user_dir = root / "alice"
             (user_dir / "config").mkdir(parents=True)
             (user_dir / "config" / "openclaw.json").write_text(
-                '{"gateway":{"auth":{"mode":"trusted-proxy","trustedProxy":{"userHeader":"x-forwarded-user"}},"trustedProxies":["10.0.0.2"]}}',
+                '{"gateway":{"auth":{"mode":"trusted-proxy","password":"local-secret","trustedProxy":{"userHeader":"x-forwarded-user"}},"trustedProxies":["10.0.0.2"]}}',
                 encoding="utf-8",
             )
             (user_dir / "docker-compose.yml").write_text(
@@ -46,6 +46,30 @@ class MetadataConsistencyTests(unittest.TestCase):
             )
             self.assertIn(
                 "openclaw_trusted_proxy_token_conflict",
+                {issue.code for issue in reporter.issues},
+            )
+
+    def test_trusted_proxy_openclaw_requires_local_control_password(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_dir = root / "alice"
+            (user_dir / "config").mkdir(parents=True)
+            (user_dir / "config" / "openclaw.json").write_text(
+                '{"gateway":{"auth":{"mode":"trusted-proxy","trustedProxy":{"userHeader":"x-forwarded-user"}},"trustedProxies":["10.0.0.2"]}}',
+                encoding="utf-8",
+            )
+            (user_dir / "docker-compose.yml").write_text(
+                "services:\n  openclaw-alice:\n    container_name: openclaw_alice\n",
+                encoding="utf-8",
+            )
+            reporter = Reporter()
+            check_user(
+                "alice", user_dir, {},
+                {"alice": {"product": "openclaw", "status": "active", "container_name": "openclaw_alice"}},
+                {}, reporter,
+            )
+            self.assertIn(
+                "openclaw_trusted_proxy_password_missing",
                 {issue.code for issue in reporter.issues},
             )
 

@@ -80,6 +80,42 @@ class ApproveDeviceScriptTests(unittest.TestCase):
             )
             self.assertIn("Paired (0)", (user_dir / "devices.txt").read_text())
 
+    def test_instance_data_path_is_used_for_device_cache(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            script, user_dir, env = self.make_fixture(
+                root,
+                'echo "$*" >> "$DOCKER_LOG"\n'
+                'if [ "$1" = "ps" ]; then echo openclaw.custom-runtime; exit 0; fi\n'
+                'echo "Paired (0)"\n',
+            )
+            instance_dir = root / "public" / "instances" / "openclaw" / "instance-1"
+            instance_dir.mkdir(parents=True)
+            env["OPENCLAW_DATA_PATH"] = str(instance_dir)
+
+            result = self.run_script(script, env)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Paired (0)", (instance_dir / "devices.txt").read_text())
+            self.assertFalse((user_dir / "devices.txt").exists())
+
+    def test_rejects_unmanaged_data_path_and_invalid_runtime_target(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            script, _, env = self.make_fixture(root, "exit 1\n")
+            hermes_dir = root / "public" / "instances" / "hermes" / "instance-1"
+            hermes_dir.mkdir(parents=True)
+            for key, value, message in (
+                ("OPENCLAW_DATA_PATH", str(hermes_dir), "data path"),
+                ("OPENCLAW_RUNTIME_TARGET", "bad target", "runtime target"),
+            ):
+                with self.subTest(key=key):
+                    current = env.copy()
+                    current[key] = value
+                    result = self.run_script(script, current)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(message, result.stderr.lower())
+
     def test_executor_latest_approval_refuses_second_attempt(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

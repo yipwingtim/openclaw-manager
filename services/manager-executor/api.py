@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file
@@ -283,14 +284,17 @@ def device_action(instance_public_id, action):
     user_id = instance.get("legacy_user_id")
     if not user_id:
         return jsonify({"error": "legacy user ID is required"}), 409
-    command = [
-        str(Path(os.environ.get("OPENCLAW_MANAGER_DIR", "/opt/openclaw-manager")) / "scripts" / "approve_device.sh"),
-        user_id,
-        "--latest" if action == "approve-latest" else "--list-only",
-    ]
-    result = subprocess.run(command, text=True, capture_output=True, timeout=60, check=False)
-    output = (result.stdout + "\n" + result.stderr).strip()
-    return jsonify({"output": output}), 200 if result.returncode == 0 else 500
+    try:
+        adapter = get_adapter(instance["product"])
+        if action == "approve-latest":
+            code, output = adapter.approve_latest_device(
+                instance, request_id=f"portal-device-{uuid.uuid4().hex}"
+            )
+        else:
+            code, output = adapter.refresh_devices(instance)
+    except (KeyError, OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"output": output}), 200 if code == 0 else 500
 
 
 @app.post("/internal/v1/instances/<instance_public_id>/files")

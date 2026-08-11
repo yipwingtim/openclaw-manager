@@ -40,7 +40,11 @@ class HermesAdapterTests(unittest.TestCase):
 
     def test_start_and_stop_manage_registered_container_without_ingress(self):
         with TemporaryDirectory() as temp_dir:
-            adapter = self.make_adapter(Path(temp_dir))
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
             with patch.object(
                 adapter, "run_command", return_value=(0, "ok")
             ) as run_command, patch.object(
@@ -48,16 +52,16 @@ class HermesAdapterTests(unittest.TestCase):
             ) as enable_nginx, patch.object(
                 adapter, "disable_nginx_conf"
             ) as disable_nginx:
-                self.assertEqual(adapter.start(self.INSTANCE), (0, "ok"))
-                self.assertEqual(adapter.stop(self.INSTANCE), (0, "ok"))
+                self.assertEqual(adapter.start(instance), (0, "ok\nok\nok\nok"))
+                self.assertEqual(adapter.stop(instance), (0, "ok"))
 
-            self.assertEqual(
-                [call.args[0] for call in run_command.call_args_list],
-                [
-                    ["docker", "start", "hermes-alice"],
-                    ["docker", "stop", "hermes-alice"],
-                ],
-            )
+            commands = [call.args[0] for call in run_command.call_args_list]
+            self.assertEqual(commands[0], ["docker", "start", "hermes-alice"])
+            self.assertEqual(commands[-1], ["docker", "stop", "hermes-alice"])
+            acl_commands = [command for command in commands if command[0] == "find"]
+            self.assertEqual([command[4] for command in acl_commands], ["d", "f"])
+            self.assertIn("d:u:", acl_commands[0][8])
+            self.assertNotIn("d:u:", acl_commands[1][8])
             enable_nginx.assert_not_called()
             disable_nginx.assert_not_called()
 
@@ -287,22 +291,26 @@ class HermesAdapterTests(unittest.TestCase):
 
     def test_stop_disables_ingress_and_start_restores_it(self):
         with TemporaryDirectory() as temp_dir:
-            adapter = self.make_adapter(Path(temp_dir))
-            active = adapter.ingress_conf(self.INSTANCE)
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            active = adapter.ingress_conf(instance)
             active.parent.mkdir(parents=True)
             active.write_text("server {}\n", encoding="utf-8")
             with patch.object(adapter, "run_command", return_value=(0, "ok")), patch.object(
                 adapter, "reload_nginx", return_value=(0, "reloaded")
             ):
-                self.assertEqual(adapter.stop(self.INSTANCE), (0, "ok"))
+                self.assertEqual(adapter.stop(instance), (0, "ok"))
                 self.assertFalse(active.exists())
-                self.assertTrue(adapter.ingress_conf(self.INSTANCE, disabled=True).exists())
-                code, output = adapter.start(self.INSTANCE)
+                self.assertTrue(adapter.ingress_conf(instance, disabled=True).exists())
+                code, output = adapter.start(instance)
 
             self.assertEqual(code, 0)
             self.assertIn("reloaded", output)
             self.assertTrue(active.exists())
-            self.assertFalse(adapter.ingress_conf(self.INSTANCE, disabled=True).exists())
+            self.assertFalse(adapter.ingress_conf(instance, disabled=True).exists())
 
     def test_create_uses_pinned_single_container_and_hashes_password(self):
         with TemporaryDirectory() as temp_dir:

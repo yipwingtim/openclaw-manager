@@ -1475,8 +1475,34 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             timeout=timeout,
         )
 
+    def _grant_host_manager_access(self, instance):
+        # ponytail: reapply on managed lifecycle; add a watcher only if Hermes resets ACLs while running.
+        data_path = self._hermes_data_path(instance)
+        if not data_path.is_dir():
+            return 1, f"Hermes data path not found: {data_path}"
+        try:
+            manager_uid = self.public_dir.stat().st_uid
+        except OSError as exc:
+            return 1, f"Could not resolve host manager UID: {exc}"
+        outputs = []
+        for file_type, acl in (
+            ("d", f"u:{manager_uid}:rwx,m::rwx,d:u:{manager_uid}:rwx,d:m::rwx"),
+            ("f", f"u:{manager_uid}:rw-,m::rwx"),
+        ):
+            code, output = self.run_command(
+                [
+                    "find", str(data_path), "-xdev", "-type", file_type, "-exec",
+                    "setfacl", "-m", acl, "{}", "+",
+                ],
+                timeout=60,
+            )
+            outputs.append(output)
+            if code != 0:
+                return code, output
+        return 0, "\n".join(part for part in outputs if part)
+
     def _wait_for_dashboard(self, instance):
-        return self.run_command(
+        code, output = self.run_command(
             [
                 "docker", "exec", self.get_runtime_target(instance), "sh", "-lc",
                 "i=0; while [ $i -lt 30 ]; do "
@@ -1485,6 +1511,10 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             ],
             timeout=70,
         )
+        if code != 0:
+            return code, output
+        acl_code, acl_output = self._grant_host_manager_access(instance)
+        return acl_code, "\n".join(part for part in (output, acl_output) if part)
 
     def _restore_hermes_runtime(self, instance, image, was_running, network):
         code, output = self.run_command(
@@ -1535,10 +1565,14 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         )
         if code != 0:
             return code, output
+        ready_code, ready_output = self._wait_for_dashboard(instance)
+        if ready_code != 0:
+            self.run_command(["docker", "stop", self.get_runtime_target(instance)], timeout=60)
+            return ready_code, ready_output
         disabled = self.ingress_conf(instance, disabled=True)
         active = self.ingress_conf(instance)
         if not disabled.is_file():
-            return 0, output
+            return 0, "\n".join(part for part in (output, ready_output) if part)
         active.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(disabled, active)
         reload_code, reload_output = self.reload_nginx()
@@ -1547,6 +1581,15 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         shutil.move(active, disabled)
         self.run_command(["docker", "stop", self.get_runtime_target(instance)], timeout=60)
         return reload_code, reload_output
+
+    def restart(self, instance):
+        code, output = self.run_command(
+            ["docker", "restart", self.get_runtime_target(instance)], timeout=90
+        )
+        if code != 0:
+            return code, output
+        ready_code, ready_output = self._wait_for_dashboard(instance)
+        return ready_code, "\n".join(part for part in (output, ready_output) if part)
 
     def stop(self, instance):
         active = self.ingress_conf(instance)

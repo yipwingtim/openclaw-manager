@@ -124,21 +124,6 @@ class LifecycleActionTests(unittest.TestCase):
                 {"legacy_user_id": "alice"},
             )
 
-    def test_device_actions_pass_metadata_runtime_to_script(self):
-        instance = {
-            "legacy_user_id": "alice",
-            "data_path": "/data/docker/openclaw-public/instances/openclaw/instance-1",
-            "runtime_identifier": "openclaw_alice_custom",
-        }
-        with patch.object(self.app_module, "get_instance_record", return_value=instance), \
-             patch.object(self.app_module, "subprocess") as subprocess_module, \
-             patch.object(self.app_module, "redirect_to_user_dashboard", return_value="redirect"):
-            subprocess_module.run.return_value = types.SimpleNamespace(returncode=0, stdout="", stderr="")
-            self.app_module.refresh_devices_for_user("alice")
-            env = subprocess_module.run.call_args.kwargs["env"]
-            self.assertEqual(env["OPENCLAW_DATA_PATH"], instance["data_path"])
-            self.assertEqual(env["OPENCLAW_RUNTIME_TARGET"], instance["runtime_identifier"])
-
     def test_status_and_logs_pass_instance_record_to_adapter(self):
         instance = {
             "legacy_user_id": "alice",

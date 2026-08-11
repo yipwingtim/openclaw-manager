@@ -165,6 +165,33 @@ class ManagerExecutorApiTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(response.get_json(), {"error": "admin service token is required"})
 
+    def test_device_actions_use_product_adapter(self):
+        instance = {
+            "product": "openclaw",
+            "access_role": "owner",
+            "legacy_user_id": "alice",
+            "data_path": "/data/docker/openclaw-public/instances/openclaw/instance-1",
+            "runtime_identifier": "openclaw_alice",
+        }
+        for action, flag in (("refresh", "--list-only"), ("approve-latest", "--latest")):
+            with self.subTest(action=action), patch.object(
+                self.api, "runtime_instance", return_value=(instance, None)
+            ), patch.object(self.api, "get_adapter") as get_adapter:
+                get_adapter.return_value.refresh_devices.return_value = (0, "ok")
+                get_adapter.return_value.approve_latest_device.return_value = (0, "ok")
+
+                response, status = self.api.device_action("instance-1", action)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(response.get_json(), {"output": "ok"})
+            if action == "refresh":
+                get_adapter.return_value.refresh_devices.assert_called_once_with(instance)
+            else:
+                get_adapter.return_value.approve_latest_device.assert_called_once()
+                self.assertEqual(
+                    get_adapter.return_value.approve_latest_device.call_args.args[0], instance
+                )
+
     def test_upload_rejects_target_replacement_before_open(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -64,6 +64,16 @@ fail() {
   exit 1
 }
 
+BASE_DIR="$(realpath -e -- "$BASE_DIR")" || fail "OpenClaw public directory not found"
+USER_DIR="$(realpath -e -- "$USER_DIR")" || fail "OpenClaw data path not found: $USER_DIR"
+case "$USER_DIR" in
+  "$BASE_DIR"/users/*|"$BASE_DIR"/instances/openclaw/*) ;;
+  *) fail "OpenClaw data path is outside managed instance directories: $USER_DIR" ;;
+esac
+if ! [[ "$CONTAINER_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+  fail "Invalid OpenClaw runtime target: $CONTAINER_NAME"
+fi
+
 if [ ! -d "$USER_DIR" ]; then
   fail "User not found: $USER_ID ($USER_DIR)"
 fi
@@ -117,7 +127,7 @@ if ! LIST_OUTPUT="$(docker exec "$CONTAINER_NAME" timeout 45s openclaw devices l
   fail "Could not list devices: $LIST_OUTPUT"
 fi
 echo "$LIST_OUTPUT"
-CACHE_DIR="$BASE_DIR/users/$USER_ID"
+CACHE_DIR="$USER_DIR"
 CACHE_FILE="$CACHE_DIR/devices.txt"
 
 mkdir -p "$CACHE_DIR"

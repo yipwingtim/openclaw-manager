@@ -392,11 +392,12 @@
 契约分为两层：
 
 - `edge_authorization`：平台入口是否要求 UIS 实例授权；当前三种产品均为 `uis`。
-- `product_auth`：下游产品当前实际使用的认证方式。OpenClaw 当前为 `token`，
+- `product_auth`：下游产品当前实际使用的认证方式。OpenClaw 旧实例为 `token`，
+  Manager 新建实例为 `trusted_proxy`，
   Hermes 为官方 `session`，EvoScientist 为 `none`。
 
 因此，适配器的生命周期动作和认证契约入口保持统一，产品差异只存在于契约值及其内部实现。
-OpenClaw 后续认证代理 PR 完成并验证后，才会将其契约切换为 `trusted_proxy`；
+OpenClaw 在迁移期按实例配置区分 `token` 和 `trusted_proxy`；
 Hermes 的官方 session 不能被 Nginx 的 Basic `Authorization` Header 直接替代，
 后续若要免登录，必须接入 Hermes 支持的认证 provider 或 OIDC 流程。
 

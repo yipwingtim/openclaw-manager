@@ -48,10 +48,38 @@ class AdapterInstanceModelTests(unittest.TestCase):
             self.make_adapter(Path("/tmp")).instance_auth_contract(),
             {
                 "edge_authorization": "uis",
-                "product_auth": "token",
-                "identity_header": None,
+                "product_auth": "trusted_proxy",
+                "identity_header": "x-forwarded-user",
             },
         )
+
+    def test_create_enables_trusted_proxy_only_for_managed_instance(self):
+        adapter = self.make_adapter(Path("/manager"))
+        instance = {
+            "public_id": "11111111-1111-4111-8111-111111111111",
+            "_creation_auth_mode": "trusted-proxy",
+            "legacy_user_id": "alice",
+            "runtime_identifier": "openclaw_alice",
+        }
+        with patch.object(adapter, "run_command", return_value=(0, "created")) as run:
+            adapter.create(instance, "false", "unused")
+
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["OPENCLAW_INSTANCE_AUTH_MODE"], "trusted-proxy")
+        self.assertEqual(env["OPENCLAW_INSTANCE_PUBLIC_ID"], instance["public_id"])
+
+    def test_auth_contract_reports_legacy_token_instance(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            config = root / "public" / "users" / "alice" / "config"
+            config.mkdir(parents=True)
+            (config / "openclaw.json").write_text(
+                '{"gateway":{"auth":{"token":"legacy"}}}', encoding="utf-8"
+            )
+            contract = adapter.instance_auth_contract({"legacy_user_id": "alice"})
+            self.assertEqual(contract["product_auth"], "token")
+            self.assertIsNone(contract["identity_header"])
 
     def test_status_uses_instance_runtime_identifier(self):
         with TemporaryDirectory() as temp_dir:

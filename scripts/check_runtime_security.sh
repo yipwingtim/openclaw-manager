@@ -308,6 +308,16 @@ EOF
       if [ "$container_state" = running ]; then
         if container_has_network "$NGINX_CONTAINER_NAME" "$tenant_network"; then
           ok "$NGINX_CONTAINER_NAME is attached to tenant network: $tenant_network"
+          trusted_proxy_label="$(docker network inspect "$tenant_network" --format '{{index .Labels "com.openclaw.trusted-proxy"}}' 2>/dev/null || true)"
+          if [ "$trusted_proxy_label" = true ]; then
+            expected_proxy_ip="$(tenant_proxy_ip "$tenant_network" 2>/dev/null || true)"
+            actual_proxy_ip="$(docker inspect "$NGINX_CONTAINER_NAME" --format "{{with index .NetworkSettings.Networks \"$tenant_network\"}}{{.IPAddress}}{{end}}" 2>/dev/null || true)"
+            if [ -n "$expected_proxy_ip" ] && [ "$actual_proxy_ip" = "$expected_proxy_ip" ]; then
+              ok "$NGINX_CONTAINER_NAME trusted proxy address matches: $tenant_network -> $actual_proxy_ip"
+            else
+              error "$NGINX_CONTAINER_NAME trusted proxy address mismatch: $tenant_network expected=$expected_proxy_ip actual=$actual_proxy_ip"
+            fi
+          fi
         else
           error "$NGINX_CONTAINER_NAME is missing tenant network: $tenant_network"
         fi

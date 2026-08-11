@@ -202,7 +202,10 @@ class ManagerControlApiTests(unittest.TestCase):
             )
 
         self.assertEqual(allowed_status, 200)
-        self.assertEqual(allowed.get_json(), {"allowed": True})
+        self.assertEqual(allowed.get_json(), {
+            "allowed": True,
+            "identity": self.user["public_id"],
+        })
         self.assertEqual(denied_status, 403)
 
     def test_instance_auth_token_cannot_call_user_web_endpoints(self):
@@ -1484,6 +1487,7 @@ class ManagerControlApiTests(unittest.TestCase):
             "admin_url": "https://example.test:41001/admin/",
             "basic_auth_password_ref": "nginx-auth:/etc/nginx/auth/users/alice-instance/.htpasswd",
             "openclaw_token": "runtime-token",
+            "auth_mode": "token",
         }
         with patch.object(
             self.control.request, "headers", {"Authorization": "Bearer executor-token"}

@@ -83,6 +83,8 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         )
         self.assertIn('if [ "$container_state" = running ]; then', script)
         self.assertIn("skip shared-service tenant network checks", script)
+        self.assertIn('trusted_proxy_label="$(docker network inspect', script)
+        self.assertIn('actual_proxy_ip="$(docker inspect "$NGINX_CONTAINER_NAME"', script)
 
     def test_runtime_check_blocks_cloud_metadata_access(self):
         script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")
@@ -425,12 +427,22 @@ class TenantNetworkIsolationTests(unittest.TestCase):
                         print(json.dumps(result))
                         raise SystemExit(0)
                     if sys.argv[1:3] == ["network", "connect"]:
-                        network, container = sys.argv[3:5]
+                        if sys.argv[3] == "--ip":
+                            _, ip_address, network, container = sys.argv[3:7]
+                            (state / f"ip_{container}_{network}_{ip_address}").touch()
+                        else:
+                            network, container = sys.argv[3:5]
                         failed = state / f"failed_{container}_{network}"
                         if container == "proxy" and network == "openclaw-user-c" and not failed.exists():
                             failed.touch()
                             raise SystemExit(1)
                         (state / f"{container}_{network}").touch()
+                        raise SystemExit(0)
+                    if sys.argv[1:3] == ["network", "inspect"]:
+                        if "{{json .Labels}}" in sys.argv:
+                            print(json.dumps({"com.openclaw.trusted-proxy": "true"}))
+                        else:
+                            print(json.dumps([{"Subnet": "10.250.0.0/28"}]))
                         raise SystemExit(0)
                     raise SystemExit(1)
                     """
@@ -456,12 +468,15 @@ class TenantNetworkIsolationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
-                {path.name for path in state_dir.iterdir() if not path.name.startswith("failed_")},
+                {path.name for path in state_dir.iterdir() if not path.name.startswith(("failed_", "ip_"))},
                 {
                     "nginx_openclaw-user-a",
                     "proxy_openclaw-user-a",
                     "proxy_openclaw-user-b",
                     "proxy_openclaw-user-c",
                 },
+            )
+            self.assertTrue(
+                (state_dir / "ip_nginx_openclaw-user-a_10.250.0.2").exists()
             )
             self.assertTrue((state_dir / "failed_proxy_openclaw-user-c").exists())

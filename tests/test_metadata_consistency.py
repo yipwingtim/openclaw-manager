@@ -3,6 +3,8 @@
 import runpy
 import sqlite3
 import unittest
+import tempfile
+from unittest.mock import Mock, patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -17,6 +19,42 @@ load_db = CHECKER["load_db"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def test_trusted_proxy_openclaw_requires_matching_nginx_authorization(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_dir = root / "alice"
+            (user_dir / "config").mkdir(parents=True)
+            (user_dir / "config" / "openclaw.json").write_text(
+                '{"gateway":{"auth":{"mode":"trusted-proxy","trustedProxy":{"userHeader":"x-forwarded-user"}},"trustedProxies":["10.0.0.2"]}}',
+                encoding="utf-8",
+            )
+            reporter = Reporter()
+            check_user(
+                "alice", user_dir, {},
+                {"alice": {"product": "openclaw", "status": "active", "container_name": "openclaw_alice"}},
+                {}, reporter,
+            )
+            self.assertIn(
+                "openclaw_trusted_proxy_mismatch",
+                {issue.code for issue in reporter.issues},
+            )
+
+    def test_nginx_detection_requires_manager_owned_identity_headers(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            conf = Path(temp_dir) / "alice.conf"
+            conf.write_text(
+                "upstream auth { server openclaw-instance-auth-proxy:8084 resolve; }\n"
+                "server { location / { auth_request /_instance_auth; proxy_set_header X-Forwarded-User $http_x_forwarded_user; } }\n",
+                encoding="utf-8",
+            )
+            detected = CHECKER["detect_nginx_conf"](conf)
+            self.assertFalse(detected["trusted_identity_headers"])
+
+    def test_expected_tenant_proxy_ip_uses_reserved_second_address(self):
+        inspected = Mock(returncode=0, stdout='[{"Subnet":"10.250.1.16/28"}]')
+        with patch.object(CHECKER["subprocess"], "run", return_value=inspected):
+            self.assertEqual(CHECKER["expected_tenant_proxy_ip"]("alice"), "10.250.1.18")
+
     def test_detect_nginx_conf_reports_instance_auth(self):
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "evo.conf"

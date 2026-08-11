@@ -55,6 +55,38 @@ render_instance_admin_provider_guard() {
   esac
 }
 
+render_instance_auth_upstream() {
+  local instance_id="$1"
+  [ -n "$instance_id" ] || return 1
+  local upstream="instance_auth_${instance_id//[^A-Za-z0-9_]/_}"
+  cat <<EOF
+upstream $upstream {
+    zone $upstream 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    server openclaw-instance-auth-proxy:8084 resolve;
+}
+EOF
+}
+
+render_instance_auth_location() {
+  local instance_id="$1"
+  local public_host="${PUBLIC_HOST:-}"
+  [ -n "$instance_id" ] && [ -n "$public_host" ] || return 1
+  local upstream="instance_auth_${instance_id//[^A-Za-z0-9_]/_}"
+  cat <<EOF
+    location = /_instance_auth {
+        internal;
+        proxy_pass http://$upstream/authorize/$instance_id;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Cookie \$http_cookie;
+    }
+    location @instance_login {
+        return 302 https://$public_host:30015/login?instance=$instance_id;
+    }
+EOF
+}
+
 nginx_user_htpasswd_file() {
   local user_id="$1"
   local htpasswd_file="$2"

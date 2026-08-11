@@ -64,14 +64,6 @@ fail() {
   exit 1
 }
 
-case "$USER_DIR" in
-  "$BASE_DIR/users/"*|"$BASE_DIR/instances/"*) ;;
-  *) fail "Invalid instance data path: $USER_DIR" ;;
-esac
-if [[ ! "$CONTAINER_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
-  fail "Invalid runtime container name"
-fi
-
 if [ ! -d "$USER_DIR" ]; then
   fail "User not found: $USER_ID ($USER_DIR)"
 fi
@@ -125,7 +117,7 @@ if ! LIST_OUTPUT="$(docker exec "$CONTAINER_NAME" timeout 45s openclaw devices l
   fail "Could not list devices: $LIST_OUTPUT"
 fi
 echo "$LIST_OUTPUT"
-CACHE_DIR="$USER_DIR"
+CACHE_DIR="$BASE_DIR/users/$USER_ID"
 CACHE_FILE="$CACHE_DIR/devices.txt"
 
 mkdir -p "$CACHE_DIR"

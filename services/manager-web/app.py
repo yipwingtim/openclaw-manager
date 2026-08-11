@@ -1907,7 +1907,12 @@ def approve_latest_for_user(
     *,
     instance_public_id=None,
 ):
+    instance = get_instance_record(user_id)
     script = MANAGER_DIR / "scripts" / "approve_device.sh"
+    env = {
+        "OPENCLAW_DATA_PATH": instance.get("data_path") or str(get_user_dir(user_id)),
+        "OPENCLAW_RUNTIME_TARGET": instance.get("runtime_identifier") or f"openclaw_{user_id}",
+    }
     result = subprocess.run(
         [str(script), user_id, "--latest"],
         cwd=str(MANAGER_DIR),
@@ -1915,6 +1920,7 @@ def approve_latest_for_user(
         capture_output=True,
         timeout=60,
         check=False,
+        env={**os.environ, **env},
     )
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:
@@ -1941,7 +1947,12 @@ def refresh_devices_for_user(
     *,
     instance_public_id=None,
 ):
+    instance = get_instance_record(user_id)
     script = MANAGER_DIR / "scripts" / "approve_device.sh"
+    env = {
+        "OPENCLAW_DATA_PATH": instance.get("data_path") or str(get_user_dir(user_id)),
+        "OPENCLAW_RUNTIME_TARGET": instance.get("runtime_identifier") or f"openclaw_{user_id}",
+    }
     result = subprocess.run(
         [str(script), user_id, "--list-only"],
         cwd=str(MANAGER_DIR),
@@ -1949,6 +1960,7 @@ def refresh_devices_for_user(
         capture_output=True,
         timeout=60,
         check=False,
+        env={**os.environ, **env},
     )
     output = (result.stdout + "\n" + result.stderr).strip()
     if result.returncode != 0:

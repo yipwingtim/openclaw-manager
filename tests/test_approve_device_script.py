@@ -80,6 +80,91 @@ class ApproveDeviceScriptTests(unittest.TestCase):
             )
             self.assertIn("Paired (0)", (user_dir / "devices.txt").read_text())
 
+    def test_instance_data_path_is_used_for_device_cache(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            script, legacy_dir, env = self.make_fixture(
+                root,
+                'if [ "$1" = "ps" ]; then echo openclaw.custom-runtime; exit 0; fi\n'
+                'echo "Paired (0)"\n',
+            )
+            instance_dir = root / "public" / "instances" / "openclaw" / "instance-1"
+            instance_dir.mkdir(parents=True)
+            env["OPENCLAW_DATA_PATH"] = str(instance_dir)
+
+            result = self.run_script(script, env)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((instance_dir / "devices.txt").is_file())
+
+    def test_refresh_cache_fails_when_metadata_query_fails(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = root / "manager"
+            scripts = manager / "scripts"
+            config = manager / "config"
+            scripts.mkdir(parents=True)
+            config.mkdir()
+            refresh = ROOT_DIR / "scripts" / "refresh_device_cache.sh"
+            shutil.copy2(refresh, scripts / refresh.name)
+            public = root / "public"
+            public.mkdir()
+            (config / "openclaw-manager.env").write_text(
+                f"OPENCLAW_PUBLIC_DIR={public}\nMETADATA_DB_FILE={public / 'manager.db'}\n",
+                encoding="utf-8",
+            )
+            (public / "manager.db").write_text("not sqlite", encoding="utf-8")
+            result = subprocess.run(["bash", str(scripts / refresh.name)], text=True, capture_output=True, env={**os.environ, "PATH": os.environ["PATH"]}, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Could not read OpenClaw instances", result.stdout)
+
+    def test_rejects_data_path_outside_public_directory(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            script, _, env = self.make_fixture(root, 'exit 0\n')
+            env["OPENCLAW_DATA_PATH"] = str(root / "outside")
+            result = self.run_script(script, env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Invalid instance data path", result.stderr)
+
+    def test_refresh_cache_script_reads_instance_metadata_paths(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = root / "manager"
+            scripts = manager / "scripts"
+            config = manager / "config"
+            scripts.mkdir(parents=True)
+            config.mkdir()
+            refresh = ROOT_DIR / "scripts" / "refresh_device_cache.sh"
+            shutil.copy2(refresh, scripts / refresh.name)
+            shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+            public = root / "public"
+            public.mkdir()
+            instance_dir = public / "instances" / "openclaw" / "instance-1"
+            instance_dir.mkdir(parents=True)
+            (config / "openclaw-manager.env").write_text(
+                f"OPENCLAW_PUBLIC_DIR={public}\nMETADATA_DB_FILE={public / 'manager.db'}\n",
+                encoding="utf-8",
+            )
+            import sqlite3
+            with sqlite3.connect(public / "manager.db") as conn:
+                conn.execute("CREATE TABLE instances (legacy_user_id TEXT, data_path TEXT, runtime_identifier TEXT, product TEXT, status TEXT)")
+                conn.execute("INSERT INTO instances VALUES ('alice', ?, 'openclaw.custom-runtime', 'openclaw', 'active')", (str(instance_dir),))
+                conn.commit()
+            docker = root / "docker"
+            docker.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = ps ]; then echo openclaw.custom-runtime; exit 0; fi\n"
+                "echo 'Paired (0)'\n",
+                encoding="utf-8",
+            )
+            docker.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{root}:{env['PATH']}"
+            result = subprocess.run(["bash", str(scripts / refresh.name)], text=True, capture_output=True, env=env, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((instance_dir / "devices.txt").is_file())
+
     def test_executor_latest_approval_refuses_second_attempt(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

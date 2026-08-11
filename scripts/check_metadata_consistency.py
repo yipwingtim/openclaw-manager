@@ -183,6 +183,7 @@ def detect_compose(path):
         "has_tenant_net": False,
         "has_old_gateway_service": False,
         "has_bad_empty_service": False,
+        "has_gateway_token_env": False,
     }
     if not path.is_file():
         return result
@@ -197,6 +198,7 @@ def detect_compose(path):
     result["has_tenant_net"] = "tenant-net" in text
     result["has_old_gateway_service"] = bool(re.search(r"(?m)^  openclaw-gateway:\s*$", text))
     result["has_bad_empty_service"] = bool(re.search(r"(?m)^  openclaw-:\s*$", text))
+    result["has_gateway_token_env"] = "OPENCLAW_GATEWAY_TOKEN=" in text
     return result
 
 
@@ -572,6 +574,11 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
         reporter.error(
             "openclaw_trusted_proxy_mismatch",
             f"{user_id}: trusted-proxy config and active Nginx authorization are inconsistent",
+        )
+    if auth_mode == "trusted-proxy" and compose["has_gateway_token_env"]:
+        reporter.error(
+            "openclaw_trusted_proxy_token_conflict",
+            f"{user_id}: trusted-proxy instance still configures OPENCLAW_GATEWAY_TOKEN",
         )
     if auth_mode == "trusted-proxy" and nginx["exists"]:
         expected_proxy = expected_tenant_proxy_ip(user_id)

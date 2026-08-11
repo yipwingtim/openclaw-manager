@@ -28,6 +28,12 @@ class MetadataConsistencyTests(unittest.TestCase):
                 '{"gateway":{"auth":{"mode":"trusted-proxy","trustedProxy":{"userHeader":"x-forwarded-user"}},"trustedProxies":["10.0.0.2"]}}',
                 encoding="utf-8",
             )
+            (user_dir / "docker-compose.yml").write_text(
+                "services:\n  openclaw-alice:\n    container_name: openclaw_alice\n"
+                "    environment:\n      - OPENCLAW_GATEWAY_TOKEN=conflict\n"
+                "    networks:\n      - tenant-net\n",
+                encoding="utf-8",
+            )
             reporter = Reporter()
             check_user(
                 "alice", user_dir, {},
@@ -36,6 +42,10 @@ class MetadataConsistencyTests(unittest.TestCase):
             )
             self.assertIn(
                 "openclaw_trusted_proxy_mismatch",
+                {issue.code for issue in reporter.issues},
+            )
+            self.assertIn(
+                "openclaw_trusted_proxy_token_conflict",
                 {issue.code for issue in reporter.issues},
             )
 
@@ -54,6 +64,16 @@ class MetadataConsistencyTests(unittest.TestCase):
         inspected = Mock(returncode=0, stdout='[{"Subnet":"10.250.1.16/28"}]')
         with patch.object(CHECKER["subprocess"], "run", return_value=inspected):
             self.assertEqual(CHECKER["expected_tenant_proxy_ip"]("alice"), "10.250.1.18")
+
+    def test_compose_detection_finds_gateway_token_environment(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            compose = Path(temp_dir) / "docker-compose.yml"
+            compose.write_text(
+                "services:\n  openclaw-alice:\n    environment:\n"
+                "      - OPENCLAW_GATEWAY_TOKEN=conflict\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(CHECKER["detect_compose"](compose)["has_gateway_token_env"])
 
     def test_detect_nginx_conf_reports_instance_auth(self):
         with TemporaryDirectory() as temp_dir:

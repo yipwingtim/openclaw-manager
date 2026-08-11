@@ -292,6 +292,11 @@ import secrets
 print(secrets.token_hex(24))
 PY
 )"
+if [ "$OPENCLAW_INSTANCE_AUTH_MODE" = "trusted-proxy" ]; then
+  GATEWAY_AUTH_ENV=""
+else
+  GATEWAY_AUTH_ENV="- OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN"
+fi
 
 # ===== 创建用户目录 =====
 mkdir -p "$USER_DIR"/{config,workspaces,workspace,skills,extensions,uploads}
@@ -367,7 +372,7 @@ sed -i "s#{{VERSION}}#$VERSION#g" "$TARGET_COMPOSE"
 sed -i "s#{{BASE_DIR}}#$BASE_DIR#g" "$TARGET_COMPOSE"
 sed -i "s#{{DATA_PATH}}#$USER_DIR#g" "$TARGET_COMPOSE"
 sed -i "s#{{TZ}}#$TZ#g" "$TARGET_COMPOSE"
-sed -i "s#{{GATEWAY_TOKEN}}#$GATEWAY_TOKEN#g" "$TARGET_COMPOSE"
+sed -i "s#{{GATEWAY_AUTH_ENV}}#$GATEWAY_AUTH_ENV#g" "$TARGET_COMPOSE"
 sed -i "s#{{TENANT_NETWORK}}#$TENANT_NETWORK#g" "$TARGET_COMPOSE"
 
 # ===== 生成 nginx 用户配置 =====

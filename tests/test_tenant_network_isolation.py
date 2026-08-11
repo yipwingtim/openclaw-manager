@@ -95,6 +95,14 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         self.assertIn('docker network ls -q --filter "label=com.openclaw.tenant-network"', script)
         self.assertIn("--format '{{range .Containers}}{{println .Name}}{{end}}'", script)
 
+    def test_runtime_check_verifies_recursive_hermes_host_access(self):
+        script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")
+
+        self.assertIn("hermes_acl_has_access", script)
+        self.assertIn("hermes_acl_has_default", script)
+        self.assertIn('find "$instance_dir" -xdev', script)
+        self.assertIn("Hermes host manager access missing", script)
+
     def test_runtime_check_ignores_nginx_backup_tokens_and_summarizes_active_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

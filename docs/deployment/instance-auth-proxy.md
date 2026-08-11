@@ -30,6 +30,13 @@ remain valid until a separate migration is performed. The same trusted-proxy
 configuration can later sit behind a shared domain-and-path route; this change
 does not implement that routing.
 
+OpenClaw's local device-management CLI also requires a Gateway control
+credential. In `trusted-proxy` mode Manager writes the official local
+`gateway.auth.password` field; it never writes `OPENCLAW_GATEWAY_TOKEN`, because
+token and trusted-proxy authentication are mutually exclusive. The Adapter
+continues to invoke the same OpenClaw CLI, which reads this password from the
+mounted instance config.
+
 ## Deployment and migration
 
 Generate a dedicated high-entropy value and add it to
@@ -102,3 +109,26 @@ bash scripts/check_runtime_security.sh
 
 Keep the backup directory printed by the migration until browser verification
 is complete.
+
+For existing trusted-proxy OpenClaw instances, preview and apply the local
+control-password migration before device approval:
+
+```bash
+docker compose exec manager-executor \
+  python3 /opt/openclaw-manager/scripts/migrate_openclaw_trusted_proxy_password.py
+
+docker compose exec manager-executor \
+  python3 /opt/openclaw-manager/scripts/migrate_openclaw_trusted_proxy_password.py --apply
+```
+
+The apply command only updates instance `openclaw.json` files and creates a
+backup; it does not restart user instances. Restart only the migrated
+OpenClaw instances during an approved maintenance window so the Gateway loads
+the password. Do not recreate unrelated instances or restore a Gateway token.
+
+Then run both checks and verify device refresh/approval from the Manager UI:
+
+```bash
+python3 scripts/check_metadata_consistency.py
+bash scripts/check_runtime_security.sh
+```

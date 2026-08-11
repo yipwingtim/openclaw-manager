@@ -114,6 +114,7 @@ class NginxDynamicUpstreamTests(unittest.TestCase):
         template = (ROOT_DIR / "templates" / "docker-compose.tpl.yml").read_text(encoding="utf-8")
 
         self.assertIn('"mode": "trusted-proxy"', script)
+        self.assertIn('"password": "$GATEWAY_PASSWORD"', script)
         self.assertIn('"userHeader": "x-forwarded-user"', script)
         self.assertIn('"trustedProxies": ["$TRUSTED_PROXY_IP"]', script)
         self.assertIn("auth_request /_instance_auth;", script)

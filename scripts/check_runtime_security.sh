@@ -167,6 +167,9 @@ for hermes_root in "$OPENCLAW_PUBLIC_DIR/hermes" "$OPENCLAW_PUBLIC_DIR/instances
     break
   fi
   while IFS= read -r -d '' instance_dir; do
+    if [ -d "$instance_dir/cron" ]; then
+      echo "[INFO] Skip Hermes-managed cron ACL subtree: $instance_dir/cron"
+    fi
     missing=""
     while IFS= read -r -d '' path; do
       expected="rw"
@@ -179,7 +182,9 @@ for hermes_root in "$OPENCLAW_PUBLIC_DIR/hermes" "$OPENCLAW_PUBLIC_DIR/instances
         missing="$path"
         break
       fi
-    done < <(find "$instance_dir" -xdev \( -type d -o -type f \) -print0)
+    done < <(find "$instance_dir" -xdev \
+      -path "$instance_dir/cron" -prune -o \
+      \( -type d -o -type f \) -print0)
     if [ -n "$missing" ]; then
       error "Hermes host manager access missing: $missing"
     else

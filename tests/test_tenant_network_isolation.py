@@ -101,7 +101,56 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         self.assertIn("hermes_acl_has_access", script)
         self.assertIn("hermes_acl_has_default", script)
         self.assertIn('find "$instance_dir" -xdev', script)
+        self.assertIn('-path "$instance_dir/cron" -prune -o', script)
+        self.assertIn("Skip Hermes-managed cron ACL subtree", script)
         self.assertIn("Hermes host manager access missing", script)
+
+    def test_runtime_check_reports_and_skips_hermes_managed_cron_acl(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manager = root / "manager"
+            scripts_dir = manager / "scripts"
+            config_dir = manager / "config"
+            public_dir = root / "public"
+            instance_dir = public_dir / "hermes" / "alice"
+            cron_dir = instance_dir / "cron"
+            bin_dir = root / "bin"
+            scripts_dir.mkdir(parents=True)
+            config_dir.mkdir()
+            cron_dir.mkdir(parents=True)
+            bin_dir.mkdir()
+            shutil.copy2(RUNTIME_SECURITY_CHECK, scripts_dir / RUNTIME_SECURITY_CHECK.name)
+            shutil.copy2(NETWORK_HELPER, scripts_dir / NETWORK_HELPER.name)
+            (config_dir / "openclaw-manager.env").write_text(
+                f"OPENCLAW_PUBLIC_DIR={public_dir}\nOPENCLAW_INTERNAL_TOKEN=current\n",
+                encoding="utf-8",
+            )
+            (bin_dir / "docker").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            (bin_dir / "getfacl").write_text(
+                "#!/bin/sh\n"
+                "printf 'user::rwx\\nuser:1000:rwx\\nmask::rwx\\n"
+                "default:user:1000:rwx\\ndefault:mask::rwx\\n'\n",
+                encoding="utf-8",
+            )
+            for command in (bin_dir / "docker", bin_dir / "getfacl"):
+                command.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+            env["HOST_MANAGER_UID"] = "1000"
+
+            result = subprocess.run(
+                ["bash", str(scripts_dir / RUNTIME_SECURITY_CHECK.name)],
+                text=True, capture_output=True, env=env, check=False,
+            )
+
+            self.assertIn(
+                f"[INFO] Skip Hermes-managed cron ACL subtree: {cron_dir}",
+                result.stdout,
+            )
+            self.assertNotIn(
+                f"Hermes host manager access missing: {cron_dir}",
+                result.stdout,
+            )
 
     def test_runtime_check_ignores_nginx_backup_tokens_and_summarizes_active_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:

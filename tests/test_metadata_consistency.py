@@ -16,9 +16,50 @@ check_deleted_recycle_dirs = CHECKER["check_deleted_recycle_dirs"]
 check_global = CHECKER["check_global"]
 check_user = CHECKER["check_user"]
 load_db = CHECKER["load_db"]
+check_hermes_auth_bridge = CHECKER["check_hermes_auth_bridge"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def test_hermes_bridge_reports_inconsistent_client_and_grant(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_file = Path(temp_dir) / "manager.db"
+            with sqlite3.connect(db_file) as conn:
+                conn.executescript((ROOT_DIR / "db" / "schema.sql").read_text())
+                conn.execute(
+                    "INSERT INTO users(public_id,username,normalized_username) "
+                    "VALUES('u','u','u')"
+                )
+                conn.executemany(
+                    "INSERT INTO instances(public_id,owner_user_id,product,instance_name,runtime_identifier) "
+                    "VALUES(?,1,?,?,?)",
+                    [("i1", "openclaw", "one", "r1"),
+                     ("i2", "hermes", "two", "r2")],
+                )
+                conn.execute(
+                    "INSERT INTO hermes_auth_clients(instance_id,client_id,client_secret_hash,redirect_uri) "
+                    "VALUES(1,'client','sha256','http://bad/auth/callback')"
+                )
+                conn.execute(
+                    "INSERT INTO user_sessions(token_hash,user_id,provider,csrf_token,expires_at,created_at,last_seen_at) "
+                    "VALUES('session',1,'campus-uis','csrf','2099-01-01','2026-01-01','2026-01-01')"
+                )
+                conn.commit()
+                conn.execute("PRAGMA foreign_keys = OFF")
+                conn.execute(
+                    "INSERT INTO hermes_auth_grants VALUES('code',1,2,1,'session','uri','challenge','1','2',NULL)"
+                )
+            reporter = Reporter()
+            check_hermes_auth_bridge(db_file, reporter)
+            self.assertEqual(
+                {issue.code for issue in reporter.issues},
+                {
+                    "hermes_auth_client_product_mismatch",
+                    "hermes_auth_redirect_not_https",
+                    "hermes_auth_secret_hash_invalid",
+                    "hermes_auth_grant_instance_mismatch",
+                },
+            )
+
     def test_trusted_proxy_openclaw_requires_matching_nginx_authorization(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

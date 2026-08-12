@@ -61,6 +61,12 @@ with sqlite3.connect(db_file) as conn:
                 "python3 scripts/migrate_activity_snapshots.py "
                 "--db <path> --apply"
             )
+        if version < 8:
+            raise SystemExit(
+                "[ERROR] Metadata schema requires: "
+                "python3 scripts/migrate_hermes_auth_bridge.py "
+                "--db <path> --apply"
+            )
     conn.executescript(schema)
     conn.commit()
 

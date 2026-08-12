@@ -290,6 +290,43 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_snapshots_success_cursor
 ON activity_snapshots(instance_id, source_cursor)
 WHERE status = 'success' AND source_cursor IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS hermes_auth_clients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL UNIQUE,
+    client_id TEXT NOT NULL UNIQUE,
+    client_secret_hash TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    rotated_at INTEGER,
+    revoked_at INTEGER,
+    FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+    UNIQUE (id, instance_id)
+);
+
+CREATE TABLE IF NOT EXISTS hermes_auth_grants (
+    code_hash TEXT PRIMARY KEY,
+    client_id INTEGER NOT NULL,
+    instance_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    manager_session_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    consumed_at INTEGER,
+    FOREIGN KEY (client_id, instance_id)
+        REFERENCES hermes_auth_clients(id, instance_id) ON DELETE CASCADE,
+    FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (manager_session_id) REFERENCES user_sessions(token_hash) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hermes_auth_grants_expires
+ON hermes_auth_grants(expires_at);
+
+INSERT OR IGNORE INTO schema_migrations (version, name)
+VALUES (8, 'hermes_auth_bridge');
+
 INSERT OR IGNORE INTO schema_migrations (version, name)
 VALUES (3, 'local_auth_session');
 

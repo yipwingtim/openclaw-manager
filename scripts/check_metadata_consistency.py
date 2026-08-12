@@ -9,6 +9,7 @@ import re
 import sqlite3
 import sys
 import subprocess
+import urllib.parse
 import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
@@ -355,6 +356,58 @@ def load_db(path, reporter):
         except sqlite3.Error as exc:
             reporter.error("metadata_db_read_failed", f"could not read metadata database: {exc}")
     return instances, ports
+
+
+def check_hermes_auth_bridge(path, reporter):
+    if not path.is_file():
+        return
+    with sqlite3.connect(path) as conn:
+        tables = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        if "hermes_auth_clients" not in tables:
+            return
+        for client_id, redirect_uri, secret_hash, product in conn.execute(
+            "SELECT c.client_id, c.redirect_uri, c.client_secret_hash, i.product "
+            "FROM hermes_auth_clients c JOIN instances i ON i.id = c.instance_id"
+        ):
+            if product != "hermes":
+                reporter.error(
+                    "hermes_auth_client_product_mismatch",
+                    f"client_id={client_id} belongs to product={product}",
+                )
+            try:
+                parsed_redirect = urllib.parse.urlsplit(redirect_uri)
+                redirect_valid = bool(
+                    parsed_redirect.scheme == "https" and parsed_redirect.hostname
+                    and not parsed_redirect.username and not parsed_redirect.password
+                    and not parsed_redirect.query and not parsed_redirect.fragment
+                    and parsed_redirect.path.endswith("/auth/callback")
+                )
+            except (TypeError, ValueError):
+                redirect_valid = False
+            if not redirect_valid:
+                reporter.error(
+                    "hermes_auth_redirect_not_https",
+                    f"client_id={client_id} redirect URI is not HTTPS",
+                )
+            if not secret_hash.startswith("scrypt$"):
+                reporter.error(
+                    "hermes_auth_secret_hash_invalid",
+                    f"client_id={client_id} secret is not stored as scrypt",
+                )
+        mismatches = conn.execute(
+            "SELECT COUNT(*) FROM hermes_auth_grants g "
+            "JOIN hermes_auth_clients c ON c.id = g.client_id "
+            "WHERE g.instance_id != c.instance_id"
+        ).fetchone()[0]
+        if mismatches:
+            reporter.error(
+                "hermes_auth_grant_instance_mismatch",
+                f"{mismatches} grant(s) do not match their client instance",
+            )
 
 
 def container_htpasswd_path(user_id):
@@ -773,6 +826,7 @@ def main():
     users_dirs = scan_user_dirs(OPENCLAW_PUBLIC_DIR)
     recycle_dirs = scan_deleted_recycle_dirs(OPENCLAW_PUBLIC_DIR)
     db_instances, db_ports = load_db(METADATA_DB_FILE, reporter)
+    check_hermes_auth_bridge(METADATA_DB_FILE, reporter)
     for user_id, row in db_instances.items():
         status = (row.get("status") or "active").strip().lower()
         data_path = row.get("data_path")

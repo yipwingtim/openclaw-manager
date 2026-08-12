@@ -59,6 +59,10 @@ def initialize(db_file=None, schema_file=None):
                 raise RuntimeError(
                     "metadata schema requires scripts/migrate_activity_snapshots.py"
                 )
+            if version < 8:
+                raise RuntimeError(
+                    "metadata schema requires scripts/migrate_hermes_auth_bridge.py"
+                )
         conn.executescript(schema)
 
 

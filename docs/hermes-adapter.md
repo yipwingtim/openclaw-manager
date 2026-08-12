@@ -71,6 +71,11 @@ python3 scripts/migrate_hermes_uis_auth.py \
   --issuer https://<manager-host>:30015/auth/hermes
 ```
 
+The `--apply` operation must run as root. Before changing files it verifies
+that privilege is available, then copies the Provider with the Hermes data
+directory owner and explicit modes (`0750` for directories and `0640` for
+files). Template ownership and inherited ACLs are never trusted.
+
 After reviewing the plan, repeat with `--apply`. Apply removes the legacy Basic
 Auth entries, installs/enables the Provider, creates one client, and restarts only
 the selected container. A failure restores the original files, deletes the new

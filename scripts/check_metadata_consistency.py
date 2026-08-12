@@ -433,6 +433,35 @@ def check_hermes_auth_bridge(path, reporter):
                     "hermes_auth_provider_not_enabled",
                     f"client_id={client_id} campus-uis-bridge is not installed and enabled",
                 )
+            elif plugin.is_file():
+                plugin_root = plugin.parent
+                try:
+                    root_stat = root.stat()
+                    plugin_paths = [
+                        plugin_root.parent, plugin_root, *sorted(plugin_root.rglob("*"))
+                    ]
+                    invalid_paths = []
+                    for plugin_path in plugin_paths:
+                        plugin_stat = plugin_path.stat()
+                        expected_mode = 0o750 if plugin_path.is_dir() else 0o640
+                        if (
+                            plugin_path.is_symlink()
+                            or not (plugin_path.is_dir() or plugin_path.is_file())
+                            or plugin_stat.st_uid != root_stat.st_uid
+                            or plugin_stat.st_gid != root_stat.st_gid
+                            or plugin_stat.st_mode & 0o777 != expected_mode
+                        ):
+                            invalid_paths.append(str(plugin_path))
+                    if invalid_paths:
+                        reporter.error(
+                            "hermes_auth_provider_permissions_invalid",
+                            f"client_id={client_id} provider ownership or modes are invalid",
+                        )
+                except OSError as exc:
+                    reporter.error(
+                        "hermes_auth_provider_permissions_invalid",
+                        f"client_id={client_id} provider permissions cannot be checked: {exc}",
+                    )
             if mode & 0o077 or any(
                 f"{key}=" not in env_text for key in (
                     "HERMES_UIS_BRIDGE_ISSUER", "HERMES_UIS_BRIDGE_CLIENT_ID",

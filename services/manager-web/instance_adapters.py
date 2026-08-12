@@ -15,6 +15,37 @@ from pathlib import Path
 from product_capabilities import product_auth_contract, product_capabilities
 
 
+HERMES_RUNTIME_UID = 10000
+HERMES_RUNTIME_GID = 10000
+
+
+def stage_hermes_plugin(source, target, uid, gid):
+    """Copy plugin contents without trusting source metadata or links."""
+    source_paths = [source, *sorted(source.rglob("*"))]
+    for path in source_paths:
+        if path.is_symlink():
+            raise RuntimeError(f"Hermes plugin cannot contain symlinks: {path}")
+        if not (path.is_dir() or path.is_file()):
+            raise RuntimeError(f"Hermes plugin contains unsupported file type: {path}")
+    shutil.copytree(source, target, copy_function=shutil.copyfile)
+    os.chown(target.parent, uid, gid, follow_symlinks=False)
+    target.parent.chmod(0o750)
+    paths = [target, *sorted(target.rglob("*"))]
+    try:
+        for path in paths:
+            if path.is_dir():
+                mode = 0o750
+            elif path.is_file():
+                mode = 0o640
+            else:
+                raise RuntimeError(f"Hermes plugin contains unsupported file type: {path}")
+            os.chown(path, uid, gid, follow_symlinks=False)
+            path.chmod(mode)
+    except Exception:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+
+
 class OpenClawDockerAdapter:
     CAPABILITIES = product_capabilities("openclaw")
     AUTH_PRODUCT = "openclaw"
@@ -1901,7 +1932,9 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             if not plugin_source.is_dir():
                 raise RuntimeError(f"Hermes UIS provider template not found: {plugin_source}")
             plugin_target.parent.mkdir(parents=True)
-            shutil.copytree(plugin_source, plugin_target)
+            stage_hermes_plugin(
+                plugin_source, plugin_target, HERMES_RUNTIME_UID, HERMES_RUNTIME_GID
+            )
             with (data_path / ".env").open("a", encoding="utf-8") as env_file:
                 env_file.write(
                     f"HERMES_UIS_BRIDGE_ISSUER={issuer}\n"

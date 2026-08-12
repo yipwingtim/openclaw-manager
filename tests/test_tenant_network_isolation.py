@@ -32,11 +32,11 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         script = DEPLOY_SERVICES.read_text(encoding="utf-8")
 
         self.assertLess(
-            script.index("docker compose build"),
-            script.index("docker compose up -d --no-build"),
+            script.index('"${compose[@]}" build'),
+            script.index('"${compose[@]}" up -d --no-build'),
         )
         self.assertLess(
-            script.index("docker compose up -d --no-build"),
+            script.index('"${compose[@]}" up -d --no-build'),
             script.index("connect_shared_services_to_tenant_networks"),
         )
 
@@ -63,8 +63,9 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         script = DEPLOY_SERVICES.read_text(encoding="utf-8")
 
         self.assertIn('services=("$@")', script)
-        self.assertIn('docker compose build "${services[@]}"', script)
-        self.assertIn('docker compose up -d --no-build --wait "${services[@]}"', script)
+        self.assertIn('compose+=(--env-file "$CONFIG_FILE")', script)
+        self.assertIn('"${compose[@]}" build "${services[@]}"', script)
+        self.assertIn('"${compose[@]}" up -d --no-build --wait "${services[@]}"', script)
 
     def test_runtime_check_verifies_shared_services_on_tenant_networks(self):
         script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")

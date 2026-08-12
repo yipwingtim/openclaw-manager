@@ -2,7 +2,7 @@
 
 ## 1. 状态
 
-- 状态：设计完成，尚未实现
+- 状态：Slice 1–4 已实现；现有实例仍需显式逐实例迁移
 - 目标版本：Hermes Agent `v2026.7.20`
 - 认证来源：现有 Manager `campus-uis` OAuth2 登录
 - 相关研究：[Hermes Dashboard 接入校内 UIS 的可行性研究](../research/hermes-dashboard-sso.md)
@@ -276,7 +276,9 @@ consumed_at             nullable
 
 ```text
 HERMES_AUTH_BRIDGE_ISSUER
+HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE
 HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE
+HERMES_AUTH_BRIDGE_SIGNING_KEYS=kid-current=/run/secrets/current.pem,kid-old=/run/secrets/old.pem
 HERMES_AUTH_BRIDGE_ACTIVE_KID
 HERMES_AUTH_BRIDGE_GRANT_TTL_SECONDS=60
 HERMES_AUTH_BRIDGE_TOKEN_TTL_SECONDS=900
@@ -453,6 +455,13 @@ Control 的入口授权立即阻止访问。Bridge access token 不作为绕过�
 - 新 Hermes 创建流程默认配置 Bridge Provider。
 - 提供只读 preview 和显式 `--apply` 的历史实例迁移脚本。
 - 备份原 Basic Auth 配置、逐实例迁移、失败自动回滚。
+
+## 20. 实现记录（2026-08-12）
+
+- 公开 Bridge 由 `manager-user-web` 承载，Control 保持 Session、实例授权、grant、client 与签名权威。
+- `campus-uis-bridge` 使用 Hermes `v2026.7.20` 的官方 keyword-only Provider 接口及八字段 `Session`；不提供 discovery 或 ID Token。
+- 新 Hermes 实例在容器启动前安装并启用 Provider、登记独立 client；失败沿现有创建事务回滚。
+- `scripts/migrate_hermes_uis_auth.py` 默认 preview，必须提供精确实例 UUID 和 `--apply` 才修改文件、client 并重启该实例。
 - 更新运行时安全检查、元数据一致性检查和部署文档。
 
 ## 20. 决策摘要

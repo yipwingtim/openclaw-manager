@@ -6,6 +6,7 @@ COPY services/manager-control/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/manager-control/app.py .
+COPY services/manager-control/hermes_auth_bridge.py .
 COPY services/manager-web/metadata_store.py .
 COPY services/manager-web/product_capabilities.py .
 

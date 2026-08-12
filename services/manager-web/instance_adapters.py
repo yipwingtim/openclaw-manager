@@ -1715,6 +1715,13 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 f"    ssl_certificate_key {key};\n\n"
                 + auth_locations
                 +
+                "    location = /auth/callback {\n"
+                f"        proxy_pass http://hermes_backend_{port};\n"
+                "        proxy_http_version 1.1;\n"
+                "        proxy_set_header Host $host;\n"
+                "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+                "        access_log off;\n"
+                "    }\n"
                 "    location / {\n"
                 "        auth_request /_instance_auth;\n"
                 f"        proxy_pass http://hermes_backend_{port};\n"
@@ -1822,7 +1829,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
     def create(
         self, instance, basic_auth_enabled, basic_auth_password="",
         skip_nginx_reload=True, skip_metadata_write=False, timeout=420,
-        version=None,
+        version=None, hermes_auth_client_callback=None,
     ):
         del skip_nginx_reload, skip_metadata_write
         runtime_target = self.get_runtime_target(instance)
@@ -1848,13 +1855,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         created_network = False
         try:
             data_path.mkdir(parents=True)
-            (data_path / ".env").write_text(
-                "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=" + user_id + "\n"
-                "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH="
-                + self._password_hash(basic_auth_password) + "\n"
-                "HERMES_DASHBOARD_BASIC_AUTH_SECRET=" + secrets.token_urlsafe(48) + "\n",
-                encoding="utf-8",
-            )
+            (data_path / ".env").touch()
             (data_path / ".env").chmod(0o600)
             (data_path / "config.yaml").write_text(
                 "security:\n  allow_lazy_installs: false\n",
@@ -1887,6 +1888,39 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             if code != 0 or len(allocated_ports) != 1:
                 raise RuntimeError(output or "Hermes ingress port allocation failed")
             instance["_created_port"] = int(allocated_ports[0])
+            issuer = os.environ.get("HERMES_AUTH_BRIDGE_ISSUER", "").rstrip("/")
+            if not issuer.startswith("https://"):
+                raise RuntimeError("HERMES_AUTH_BRIDGE_ISSUER must use HTTPS")
+            client_id = secrets.token_urlsafe(24)
+            client_secret = secrets.token_urlsafe(48)
+            redirect_uri = f"https://{os.environ.get('PUBLIC_HOST', '').strip()}:{instance['_created_port']}/auth/callback"
+            if not os.environ.get("PUBLIC_HOST", "").strip():
+                raise RuntimeError("PUBLIC_HOST is required for Hermes UIS authentication")
+            plugin_source = self.manager_dir / "templates" / "hermes" / "plugins" / "campus-uis-bridge"
+            plugin_target = data_path / "plugins" / "campus-uis-bridge"
+            if not plugin_source.is_dir():
+                raise RuntimeError(f"Hermes UIS provider template not found: {plugin_source}")
+            plugin_target.parent.mkdir(parents=True)
+            shutil.copytree(plugin_source, plugin_target)
+            with (data_path / ".env").open("a", encoding="utf-8") as env_file:
+                env_file.write(
+                    f"HERMES_UIS_BRIDGE_ISSUER={issuer}\n"
+                    f"HERMES_UIS_BRIDGE_CLIENT_ID={client_id}\n"
+                    f"HERMES_UIS_BRIDGE_CLIENT_SECRET={client_secret}\n"
+                    f"HERMES_UIS_BRIDGE_INSTANCE_ID={instance['public_id']}\n"
+                )
+            (data_path / "config.yaml").write_text(
+                "security:\n  allow_lazy_installs: false\n"
+                "plugins:\n  enabled:\n    - campus-uis-bridge\n",
+                encoding="utf-8",
+            )
+            instance["_hermes_auth_client"] = {
+                "client_id": client_id, "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+            }
+            if hermes_auth_client_callback is not None:
+                hermes_auth_client_callback(instance["_hermes_auth_client"])
+                instance["_hermes_auth_client_created"] = True
             image = f"nousresearch/hermes-agent:{version or self.IMAGE.rsplit(':', 1)[-1]}"
             code, output = self._run_hermes_container(instance, image, network, timeout)
             if code != 0:
@@ -1901,6 +1935,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             if created_network:
                 self.run_command(["docker", "network", "rm", network], timeout=30)
             instance.pop("_created_port", None)
+            instance.pop("_hermes_auth_client", None)
             return 1, f"Hermes creation failed and was rolled back: {exc}"
 
     def delete(self, instance):
@@ -2032,7 +2067,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             lines = text.splitlines(keepends=True)
         return "".join(lines)
 
-    def restore(self, instance):
+    def restore(self, instance, hermes_auth_client_callback=None):
         try:
             data_path = self._hermes_data_path(instance)
         except ValueError as exc:
@@ -2086,6 +2121,31 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             data_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(recycled_data), str(data_path))
             moved = True
+            env_file = data_path / ".env"
+            env_text = env_file.read_text(encoding="utf-8") if env_file.is_file() else ""
+            if "HERMES_UIS_BRIDGE_CLIENT_ID=" in env_text:
+                issuer = os.environ.get("HERMES_AUTH_BRIDGE_ISSUER", "").rstrip("/")
+                if not issuer.startswith("https://"):
+                    raise RuntimeError("HERMES_AUTH_BRIDGE_ISSUER must use HTTPS")
+                client_id, client_secret = secrets.token_urlsafe(24), secrets.token_urlsafe(48)
+                values = {
+                    "HERMES_UIS_BRIDGE_ISSUER": issuer,
+                    "HERMES_UIS_BRIDGE_CLIENT_ID": client_id,
+                    "HERMES_UIS_BRIDGE_CLIENT_SECRET": client_secret,
+                    "HERMES_UIS_BRIDGE_INSTANCE_ID": instance["public_id"],
+                }
+                lines = [
+                    line for line in env_text.splitlines()
+                    if line.split("=", 1)[0] not in values
+                ] + [f"{key}={value}" for key, value in values.items()]
+                env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                env_file.chmod(0o600)
+                if hermes_auth_client_callback is not None:
+                    hermes_auth_client_callback({
+                        "client_id": client_id, "client_secret": client_secret,
+                        "redirect_uri": f"{instance['access_url'].rstrip('/')}/auth/callback",
+                    })
+                    instance["_hermes_auth_client_created"] = True
             code, output = self._restore_hermes_runtime(
                 instance, image, was_running, network
             )

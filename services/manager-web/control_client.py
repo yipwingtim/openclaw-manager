@@ -151,6 +151,18 @@ def delete_external_session(external_token_hash):
     )
 
 
+def authorize_hermes(payload):
+    return request_json("POST", "/internal/v1/hermes-auth/authorize", payload=payload)
+
+
+def redeem_hermes(payload):
+    return request_json("POST", "/internal/v1/hermes-auth/token", payload=payload)
+
+
+def hermes_jwks():
+    return request_json("GET", "/internal/v1/hermes-auth/jwks.json")
+
+
 def list_admin_instances():
     return request_json("GET", "/internal/v1/admin/instances")["instances"]
 

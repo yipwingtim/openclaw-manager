@@ -254,9 +254,16 @@ class ManagerExecutorTests(unittest.TestCase):
         }
         adapter = Mock()
         adapter.supports.return_value = True
-        adapter.create.side_effect = lambda *args, **kwargs: (
-            instance.__setitem__("_created_port", 39119) or (0, "created")
-        )
+        def create(*args, **kwargs):
+            instance["_created_port"] = 39119
+            kwargs["hermes_auth_client_callback"]({
+                "client_id": "client", "client_secret": "secret",
+                "redirect_uri": "https://example.test:39119/auth/callback",
+            })
+            instance["_hermes_auth_client_created"] = True
+            return 0, "created"
+
+        adapter.create.side_effect = create
         adapter.configure_ingress.return_value = (0, "published")
         with tempfile.TemporaryDirectory() as directory:
             secret_dir = Path(directory)
@@ -273,6 +280,12 @@ class ManagerExecutorTests(unittest.TestCase):
                 self.executor.run_once(control, lambda product: adapter)
 
         adapter.configure_ingress.assert_called_once_with(instance)
+        control.create_hermes_auth_client.assert_called_once_with(
+            "instance-1",
+            {"client_id": "client", "client_secret": "secret",
+             "redirect_uri": "https://example.test:39119/auth/callback"},
+        )
+        control.delete_hermes_auth_client.assert_not_called()
         result = control.update.call_args.kwargs["result"]
         self.assertEqual(result["access_url"], "https://example.test:39119")
         self.assertEqual(result["openclaw_token"], "")
@@ -667,6 +680,37 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter, max_attempts=2)
 
         adapter.restore.assert_called_once_with(control.claim.return_value["instance"])
+
+    def test_run_once_restores_hermes_with_rotated_bridge_client(self):
+        control = Mock()
+        instance = {
+            "public_id": "instance-1", "product": "hermes", "status": "deleted",
+            "restore_state": "restorable", "legacy_user_id": "alice",
+            "runtime_identifier": "hermes_alice",
+        }
+        control.claim.return_value = {
+            "job": {"request_id": "restore-hermes", "action": "instance.restore", "params": {}},
+            "instance": instance,
+        }
+        adapter = Mock()
+        adapter.supports.return_value = True
+
+        def restore(*args, **kwargs):
+            kwargs["hermes_auth_client_callback"]({
+                "client_id": "rotated", "client_secret": "new-secret",
+                "redirect_uri": "https://example.test/auth/callback",
+            })
+            return 0, "restored"
+
+        adapter.restore.side_effect = restore
+        self.executor.run_once(control, lambda product: adapter)
+
+        control.create_hermes_auth_client.assert_called_once_with(
+            "instance-1",
+            {"client_id": "rotated", "client_secret": "new-secret",
+             "redirect_uri": "https://example.test/auth/callback"},
+        )
+        control.delete_hermes_auth_client.assert_not_called()
 
     def test_run_once_purges_only_restorable_deleted_instance(self):
         control = Mock()

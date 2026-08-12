@@ -13,6 +13,7 @@ from flask import Flask, g, jsonify, request
 from werkzeug.security import check_password_hash
 
 import metadata_store
+from hermes_auth_bridge import BridgeStore, SigningKeys
 from product_capabilities import execution_action_capability, product_supports
 
 
@@ -97,6 +98,27 @@ JOB_ACTION_PARAMS = {
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+_hermes_signing_keys = None
+
+
+def hermes_bridge_store():
+    return BridgeStore(DB_FILE)
+
+
+def hermes_signing_keys():
+    global _hermes_signing_keys
+    if _hermes_signing_keys is None:
+        kid = os.environ.get("HERMES_AUTH_BRIDGE_ACTIVE_KID", "").strip()
+        configured = os.environ.get("HERMES_AUTH_BRIDGE_SIGNING_KEYS", "").strip()
+        if configured:
+            key_files = dict(item.split("=", 1) for item in configured.split(","))
+        else:
+            key_file = os.environ.get("HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE", "").strip()
+            key_files = {kid: key_file} if kid and key_file else {}
+        if not key_files or not kid:
+            raise ValueError("Hermes auth bridge signing key is not configured")
+        _hermes_signing_keys = SigningKeys.from_pem_files(key_files, kid)
+    return _hermes_signing_keys
 
 
 def portal_instance(instance):
@@ -438,6 +460,100 @@ def authorize_instance_access(instance_public_id):
     if instance is None or instance["status"] not in {"active", "stopped"}:
         return jsonify({"error": "instance access is forbidden"}), 403
     return jsonify({"allowed": True, "identity": user["public_id"]})
+
+
+@app.post("/internal/v1/hermes-auth/authorize")
+@require_services("manager-user-web")
+def authorize_hermes_bridge():
+    payload = request.get_json(silent=True) or {}
+    required = ("client_id", "redirect_uri", "code_challenge", "session_hash")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+        return jsonify({"error": "invalid_request"}), 400
+    try:
+        ttl = max(1, int(os.environ.get("HERMES_AUTH_BRIDGE_GRANT_TTL_SECONDS", "60")))
+        code = hermes_bridge_store().issue_grant(
+            client_id=payload["client_id"],
+            instance_id=None,
+            user_id=None,
+            session_id=payload["session_hash"],
+            redirect_uri=payload["redirect_uri"],
+            code_challenge=payload["code_challenge"],
+            ttl=ttl,
+        )
+    except ValueError:
+        return jsonify({"error": "access_denied"}), 403
+    except sqlite3.Error:
+        return jsonify({"error": "temporarily_unavailable"}), 503
+    return jsonify({"code": code})
+
+
+@app.post("/internal/v1/hermes-auth/token")
+@require_services("manager-user-web")
+def redeem_hermes_bridge():
+    payload = request.get_json(silent=True) or {}
+    required = ("code", "client_id", "client_secret", "redirect_uri", "code_verifier")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+        return jsonify({"error": "invalid_request"}), 400
+    try:
+        ttl = max(1, int(os.environ.get("HERMES_AUTH_BRIDGE_TOKEN_TTL_SECONDS", "900")))
+        keys = hermes_signing_keys()
+        issuer = os.environ["HERMES_AUTH_BRIDGE_ISSUER"]
+    except (KeyError, ValueError, OSError):
+        return jsonify({"error": "temporarily_unavailable"}), 503
+    try:
+        token = hermes_bridge_store().redeem(
+            code=payload["code"], client_id=payload["client_id"],
+            secret=payload["client_secret"], redirect_uri=payload["redirect_uri"],
+            verifier=payload["code_verifier"],
+            issue_token=lambda principal: keys.issue_access_token(principal, issuer, ttl=ttl),
+        )
+    except ValueError:
+        return jsonify({"error": "invalid_grant"}), 400
+    except sqlite3.Error:
+        return jsonify({"error": "temporarily_unavailable"}), 503
+    except OSError:
+        return jsonify({"error": "temporarily_unavailable"}), 503
+    return jsonify({"access_token": token, "token_type": "Bearer", "expires_in": ttl})
+
+
+@app.get("/internal/v1/hermes-auth/jwks.json")
+@require_services("manager-user-web")
+def hermes_bridge_jwks():
+    try:
+        return jsonify(hermes_signing_keys().jwks())
+    except (ValueError, OSError):
+        return jsonify({"error": "temporarily_unavailable"}), 503
+
+
+@app.post("/internal/v1/executor/hermes-auth/clients/<instance_public_id>")
+@require_services("manager-executor")
+def create_hermes_bridge_client(instance_public_id):
+    payload = request.get_json(silent=True) or {}
+    required = ("client_id", "client_secret", "redirect_uri")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+        return jsonify({"error": "invalid client metadata"}), 400
+    instance = metadata_store.get_instance_by_public_id(instance_public_id, db_file=DB_FILE)
+    if instance is None or instance["product"] != "hermes":
+        return jsonify({"error": "Hermes instance not found"}), 404
+    try:
+        hermes_bridge_store().create_client(
+            instance["id"], payload["client_id"], payload["client_secret"],
+            payload["redirect_uri"],
+        )
+    except (ValueError, sqlite3.IntegrityError):
+        return jsonify({"error": "could not create Hermes auth client"}), 409
+    return "", 204
+
+
+@app.delete("/internal/v1/executor/hermes-auth/clients/<instance_public_id>")
+@require_services("manager-executor")
+def delete_hermes_bridge_client(instance_public_id):
+    instance = metadata_store.get_instance_by_public_id(instance_public_id, db_file=DB_FILE)
+    if instance is None:
+        return "", 204
+    with hermes_bridge_store().connect() as conn:
+        conn.execute("DELETE FROM hermes_auth_clients WHERE instance_id = ?", (instance["id"],))
+    return "", 204
 
 
 @app.get("/internal/v1/instances/<instance_public_id>/entry")

@@ -18,6 +18,7 @@ LOCAL_AUTH_ENABLED = os.environ.get(
 ).lower() in {"1", "true", "yes", "on"}
 COOKIE_NAME = "openclaw_manager_session"
 INSTANCE_RETURN_COOKIE = "openclaw_manager_instance_return"
+HERMES_RETURN_COOKIE = "openclaw_manager_hermes_return"
 INSTANCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 COOKIE_SECURE = os.environ.get("MANAGER_COOKIE_SECURE", "true").lower() not in {
     "0", "false", "no"
@@ -110,7 +111,11 @@ def external_callback(app):
     except Exception:
         return render_template("error.html", message="External authentication failed."), 401
     instance_id = request.cookies.get(INSTANCE_RETURN_COOKIE, "")
+    hermes_return = request.cookies.get(HERMES_RETURN_COOKIE, "")
     destination = (
+        hermes_return
+        if hermes_return.startswith("/auth/hermes/authorize?")
+        else
         url_for("open_instance", instance_public_id=instance_id)
         if INSTANCE_ID_RE.fullmatch(instance_id)
         else "/admin" if user["role"] == "admin" else url_for("index")
@@ -121,6 +126,7 @@ def external_callback(app):
         samesite="Lax", max_age=SESSION_HOURS * 3600,
     )
     response.delete_cookie(INSTANCE_RETURN_COOKIE)
+    response.delete_cookie(HERMES_RETURN_COOKIE)
     return response
 
 
@@ -185,7 +191,11 @@ def local_login(app, login_action="/login"):
             external_login_url="/auth/uis/login" if external_auth_enabled() else "",
         ), 401
     instance_id = request.cookies.get(INSTANCE_RETURN_COOKIE, "")
+    hermes_return = request.cookies.get(HERMES_RETURN_COOKIE, "")
     destination = (
+        hermes_return
+        if hermes_return.startswith("/auth/hermes/authorize?")
+        else
         url_for("open_instance", instance_public_id=instance_id)
         if INSTANCE_ID_RE.fullmatch(instance_id)
         else url_for("index")
@@ -197,6 +207,7 @@ def local_login(app, login_action="/login"):
     )
     response.delete_cookie("openclaw_manager_login_csrf")
     response.delete_cookie(INSTANCE_RETURN_COOKIE)
+    response.delete_cookie(HERMES_RETURN_COOKIE)
     return response
 
 
@@ -241,6 +252,7 @@ def require_csrf():
         AUTH_PROVIDER == "nginx-basic"
         or request.method != "POST"
         or request.path in {"/login", "/admin/login"}
+        or request.path == "/auth/hermes/token"
     ):
         return None
     current = actor()

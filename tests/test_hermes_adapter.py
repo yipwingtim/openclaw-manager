@@ -168,7 +168,15 @@ class HermesAdapterTests(unittest.TestCase):
             data_path = root / "public" / "hermes" / "alice"
             data_path.mkdir(parents=True)
             (data_path / "config.yaml").write_text("security: {}\n", encoding="utf-8")
-            instance = {**self.INSTANCE, "data_path": str(data_path), "port": 39119}
+            (data_path / ".env").write_text(
+                "HERMES_UIS_BRIDGE_CLIENT_ID=old-client\n"
+                "HERMES_UIS_BRIDGE_CLIENT_SECRET=old-secret\n",
+                encoding="utf-8",
+            )
+            instance = {
+                **self.INSTANCE, "data_path": str(data_path), "port": 39119,
+                "access_url": "https://manager.example.test:39119",
+            }
             compose = root / "nginx" / "compose" / "docker-compose.yml"
             compose.parent.mkdir(parents=True)
             compose.write_text(
@@ -188,7 +196,10 @@ class HermesAdapterTests(unittest.TestCase):
                     return 0, f"nousresearch/hermes-agent:v2026.7.20|true|{adapter.tenant_network(instance)}"
                 return 0, "ok"
 
-            with patch.object(adapter, "run_command", side_effect=run), patch.object(
+            clients = []
+            with patch.dict(os.environ, {
+                "HERMES_AUTH_BRIDGE_ISSUER": "https://manager.example.test:30015/auth/hermes",
+            }), patch.object(adapter, "run_command", side_effect=run), patch.object(
                 adapter, "apply_nginx_compose", return_value=(0, "applied")
             ), patch.object(adapter, "reload_nginx", return_value=(0, "reloaded")), patch.object(
                 adapter, "configure_ingress", return_value=(0, "published")
@@ -196,10 +207,14 @@ class HermesAdapterTests(unittest.TestCase):
                 self.assertEqual(adapter.delete(instance)[0], 0)
                 self.assertFalse(data_path.exists())
                 self.assertTrue((adapter.hermes_recycle_dir(instance) / "data" / "config.yaml").is_file())
-                self.assertEqual(adapter.restore(instance)[0], 0)
+                self.assertEqual(adapter.restore(
+                    instance, hermes_auth_client_callback=clients.append
+                )[0], 0)
 
             self.assertTrue((data_path / "config.yaml").is_file())
             self.assertFalse(adapter.hermes_recycle_dir(instance).exists())
+            self.assertEqual(clients[0]["redirect_uri"], "https://manager.example.test:39119/auth/callback")
+            self.assertNotEqual(clients[0]["client_id"], "old-client")
             self.assertIn(
                 ["docker", "network", "connect", adapter.tenant_network(instance),
                  "openclaw-model-proxy"],
@@ -348,6 +363,9 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertIn("      - hermes-net", compose_text)
             self.assertIn("      - instance-auth-net", compose_text)
             self.assertIn("auth_request /_instance_auth;", nginx)
+            callback = nginx.split("location = /auth/callback {", 1)[1].split("}", 1)[0]
+            self.assertNotIn("auth_request", callback)
+            self.assertIn("access_log off", callback)
             self.assertIn("openclaw-instance-auth-proxy:8084 resolve;", nginx)
             self.assertEqual(run_command.call_count, 2)
             reconnect = run_command.call_args_list[1].args[0]
@@ -379,7 +397,7 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertTrue(active.exists())
             self.assertFalse(adapter.ingress_conf(instance, disabled=True).exists())
 
-    def test_create_uses_pinned_single_container_and_hashes_password(self):
+    def test_create_uses_pinned_container_and_stages_uis_provider_before_start(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             adapter = self.make_adapter(root)
@@ -388,6 +406,10 @@ class HermesAdapterTests(unittest.TestCase):
                 "data_path": str(root / "public" / "hermes" / "alice"),
             }
             calls = []
+            template = root / "templates" / "hermes" / "plugins" / "campus-uis-bridge"
+            template.mkdir(parents=True)
+            (template / "plugin.yaml").write_text("name: campus-uis-bridge\n", encoding="utf-8")
+            (template / "__init__.py").write_text("def register(ctx): pass\n", encoding="utf-8")
 
             def run(command, **kwargs):
                 calls.append(command)
@@ -397,8 +419,18 @@ class HermesAdapterTests(unittest.TestCase):
                     return 0, "39119\n[INFO] Port 39118 is already in use, skip"
                 return 0, "ok"
 
-            with patch.object(adapter, "run_command", side_effect=run):
-                code, _ = adapter.create(instance, "true", "line1\nINJECTED=value")
+            created_clients = []
+            with patch.object(adapter, "run_command", side_effect=run), patch.dict(
+                os.environ,
+                {
+                    "HERMES_AUTH_BRIDGE_ISSUER": "https://manager.example.test:30015/auth/hermes",
+                    "PUBLIC_HOST": "manager.example.test",
+                },
+            ):
+                code, _ = adapter.create(
+                    instance, "true", "unused-password",
+                    hermes_auth_client_callback=created_clients.append,
+                )
 
             self.assertEqual(code, 0)
             self.assertEqual(instance["_created_port"], 39119)
@@ -408,12 +440,16 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertNotIn("-p", docker_run)
             self.assertTrue(any(command[:3] == ["docker", "exec", "hermes-alice"] for command in calls))
             env_text = (Path(instance["data_path"]) / ".env").read_text(encoding="utf-8")
-            self.assertIn("HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH=scrypt$", env_text)
-            self.assertNotIn("line1", env_text)
-            self.assertNotIn("INJECTED", env_text)
+            self.assertNotIn("HERMES_DASHBOARD_BASIC_AUTH", env_text)
+            self.assertIn("HERMES_UIS_BRIDGE_CLIENT_ID=", env_text)
+            self.assertIn("HERMES_UIS_BRIDGE_CLIENT_SECRET=", env_text)
+            self.assertEqual(created_clients[0]["redirect_uri"], "https://manager.example.test:39119/auth/callback")
+            self.assertTrue(
+                (Path(instance["data_path"]) / "plugins" / "campus-uis-bridge" / "plugin.yaml").is_file()
+            )
             self.assertEqual(
                 (Path(instance["data_path"]) / "config.yaml").read_text(encoding="utf-8"),
-                "security:\n  allow_lazy_installs: false\n",
+                "security:\n  allow_lazy_installs: false\nplugins:\n  enabled:\n    - campus-uis-bridge\n",
             )
 
     def test_create_failure_removes_container_data_and_new_network(self):

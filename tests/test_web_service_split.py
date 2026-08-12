@@ -106,6 +106,14 @@ class WebServiceSplitTests(unittest.TestCase):
         self.assertIn("proxy_set_header X-UIS-Logout-Token $arg_token", template)
         self.assertIn("proxy_pass http://manager_user_web_backend/auth/uis/logout?", template)
 
+    def test_hermes_bridge_routes_disable_query_logging(self):
+        template = (ROOT_DIR / "templates" / "nginx" / "manager-web.conf.tpl").read_text(
+            encoding="utf-8"
+        )
+        block = template.split("location ^~ /auth/hermes/ {", 1)[1].split("}", 1)[0]
+        self.assertIn("access_log off;", block)
+        self.assertIn("proxy_set_header X-Forwarded-Proto $scheme;", block)
+
     def test_admin_local_login_is_exempt_from_authenticated_csrf_check(self):
         source = (ROOT_DIR / "services" / "manager-web" / "web_common.py").read_text(
             encoding="utf-8"

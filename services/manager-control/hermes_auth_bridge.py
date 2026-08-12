@@ -96,7 +96,7 @@ class BridgeStore:
         with self.connect() as conn:
             instance = conn.execute(
                 "SELECT 1 FROM instances WHERE id = ? AND product = 'hermes' "
-                "AND status = 'active'", (instance_id,),
+                "AND status IN ('provisioning', 'active', 'stopped', 'deleted')", (instance_id,),
             ).fetchone()
             if not instance:
                 raise ValueError("invalid Hermes instance")
@@ -136,32 +136,37 @@ class BridgeStore:
         code = secrets.token_urlsafe(32)
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT c.id, c.redirect_uri FROM hermes_auth_clients c "
+                "SELECT c.id, c.redirect_uri, c.instance_id, u.id FROM hermes_auth_clients c "
                 "JOIN instances i ON i.id = c.instance_id "
-                "JOIN users u ON u.id = ? "
-                "JOIN user_sessions s ON s.token_hash = ? AND s.user_id = u.id "
-                "WHERE c.client_id = ? AND c.instance_id = ? "
+                "JOIN user_sessions s ON s.token_hash = ? "
+                "JOIN users u ON u.id = s.user_id "
+                "WHERE c.client_id = ? "
                 "AND c.revoked_at IS NULL AND i.product = 'hermes' "
                 "AND i.status = 'active' AND u.status = 'active' "
                 "AND s.provider = 'campus-uis' AND s.expires_at > datetime('now') "
                 "AND (u.role = 'admin' OR i.owner_user_id = u.id OR EXISTS ("
                 "SELECT 1 FROM instance_members m "
                 "WHERE m.instance_id = i.id AND m.user_id = u.id))",
-                (user_id, session_id, client_id, instance_id),
+                (session_id, client_id),
             ).fetchone()
-            if not row or row[1] != redirect_uri:
+            if (
+                not row or row[1] != redirect_uri
+                or (instance_id is not None and row[2] != instance_id)
+                or (user_id is not None and row[3] != user_id)
+            ):
                 raise ValueError("invalid client")
             conn.execute(
                 "INSERT INTO hermes_auth_grants "
                 "(code_hash, client_id, instance_id, user_id, manager_session_id, "
                 "redirect_uri, code_challenge, created_at, expires_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (sha256(code), row[0], instance_id, user_id, session_id,
+                (sha256(code), row[0], row[2], row[3], session_id,
                  redirect_uri, code_challenge, now, now + ttl),
             )
         return code
 
-    def redeem(self, *, code, client_id, secret, redirect_uri, verifier, now=None):
+    def redeem(self, *, code, client_id, secret, redirect_uri, verifier, now=None,
+               issue_token=None):
         now = int(time.time() if now is None else now)
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -195,6 +200,8 @@ class BridgeStore:
             if not valid:
                 conn.rollback()
                 raise ValueError("invalid_grant")
+            principal = BridgePrincipal(row[2], row[1], row[7])
+            result = issue_token(principal) if issue_token else principal
             changed = conn.execute(
                 "UPDATE hermes_auth_grants SET consumed_at = ? "
                 "WHERE code_hash = ? AND consumed_at IS NULL", (now, row[0]),
@@ -203,7 +210,7 @@ class BridgeStore:
                 conn.rollback()
                 raise ValueError("invalid_grant")
             conn.commit()
-            return BridgePrincipal(row[2], row[1], row[7])
+            return result
 
 
 class SigningKeys:

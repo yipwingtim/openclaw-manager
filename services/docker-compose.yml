@@ -9,6 +9,7 @@ services:
       - ../config/openclaw-manager.env
     volumes:
       - ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}:${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
+      - ${HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE:-/dev/null}:/run/secrets/hermes-auth-bridge-ed25519.pem:ro
     healthcheck:
       test:
         - CMD

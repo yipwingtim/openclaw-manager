@@ -408,6 +408,41 @@ def check_hermes_auth_bridge(path, reporter):
                 "hermes_auth_grant_instance_mismatch",
                 f"{mismatches} grant(s) do not match their client instance",
             )
+        for client_id, data_path, status in conn.execute(
+            "SELECT c.client_id, i.data_path, i.status FROM hermes_auth_clients c "
+            "JOIN instances i ON i.id = c.instance_id WHERE c.revoked_at IS NULL"
+        ):
+            if status not in {"active", "stopped"}:
+                continue
+            root = Path(data_path or "")
+            env_file = root / ".env"
+            config_file = root / "config.yaml"
+            plugin = root / "plugins" / "campus-uis-bridge" / "plugin.yaml"
+            try:
+                env_text = env_file.read_text(encoding="utf-8")
+                config_text = config_file.read_text(encoding="utf-8")
+                mode = env_file.stat().st_mode & 0o777
+            except (OSError, UnicodeError) as exc:
+                reporter.error(
+                    "hermes_auth_provider_files_missing",
+                    f"client_id={client_id} provider files cannot be read: {exc}",
+                )
+                continue
+            if not plugin.is_file() or "- campus-uis-bridge" not in config_text:
+                reporter.error(
+                    "hermes_auth_provider_not_enabled",
+                    f"client_id={client_id} campus-uis-bridge is not installed and enabled",
+                )
+            if mode & 0o077 or any(
+                f"{key}=" not in env_text for key in (
+                    "HERMES_UIS_BRIDGE_ISSUER", "HERMES_UIS_BRIDGE_CLIENT_ID",
+                    "HERMES_UIS_BRIDGE_CLIENT_SECRET", "HERMES_UIS_BRIDGE_INSTANCE_ID",
+                )
+            ):
+                reporter.error(
+                    "hermes_auth_provider_env_invalid",
+                    f"client_id={client_id} provider env is incomplete or not private",
+                )
 
 
 def container_htpasswd_path(user_id):

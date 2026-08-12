@@ -1,4 +1,7 @@
-from flask import Flask, Response, redirect, render_template, request, url_for
+import re
+import urllib.parse
+
+from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
 
 import control_client
 import executor_client
@@ -10,6 +13,19 @@ app.config["SECRET_KEY"] = web_common.SESSION_SECRET or None
 app.before_request(web_common.require_internal_token)
 app.before_request(web_common.require_csrf)
 app.context_processor(web_common.context)
+
+PKCE_CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+OAUTH_VALUE_RE = re.compile(r"^[\x21-\x7e]{1,512}$")
+
+
+def oauth_error(error, status):
+    response = jsonify({"error": error})
+    response.headers["Cache-Control"] = "no-store"
+    return response, status
+
+
+def forwarded_https():
+    return request.headers.get("X-Forwarded-Proto", "").lower() == "https"
 
 
 @app.get("/health")
@@ -43,6 +59,83 @@ def uis_login():
 @app.get("/auth/uis/logout")
 def uis_logout_callback():
     return web_common.external_logout_callback()
+
+
+@app.get("/auth/hermes/authorize")
+def hermes_authorize():
+    values = {key: request.args.get(key, "") for key in (
+        "response_type", "client_id", "redirect_uri", "state",
+        "code_challenge", "code_challenge_method",
+    )}
+    if (
+        not forwarded_https()
+        or values["response_type"] != "code"
+        or values["code_challenge_method"] != "S256"
+        or not PKCE_CHALLENGE_RE.fullmatch(values["code_challenge"])
+        or any(not OAUTH_VALUE_RE.fullmatch(values[key]) for key in (
+            "client_id", "redirect_uri", "state",
+        ))
+    ):
+        return oauth_error("invalid_request", 400)
+    raw_session = request.cookies.get(web_common.COOKIE_NAME, "")
+    if not raw_session or not web_common.actor():
+        response = app.make_response(redirect(url_for("login")))
+        response.set_cookie(
+            web_common.HERMES_RETURN_COOKIE,
+            request.full_path.rstrip("?"),
+            secure=web_common.COOKIE_SECURE, httponly=True,
+            samesite="Lax", max_age=600,
+        )
+        return response
+    try:
+        result = control_client.authorize_hermes({
+            "client_id": values["client_id"],
+            "redirect_uri": values["redirect_uri"],
+            "code_challenge": values["code_challenge"],
+            "session_hash": web_common.token_hash(raw_session),
+        })
+    except control_client.ControlError as exc:
+        return oauth_error(
+            "access_denied" if exc.status == 403 else "temporarily_unavailable",
+            exc.status if exc.status in {403, 503} else 400,
+        )
+    separator = "&" if urllib.parse.urlsplit(values["redirect_uri"]).query else "?"
+    query = urllib.parse.urlencode({"code": result["code"], "state": values["state"]})
+    response = redirect(f'{values["redirect_uri"]}{separator}{query}')
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/auth/hermes/token")
+def hermes_token():
+    if not forwarded_https() or request.mimetype != "application/x-www-form-urlencoded":
+        return oauth_error("invalid_request", 400)
+    if request.form.get("grant_type") != "authorization_code":
+        return oauth_error("unsupported_grant_type", 400)
+    required = ("code", "client_id", "client_secret", "redirect_uri", "code_verifier")
+    if any(not request.form.get(key) or len(request.form[key]) > 2048 for key in required):
+        return oauth_error("invalid_request", 400)
+    try:
+        result = control_client.redeem_hermes({key: request.form[key] for key in required})
+    except control_client.ControlError as exc:
+        return oauth_error(
+            "temporarily_unavailable" if exc.status == 503 else
+            "invalid_client" if exc.status == 401 else "invalid_grant",
+            503 if exc.status == 503 else 401 if exc.status == 401 else 400,
+        )
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/auth/hermes/jwks.json")
+def hermes_jwks():
+    try:
+        response = jsonify(control_client.hermes_jwks())
+    except control_client.ControlError:
+        return oauth_error("temporarily_unavailable", 503)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return response
 
 
 @app.post("/logout")

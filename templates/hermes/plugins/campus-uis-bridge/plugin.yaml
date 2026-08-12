@@ -1,0 +1,10 @@
+name: campus-uis-bridge
+version: 1.0.0
+description: "Dashboard auth provider for the OpenClaw Manager UIS bridge."
+author: OpenClaw Manager
+kind: backend
+requires_env:
+  - HERMES_UIS_BRIDGE_ISSUER
+  - HERMES_UIS_BRIDGE_CLIENT_ID
+  - HERMES_UIS_BRIDGE_CLIENT_SECRET
+  - HERMES_UIS_BRIDGE_INSTANCE_ID

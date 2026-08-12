@@ -25,6 +25,15 @@ server {
 
 {{MANAGER_EMERGENCY_LOCATION}}
 
+    location ^~ /auth/hermes/ {
+        access_log off;
+        proxy_pass http://manager_user_web_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+{{MANAGER_INTERNAL_TOKEN_HEADER}}
+    }
+
     location = /auth/uis/logout {
         access_log off;
         error_log /dev/null;

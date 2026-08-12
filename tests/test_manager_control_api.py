@@ -58,6 +58,7 @@ def load_control_app():
     )
 
     sys.path.insert(0, str(MANAGER_WEB_DIR))
+    sys.path.insert(0, str(CONTROL_DIR))
     spec = importlib.util.spec_from_file_location(
         "manager_control_app", CONTROL_DIR / "app.py"
     )
@@ -231,6 +232,137 @@ class ManagerControlApiTests(unittest.TestCase):
             )
 
         self.assertEqual(status, 401)
+
+    def test_hermes_bridge_authorizes_session_and_returns_signed_token(self):
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        session_hash = "d" * 64
+        self.control.metadata_store.upsert_identity(
+            self.user["id"], "campus-uis", "alice-subject", "alice",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.create_session(
+            session_hash, self.user["id"], "campus-uis", "csrf", expires_at,
+            db_file=self.db_file,
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="hermes",
+            instance_name="Hermes", runtime_identifier="hermes_alice",
+            status="active", db_file=self.db_file,
+        )
+        secret = "secret-" + "x" * 40
+        client_id = "hermes-client"
+        redirect_uri = "https://manager.example.test:39119/auth/callback"
+        verifier = "v" * 43
+        self.control.hermes_bridge_store().create_client(
+            instance["id"], client_id, secret, redirect_uri,
+        )
+        from hermes_auth_bridge import SigningKeys, pkce_challenge
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        self.control._hermes_signing_keys = SigningKeys(
+            {"test-key": Ed25519PrivateKey.generate()}, "test-key"
+        )
+
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer user-token"}
+        ), patch.object(
+            self.control.request, "get_json", return_value={
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": pkce_challenge(verifier),
+                "session_hash": session_hash,
+            }
+        ):
+            authorized, authorized_status = response_parts(
+                self.control.authorize_hermes_bridge()
+            )
+
+        with patch.dict(os.environ, {
+            "HERMES_AUTH_BRIDGE_ISSUER": "https://manager.example.test:30015/auth/hermes"
+        }), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer user-token"}
+        ), patch.object(
+            self.control.request, "get_json", return_value={
+                "code": authorized.get_json()["code"],
+                "client_id": client_id,
+                "client_secret": secret,
+                "redirect_uri": redirect_uri,
+                "code_verifier": verifier,
+            }
+        ):
+            token, token_status = response_parts(self.control.redeem_hermes_bridge())
+
+        self.assertEqual(authorized_status, 200)
+        self.assertEqual(token_status, 200)
+        self.assertEqual(token.get_json()["token_type"], "Bearer")
+        self.assertEqual(len(token.get_json()["access_token"].split(".")), 3)
+
+    def test_hermes_bridge_does_not_accept_browser_supplied_identity(self):
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer user-token"}
+        ), patch.object(
+            self.control.request, "get_json", return_value={
+                "client_id": "missing-client",
+                "redirect_uri": "https://attacker.example/auth/callback",
+                "code_challenge": "a" * 43,
+                "session_hash": "e" * 64,
+                "instance_id": 1,
+                "user_id": 1,
+            }
+        ):
+            response, status = response_parts(self.control.authorize_hermes_bridge())
+
+        self.assertEqual(status, 403)
+        self.assertEqual(response.get_json(), {"error": "access_denied"})
+
+    def test_hermes_signing_keys_load_rotation_window(self):
+        from hermes_auth_bridge import SigningKeys
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path(directory) / "old.pem"
+            current = Path(directory) / "current.pem"
+            old.write_bytes(SigningKeys.generate_private_key_pem())
+            current.write_bytes(SigningKeys.generate_private_key_pem())
+            self.control._hermes_signing_keys = None
+            with patch.dict(os.environ, {
+                "HERMES_AUTH_BRIDGE_ACTIVE_KID": "current",
+                "HERMES_AUTH_BRIDGE_SIGNING_KEYS": f"old={old},current={current}",
+            }, clear=False):
+                keys = self.control.hermes_signing_keys()
+        self.assertEqual(keys.active_kid, "current")
+        self.assertEqual({item["kid"] for item in keys.jwks()["keys"]}, {"old", "current"})
+
+    def test_executor_creates_and_deletes_hermes_client_for_exact_instance(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="hermes",
+            instance_name="Hermes", runtime_identifier="hermes_alice",
+            status="provisioning", db_file=self.db_file,
+        )
+        payload = {
+            "client_id": "client-1", "client_secret": "s" * 48,
+            "redirect_uri": "https://manager.example.test:39119/auth/callback",
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            _, created_status = response_parts(
+                self.control.create_hermes_bridge_client(instance["public_id"])
+            )
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            stored = conn.execute(
+                "SELECT client_secret_hash FROM hermes_auth_clients WHERE instance_id = ?",
+                (instance["id"],),
+            ).fetchone()
+        self.assertEqual(created_status, 204)
+        self.assertTrue(stored[0].startswith("scrypt$"))
+
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ):
+            _, deleted_status = response_parts(
+                self.control.delete_hermes_bridge_client(instance["public_id"])
+            )
+        self.assertEqual(deleted_status, 204)
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 0)
 
     def test_admin_can_resolve_instance_entry_without_membership(self):
         owner = self.control.metadata_store.create_user("owner", db_file=self.db_file)
@@ -976,7 +1108,10 @@ class ManagerControlApiTests(unittest.TestCase):
             response.get_json()["instance"]["public_id"], db_file=self.db_file
         )
         self.assertEqual(instance["runtime_identifier"], "hermes_alice-hermes")
-        self.assertTrue(instance["data_path"].endswith("/hermes/alice-hermes"))
+        self.assertRegex(
+            instance["data_path"],
+            r"/instances/hermes/[0-9a-f-]{36}$",
+        )
 
     def test_admin_create_accepts_version_and_requires_latest_confirmation(self):
         self.control.metadata_store.set_user_role(
@@ -1241,9 +1376,15 @@ class ManagerControlApiTests(unittest.TestCase):
             for item in self.control.metadata_store.list_instances(db_file=self.db_file)
         }
         self.assertEqual(instances["hermes"]["runtime_identifier"], "hermes_alice-hermes")
-        self.assertTrue(instances["hermes"]["data_path"].endswith("/hermes/alice-hermes"))
+        self.assertRegex(
+            instances["hermes"]["data_path"],
+            r"/instances/hermes/[0-9a-f-]{36}$",
+        )
         self.assertEqual(instances["evoscientist"]["runtime_identifier"], "evoscientist_alice-evo")
-        self.assertTrue(instances["evoscientist"]["data_path"].endswith("/users/alice-evo"))
+        self.assertRegex(
+            instances["evoscientist"]["data_path"],
+            r"/instances/evoscientist/[0-9a-f-]{36}$",
+        )
         children = response.get_json()["children"]
         self.assertEqual(
             [child["params"] for child in children],
@@ -2985,7 +3126,7 @@ class ManagerControlApiTests(unittest.TestCase):
                 "legacy_user_id": None,
                 "product": "openclaw",
                 "runtime_identifier": "openclaw_alice",
-                "data_path": None,
+                "data_path": instance["data_path"],
                 "port": 39119,
                 "basic_auth_enabled": True,
                 "status": "active",

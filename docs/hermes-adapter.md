@@ -13,15 +13,17 @@ support the legacy two-container topology.
   exactly one dedicated Docker network.
 - `openclaw-nginx` publishes one external TLS port per instance and joins that
   network persistently through its Compose configuration.
-- Nginx requires Manager UIS instance authorization before routing. Hermes
-  Dashboard authentication remains as a second layer for username/password,
-  Nous OAuth, or self-hosted OIDC. The
+- Nginx requires Manager UIS instance authorization before routing. New Hermes
+  instances use the custom `campus-uis-bridge` `DashboardAuthProvider` as the
+  second layer and establish an official Hermes Session without another password.
+  The
   OpenAI-compatible API on `8642` uses a separate `API_SERVER_KEY`.
 - Creation runs `gateway run` with `HERMES_DASHBOARD=1`, mounts a dedicated
   instance directory at `/opt/data`, and publishes no host ports directly.
-- Dashboard Basic Auth is mandatory for creation. Only the official Hermes
-  scrypt password hash and a random session secret are persisted in `.env`;
-  the plaintext password is consumed from the one-shot provisioning secret.
+- Each new instance receives a unique Bridge `client_id` and `client_secret`.
+  The secret exists only in the instance's mode `0600` `.env`; Manager metadata
+  stores only its scrypt verifier. The Provider is installed under
+  `/opt/data/plugins/campus-uis-bridge` and enabled in `config.yaml` before startup.
 - Runtime dependency lazy installation is disabled in `config.yaml` so a
   missing optional package cannot block agent initialization. Optional
   dependencies must be included in the image before enabling their features.
@@ -56,3 +58,20 @@ container name or data path.
 
 The legacy v0.12 two-container `hermes-main` plus `hermes-dashboard` layout is
 not supported by this adapter and must be replaced before using these actions.
+
+## Existing instance migration
+
+Deploying Manager services does not alter or restart existing Hermes instances.
+Preview one exact instance first:
+
+```bash
+python3 scripts/migrate_hermes_uis_auth.py \
+  --db /data/docker/openclaw-public/manager.db \
+  --instance <instance-public-uuid> \
+  --issuer https://<manager-host>:30015/auth/hermes
+```
+
+After reviewing the plan, repeat with `--apply`. Apply removes the legacy Basic
+Auth entries, installs/enables the Provider, creates one client, and restarts only
+the selected container. A failure restores the original files, deletes the new
+client, and attempts to restart the original configuration.

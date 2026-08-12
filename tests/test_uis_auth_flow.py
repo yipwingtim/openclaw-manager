@@ -151,6 +151,22 @@ class UISAuthFlowTests(unittest.TestCase):
         self.assertIs(response, rendered)
         self.assertEqual(render.call_args.kwargs["external_login_url"], "/auth/uis/login")
 
+    def test_local_login_returns_to_pending_hermes_authorization(self):
+        return_path = "/auth/hermes/authorize?client_id=client-1"
+        cookies = {
+            "openclaw_manager_login_csrf": "csrf",
+            self.web_common.HERMES_RETURN_COOKIE: return_path,
+        }
+        form = {"csrf_token": "csrf", "username": "alice", "password": "secret"}
+        with patch.object(self.request, "cookies", cookies), patch.object(
+            self.request, "form", form
+        ), patch.object(self.web_common, "AUTH_PROVIDER", "campus-uis"), patch.object(
+            self.web_common, "LOCAL_AUTH_ENABLED", True
+        ), patch.object(self.web_common.control_client, "local_login", return_value={}):
+            response = self.web_common.local_login(self.app)
+
+        self.assertEqual(response.location, return_path)
+
     def test_nginx_basic_ignores_mixed_local_flag(self):
         with patch.object(self.web_common, "AUTH_PROVIDER", "nginx-basic"), patch.object(
             self.web_common, "LOCAL_AUTH_ENABLED", True

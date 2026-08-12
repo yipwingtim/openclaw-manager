@@ -21,13 +21,17 @@ if ! docker network inspect instance-auth-net >/dev/null 2>&1; then
 fi
 
 cd "$MANAGER_DIR/services"
+compose=(docker compose)
+if [ -f "$CONFIG_FILE" ]; then
+  compose+=(--env-file "$CONFIG_FILE")
+fi
 services=("$@")
 if [ "${#services[@]}" -gt 0 ]; then
   echo "==> Target services: ${services[*]}"
 fi
-docker compose build "${services[@]}"
+"${compose[@]}" build "${services[@]}"
 
-if ! docker compose up -d --no-build --wait "${services[@]}"; then
+if ! "${compose[@]}" up -d --no-build --wait "${services[@]}"; then
   echo "[ERROR] New services did not become ready; Nginx configuration was not changed" >&2
   exit 1
 fi

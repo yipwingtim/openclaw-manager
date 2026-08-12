@@ -58,6 +58,16 @@ class BridgeTests(unittest.TestCase):
                               redirect_uri="https://h/auth/callback", verifier="w" * 43)
         self.assertEqual(self.redeem(code).client_id, "client-1")
 
+    def test_token_issue_failure_does_not_consume_grant(self):
+        code = self.grant()
+        with self.assertRaisesRegex(OSError, "signing failed"):
+            self.store.redeem(
+                code=code, client_id="client-1", secret=self.secret,
+                redirect_uri="https://h/auth/callback", verifier="v" * 43,
+                issue_token=lambda principal: (_ for _ in ()).throw(OSError("signing failed")),
+            )
+        self.assertEqual(self.redeem(code).client_id, "client-1")
+
     def test_grant_requires_matching_active_manager_session(self):
         with self.assertRaisesRegex(ValueError, "invalid client"):
             self.store.issue_grant(

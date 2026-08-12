@@ -85,6 +85,16 @@ class ControlClient:
     def record_activity(self, payload):
         return self.request("POST", "/internal/v1/activity-snapshots", payload)
 
+    def create_hermes_auth_client(self, instance_public_id, payload):
+        instance_id = urllib.parse.quote(instance_public_id, safe="")
+        return self.request(
+            "POST", f"/internal/v1/executor/hermes-auth/clients/{instance_id}", payload
+        )
+
+    def delete_hermes_auth_client(self, instance_public_id):
+        instance_id = urllib.parse.quote(instance_public_id, safe="")
+        return self.request("DELETE", f"/internal/v1/executor/hermes-auth/clients/{instance_id}")
+
 
 def resolve_instance_file(instance, root_key, relative_path):
     relative_root = FILE_ROOTS.get(root_key)
@@ -348,6 +358,10 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             }
             if job["params"].get("version"):
                 create_kwargs["version"] = job["params"]["version"]
+            if instance["product"] == "hermes":
+                create_kwargs["hermes_auth_client_callback"] = lambda payload: (
+                    control.create_hermes_auth_client(instance["public_id"], payload)
+                )
             code, failure_output = adapter.create(
                 instance,
                 "true" if instance.get("basic_auth_enabled") else "false",
@@ -370,6 +384,8 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                 except Exception as exc:
                     code = 1
                     failure_output = str(exc)
+            if instance.pop("_hermes_auth_client_created", False):
+                control.delete_hermes_auth_client(instance["public_id"])
             rollback_code = rollback_created_instance(adapter, instance)[0] if created else 0
             rollback_note = (
                 "resources removed"
@@ -593,11 +609,23 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                 or instance.get("restore_state") != "restorable"
             ):
                 raise ValueError("instance is not eligible for permanent deletion")
-            code, output = getattr(adapter, action)(instance)
+            if action == "restore" and instance["product"] == "hermes":
+                code, output = adapter.restore(
+                    instance,
+                    hermes_auth_client_callback=lambda payload: (
+                        control.create_hermes_auth_client(instance["public_id"], payload)
+                    ),
+                )
+            else:
+                code, output = getattr(adapter, action)(instance)
             output = output[-MAX_OUTPUT_LENGTH:]
             if code == 0:
+                if action == "delete" and instance["product"] == "hermes":
+                    control.delete_hermes_auth_client(instance["public_id"])
                 control.update(request_id, "succeeded", output=output)
             else:
+                if instance.pop("_hermes_auth_client_created", False):
+                    control.delete_hermes_auth_client(instance["public_id"])
                 control.update(
                     request_id,
                     "failed",

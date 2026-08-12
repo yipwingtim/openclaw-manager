@@ -161,7 +161,9 @@ class ManagerControlUserJobTests(unittest.TestCase):
         ), patch.object(
             self.control.metadata_store,
             "get_instance_for_user",
-            return_value={"access_role": "owner", "product": "openclaw"},
+            return_value={"access_role": "owner", "product": "openclaw", "status": "active"},
+        ), patch.object(
+            self.control.metadata_store, "get_execution_job", return_value=None
         ), patch.object(
             self.control.metadata_store, "connect", return_value=nullcontext(conn)
         ), patch.object(

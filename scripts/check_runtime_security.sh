@@ -34,7 +34,6 @@ error() {
     *"missing tenant network"*) type="tenant_network_missing" ;;
     *"can reach cloud metadata endpoint"*) type="metadata_endpoint_reachable" ;;
     *"can reach cloud metadata endpoint"*) type="metadata_endpoint_reachable" ;;
-    "Hermes host manager access missing"*) type="hermes_host_access_missing" ;;
     "docker command not found") type="docker_missing" ;;
     "config missing"*) type="config_missing" ;;
     "Nginx conf dir missing"*) type="nginx_conf_dir_missing" ;;
@@ -142,54 +141,10 @@ INSTANCE_AUTH_CONTAINER_NAME="${INSTANCE_AUTH_CONTAINER_NAME:-openclaw-instance-
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 OPENCLAW_TENANT_NETWORK_PREFIX="${OPENCLAW_TENANT_NETWORK_PREFIX:-openclaw-user}"
 USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
-HOST_MANAGER_UID="${HOST_MANAGER_UID:-$(stat -c %u "$OPENCLAW_PUBLIC_DIR" 2>/dev/null || true)}"
-
-hermes_acl_has_access() {
-  getfacl -cpn "$1" 2>/dev/null | awk -F: -v uid="$HOST_MANAGER_UID" -v expected="$2" '
-    $1 == "user" && $2 == uid && index($3, expected) == 1 { user = 1 }
-    $1 == "mask" && $2 == "" && index($3, expected) == 1 { mask = 1 }
-    END { exit !(user && mask) }
-  '
-}
-
-hermes_acl_has_default() {
-  getfacl -cpn "$1" 2>/dev/null | awk -F: -v uid="$HOST_MANAGER_UID" '
-    $1 == "default" && $2 == "user" && $3 == uid && $4 ~ /^rwx([[:space:]]|$)/ { user = 1 }
-    $1 == "default" && $2 == "mask" && $3 == "" && $4 ~ /^rwx([[:space:]]|$)/ { mask = 1 }
-    END { exit !(user && mask) }
-  '
-}
-
 for hermes_root in "$OPENCLAW_PUBLIC_DIR/hermes" "$OPENCLAW_PUBLIC_DIR/instances/hermes"; do
   [ -d "$hermes_root" ] || continue
-  if ! has_cmd getfacl; then
-    error "Hermes host manager access missing: getfacl is not installed"
-    break
-  fi
   while IFS= read -r -d '' instance_dir; do
-    if [ -d "$instance_dir/cron" ]; then
-      echo "[INFO] Skip Hermes-managed cron ACL subtree: $instance_dir/cron"
-    fi
-    missing=""
-    while IFS= read -r -d '' path; do
-      expected="rw"
-      [ -d "$path" ] && expected="rwx"
-      if ! hermes_acl_has_access "$path" "$expected"; then
-        missing="$path"
-        break
-      fi
-      if [ -d "$path" ] && ! hermes_acl_has_default "$path"; then
-        missing="$path"
-        break
-      fi
-    done < <(find "$instance_dir" -xdev \
-      -path "$instance_dir/cron" -prune -o \
-      \( -type d -o -type f \) -print0)
-    if [ -n "$missing" ]; then
-      error "Hermes host manager access missing: $missing"
-    else
-      ok "Hermes host manager has recursive access: $instance_dir"
-    fi
+    echo "[INFO] Hermes data permissions are managed by the container: $instance_dir"
   done < <(find "$hermes_root" -mindepth 1 -maxdepth 1 -type d -print0)
 done
 

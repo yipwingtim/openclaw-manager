@@ -534,12 +534,6 @@ def check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_de
                 f"{user_id}: ports row port={port} user_id={port_row.get('user_id')} status={port_row.get('status')}",
             )
 def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, verbose=False):
-    compose_file = user_dir / "docker-compose.yml"
-    nginx_conf = resolve_nginx_user_conf(user_id, reporter)
-    verbose_check(verbose, user_id, "compose file")
-    compose = detect_compose(compose_file)
-    verbose_check(verbose, user_id, "nginx conf")
-    nginx = detect_nginx_conf(nginx_conf)
     csv_row = users_csv.get(user_id)
     db_row = db_instances.get(user_id)
     csv_status = (csv_row or {}).get("status")
@@ -554,13 +548,6 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     if db_status in {"failed", "deleted"}:
         return
     product = (db_row or {}).get("product")
-    if not product and (
-        (user_dir / "evoscientist-data").is_dir()
-        or (user_dir / "workspace").is_dir()
-        or user_id.lower().startswith(("evo_", "evosci-"))
-    ):
-        product = "evoscientist"
-    product = product or "openclaw"
     if product == "hermes":
         expected_container = f"hermes_{user_id}"
         if db_row.get("container_name") != expected_container:
@@ -576,6 +563,19 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
                     f"{user_id}: Hermes ingress lacks UIS authorization; run scripts/migrate_instance_auth.py --apply",
                 )
         return
+    compose_file = user_dir / "docker-compose.yml"
+    nginx_conf = resolve_nginx_user_conf(user_id, reporter)
+    verbose_check(verbose, user_id, "compose file")
+    compose = detect_compose(compose_file)
+    verbose_check(verbose, user_id, "nginx conf")
+    nginx = detect_nginx_conf(nginx_conf)
+    if not product and (
+        (user_dir / "evoscientist-data").is_dir()
+        or (user_dir / "workspace").is_dir()
+        or user_id.lower().startswith(("evo_", "evosci-"))
+    ):
+        product = "evoscientist"
+    product = product or "openclaw"
     if product == "evoscientist":
         check_evoscientist_user(user_id, user_dir, db_row, db_ports, reporter, is_deleted=is_deleted)
         return

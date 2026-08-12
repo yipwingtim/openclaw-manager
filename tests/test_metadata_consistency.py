@@ -246,6 +246,34 @@ class MetadataConsistencyTests(unittest.TestCase):
 
             self.assertNotIn("metadata_dir_missing", {issue.code for issue in reporter.issues})
 
+    def test_user_check_does_not_inspect_hermes_data_directory(self):
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "Hermes-guwei"
+            data_dir.mkdir()
+            data_dir.chmod(0)
+            try:
+                reporter = Reporter()
+                check_user(
+                    "Hermes-guwei",
+                    data_dir,
+                    {},
+                    {
+                        "Hermes-guwei": {
+                            "product": "hermes",
+                            "status": "active",
+                            "container_name": "hermes_Hermes-guwei",
+                        }
+                    },
+                    {},
+                    reporter,
+                )
+            finally:
+                data_dir.chmod(0o700)
+
+            self.assertNotIn(
+                "compose_missing", {issue.code for issue in reporter.issues}
+            )
+
     def test_global_check_ignores_missing_data_for_failed_instances(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -13,8 +13,10 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR / "services" / "manager-web"))
 sys.path.insert(0, str(ROOT_DIR / "services" / "manager-control"))
 from hermes_auth_bridge import BridgeStore
+from instance_adapters import stage_hermes_plugin
 
 
 BASIC_KEYS = {
@@ -80,11 +82,17 @@ def apply(instance, db_file, issuer):
     if old_plugin.exists():
         raise RuntimeError(f"rollback path already exists: {old_plugin}")
     created_client = False
+    plugin_parent_created = not plugin.parent.exists()
+    plugin_parent_stat = (
+        plugin.parent.stat(follow_symlinks=False)
+        if not plugin_parent_created else None
+    )
     try:
         if plugin.exists():
             shutil.move(plugin, old_plugin)
         plugin.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source, plugin)
+        data_stat = data_path.stat()
+        stage_hermes_plugin(source, plugin, data_stat.st_uid, data_stat.st_gid)
         env_file.write_text(bridge_env(
             old_env.decode(), issuer=issuer, client_id=client_id,
             client_secret=client_secret, instance_id=instance["public_id"],
@@ -112,6 +120,17 @@ def apply(instance, db_file, issuer):
         shutil.rmtree(plugin, ignore_errors=True)
         if old_plugin.exists():
             shutil.move(old_plugin, plugin)
+        if plugin_parent_created:
+            try:
+                plugin.parent.rmdir()
+            except OSError:
+                pass
+        elif plugin_parent_stat is not None:
+            os.chown(
+                plugin.parent, plugin_parent_stat.st_uid, plugin_parent_stat.st_gid,
+                follow_symlinks=False,
+            )
+            plugin.parent.chmod(plugin_parent_stat.st_mode & 0o777)
         if created_client:
             with BridgeStore(db_file).connect() as conn:
                 conn.execute("DELETE FROM hermes_auth_clients WHERE instance_id = ?", (instance["id"],))
@@ -136,6 +155,8 @@ def main(argv=None):
     if not args.apply:
         print("[INFO] Preview completed; no files, clients, or containers were changed")
         return 0
+    if os.geteuid() != 0:
+        parser.error("--apply must be run as root")
     try:
         apply(instance, args.db, issuer)
     except Exception as exc:

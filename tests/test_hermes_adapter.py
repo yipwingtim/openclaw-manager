@@ -12,7 +12,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 MANAGER_WEB_DIR = ROOT_DIR / "services" / "manager-web"
 sys.path.insert(0, str(MANAGER_WEB_DIR))
 
-from instance_adapters import HermesDockerAdapter
+from instance_adapters import HermesDockerAdapter, stage_hermes_plugin
 
 
 class HermesAdapterTests(unittest.TestCase):
@@ -410,6 +410,9 @@ class HermesAdapterTests(unittest.TestCase):
             template.mkdir(parents=True)
             (template / "plugin.yaml").write_text("name: campus-uis-bridge\n", encoding="utf-8")
             (template / "__init__.py").write_text("def register(ctx): pass\n", encoding="utf-8")
+            template.chmod(0o770)
+            (template / "plugin.yaml").chmod(0o660)
+            (template / "__init__.py").chmod(0o660)
 
             def run(command, **kwargs):
                 calls.append(command)
@@ -426,7 +429,7 @@ class HermesAdapterTests(unittest.TestCase):
                     "HERMES_AUTH_BRIDGE_ISSUER": "https://manager.example.test:30015/auth/hermes",
                     "PUBLIC_HOST": "manager.example.test",
                 },
-            ):
+            ), patch("instance_adapters.os.chown") as chown:
                 code, _ = adapter.create(
                     instance, "true", "unused-password",
                     hermes_auth_client_callback=created_clients.append,
@@ -447,10 +450,32 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertTrue(
                 (Path(instance["data_path"]) / "plugins" / "campus-uis-bridge" / "plugin.yaml").is_file()
             )
+            plugin = Path(instance["data_path"]) / "plugins" / "campus-uis-bridge"
+            self.assertEqual(plugin.parent.stat().st_mode & 0o777, 0o750)
+            self.assertEqual(plugin.stat().st_mode & 0o777, 0o750)
+            self.assertEqual((plugin / "plugin.yaml").stat().st_mode & 0o777, 0o640)
+            self.assertEqual((plugin / "__init__.py").stat().st_mode & 0o777, 0o640)
+            self.assertTrue(any(call.args[1:] == (10000, 10000) for call in chown.call_args_list))
             self.assertEqual(
                 (Path(instance["data_path"]) / "config.yaml").read_text(encoding="utf-8"),
                 "security:\n  allow_lazy_installs: false\nplugins:\n  enabled:\n    - campus-uis-bridge\n",
             )
+
+    def test_stage_hermes_plugin_rejects_symlinks_before_copying(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source"
+            target = root / "target"
+            source.mkdir()
+            external = root / "external.py"
+            external.write_text("secret\n", encoding="utf-8")
+            (source / "__init__.py").symlink_to(external)
+
+            with patch("instance_adapters.os.chown"):
+                with self.assertRaisesRegex(RuntimeError, "cannot contain symlinks"):
+                    stage_hermes_plugin(source, target, 10000, 10000)
+
+            self.assertFalse(target.exists())
 
     def test_create_failure_removes_container_data_and_new_network(self):
         with TemporaryDirectory() as temp_dir:

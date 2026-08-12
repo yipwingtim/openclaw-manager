@@ -46,6 +46,9 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.template.mkdir(parents=True)
         (self.template / "plugin.yaml").write_text("name: campus-uis-bridge\n")
         (self.template / "__init__.py").write_text("def register(ctx): pass\n")
+        self.template.chmod(0o770)
+        (self.template / "plugin.yaml").chmod(0o660)
+        (self.template / "__init__.py").chmod(0o660)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -67,7 +70,7 @@ class HermesUISMigrationTests(unittest.TestCase):
         instance = migration.load_instance(self.db, "11111111-1111-1111-1111-111111111111")
         with patch.object(migration, "ROOT_DIR", self.root), patch.object(
             migration, "run", return_value=success
-        ) as run:
+        ) as run, patch.object(migration.os, "chown") as chown:
             migration.apply(instance, self.db, "https://manager.example.test:30015/auth/hermes")
         env = (self.data / ".env").read_text()
         self.assertIn("KEEP=value", env)
@@ -82,6 +85,28 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertIn("HERMES_DASHBOARD_BASIC_AUTH", (backups[0] / ".env").read_text())
         self.assertEqual((backups[0] / ".env").stat().st_mode & 0o777, 0o600)
+        plugin = self.data / "plugins" / "campus-uis-bridge"
+        self.assertEqual(plugin.parent.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(plugin.stat().st_mode & 0o777, 0o750)
+        self.assertEqual((plugin / "plugin.yaml").stat().st_mode & 0o777, 0o640)
+        self.assertEqual((plugin / "__init__.py").stat().st_mode & 0o777, 0o640)
+        self.assertTrue(any(call.args[1:] == (self.data.stat().st_uid, self.data.stat().st_gid)
+                            for call in chown.call_args_list))
+
+    def test_apply_requires_root_before_writing_files(self):
+        before = (self.data / ".env").read_bytes()
+        with patch.object(migration, "ROOT_DIR", self.root), patch.object(
+            migration.os, "geteuid", return_value=1000
+        ):
+            with self.assertRaises(SystemExit):
+                migration.main([
+                    "--db", str(self.db),
+                    "--instance", "11111111-1111-1111-1111-111111111111",
+                    "--issuer", "https://manager.example.test:30015/auth/hermes",
+                    "--apply",
+                ])
+        self.assertEqual((self.data / ".env").read_bytes(), before)
+        self.assertFalse((self.data.parent.parent / ".manager-auth-backups").exists())
 
     def test_restart_failure_restores_files_and_deletes_client(self):
         before_env = (self.data / ".env").read_bytes()
@@ -99,6 +124,7 @@ class HermesUISMigrationTests(unittest.TestCase):
                 migration.apply(instance, self.db, "https://manager.example.test:30015/auth/hermes")
         self.assertEqual((self.data / ".env").read_bytes(), before_env)
         self.assertEqual((self.data / "config.yaml").read_bytes(), before_config)
+        self.assertFalse((self.data / "plugins").exists())
         with sqlite3.connect(self.db) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 0)
 

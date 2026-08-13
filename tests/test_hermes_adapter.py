@@ -446,6 +446,10 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertNotIn("HERMES_DASHBOARD_BASIC_AUTH", env_text)
             self.assertIn("HERMES_UIS_BRIDGE_CLIENT_ID=", env_text)
             self.assertIn("HERMES_UIS_BRIDGE_CLIENT_SECRET=", env_text)
+            self.assertIn(
+                "HERMES_UIS_BRIDGE_REDIRECT_URI=https://manager.example.test:39119/auth/callback",
+                env_text,
+            )
             self.assertEqual(created_clients[0]["redirect_uri"], "https://manager.example.test:39119/auth/callback")
             self.assertTrue(
                 (Path(instance["data_path"]) / "plugins" / "campus-uis-bridge" / "plugin.yaml").is_file()

@@ -76,6 +76,10 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.assertIn("KEEP=value", env)
         self.assertNotIn("HERMES_DASHBOARD_BASIC_AUTH", env)
         self.assertIn("HERMES_UIS_BRIDGE_CLIENT_SECRET=", env)
+        self.assertIn(
+            "HERMES_UIS_BRIDGE_REDIRECT_URI=https://manager.example.test:39119/auth/callback",
+            env,
+        )
         self.assertEqual(run.call_args_list[-1].args[0], ["docker", "restart", "hermes_alice"])
         with sqlite3.connect(self.db) as conn:
             client = conn.execute("SELECT client_secret_hash,redirect_uri FROM hermes_auth_clients").fetchone()
@@ -92,6 +96,39 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.assertEqual((plugin / "__init__.py").stat().st_mode & 0o777, 0o640)
         self.assertTrue(any(call.args[1:] == (self.data.stat().st_uid, self.data.stat().st_gid)
                             for call in chown.call_args_list))
+
+    def test_apply_reuses_matching_existing_client_to_repair_provider(self):
+        secret = "s" * 48
+        redirect_uri = "https://manager.example.test:39119/auth/callback"
+        store = migration.BridgeStore(self.db)
+        store.create_client(1, "existing-client", secret, redirect_uri)
+        self.data.joinpath(".env").write_text(
+            "KEEP=value\n"
+            "HERMES_UIS_BRIDGE_ISSUER=https://manager.example.test:30015/auth/hermes\n"
+            "HERMES_UIS_BRIDGE_CLIENT_ID=existing-client\n"
+            f"HERMES_UIS_BRIDGE_CLIENT_SECRET={secret}\n"
+            "HERMES_UIS_BRIDGE_INSTANCE_ID=11111111-1111-1111-1111-111111111111\n",
+            encoding="utf-8",
+        )
+        success = types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
+        instance = migration.load_instance(
+            self.db, "11111111-1111-1111-1111-111111111111"
+        )
+        with patch.object(migration, "ROOT_DIR", self.root), patch.object(
+            migration, "run", return_value=success
+        ), patch.object(migration.os, "chown"):
+            migration.apply(
+                instance, self.db,
+                "https://manager.example.test:30015/auth/hermes",
+            )
+        env = self.data.joinpath(".env").read_text(encoding="utf-8")
+        self.assertIn("HERMES_UIS_BRIDGE_CLIENT_ID=existing-client", env)
+        self.assertIn(f"HERMES_UIS_BRIDGE_CLIENT_SECRET={secret}", env)
+        self.assertIn(f"HERMES_UIS_BRIDGE_REDIRECT_URI={redirect_uri}", env)
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 1
+            )
 
     def test_apply_requires_root_before_writing_files(self):
         before = (self.data / ".env").read_bytes()

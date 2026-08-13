@@ -128,6 +128,48 @@ class MetadataConsistencyTests(unittest.TestCase):
                 {issue.code for issue in reporter.issues},
             )
 
+    def test_hermes_provider_redirect_must_match_registered_client(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_file = root / "manager.db"
+            data_path = root / "hermes"
+            plugin = data_path / "plugins" / "campus-uis-bridge"
+            plugin.mkdir(parents=True)
+            plugin.parent.chmod(0o750)
+            plugin.chmod(0o750)
+            (plugin / "plugin.yaml").write_text("name: campus-uis-bridge\n")
+            (plugin / "plugin.yaml").chmod(0o640)
+            (plugin / "__init__.py").write_text("def register(ctx): pass\n")
+            (plugin / "__init__.py").chmod(0o640)
+            (data_path / ".env").write_text(
+                "HERMES_UIS_BRIDGE_ISSUER=https://manager.test/auth/hermes\n"
+                "HERMES_UIS_BRIDGE_CLIENT_ID=client\n"
+                "HERMES_UIS_BRIDGE_CLIENT_SECRET=secret\n"
+                "HERMES_UIS_BRIDGE_INSTANCE_ID=i\n"
+                "HERMES_UIS_BRIDGE_REDIRECT_URI=https://wrong.test/auth/callback\n"
+            )
+            (data_path / ".env").chmod(0o600)
+            (data_path / "config.yaml").write_text(
+                "plugins:\n  enabled:\n    - campus-uis-bridge\n"
+            )
+            with sqlite3.connect(db_file) as conn:
+                conn.executescript((ROOT_DIR / "db" / "schema.sql").read_text())
+                conn.execute("INSERT INTO users(id,public_id,username,normalized_username) VALUES(1,'u','u','u')")
+                conn.execute(
+                    "INSERT INTO instances(id,public_id,owner_user_id,product,instance_name,runtime_identifier,status,data_path) "
+                    "VALUES(1,'i',1,'hermes','h','hermes_h','active',?)", (str(data_path),),
+                )
+                conn.execute(
+                    "INSERT INTO hermes_auth_clients(instance_id,client_id,client_secret_hash,redirect_uri) "
+                    "VALUES(1,'client','scrypt$hash','https://example.test/auth/callback')"
+                )
+            reporter = Reporter()
+            check_hermes_auth_bridge(db_file, reporter)
+            self.assertIn(
+                "hermes_auth_provider_redirect_mismatch",
+                {issue.code for issue in reporter.issues},
+            )
+
     def test_trusted_proxy_openclaw_requires_matching_nginx_authorization(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

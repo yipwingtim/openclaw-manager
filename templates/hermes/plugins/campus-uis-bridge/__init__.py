@@ -23,14 +23,16 @@ class CampusUISBridgeProvider(DashboardAuthProvider):
     name = "campus-uis-bridge"
     display_name = "Campus UIS"
 
-    def __init__(self, issuer, client_id, client_secret, instance_id):
+    def __init__(self, issuer, client_id, client_secret, instance_id, redirect_uri):
         self.issuer = issuer.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
         self.instance_id = str(uuid.UUID(instance_id))
+        self.redirect_uri = redirect_uri
         self.jwks = jwt.PyJWKClient(f"{self.issuer}/jwks.json", cache_keys=True, lifespan=300)
 
     def start_login(self, *, redirect_uri):
+        del redirect_uri
         verifier = base64.urlsafe_b64encode(secrets.token_bytes(64)).rstrip(b"=").decode()
         challenge = base64.urlsafe_b64encode(
             hashlib.sha256(verifier.encode("ascii")).digest()
@@ -38,7 +40,7 @@ class CampusUISBridgeProvider(DashboardAuthProvider):
         state = secrets.token_urlsafe(32)
         query = urllib.parse.urlencode({
             "response_type": "code", "client_id": self.client_id,
-            "redirect_uri": redirect_uri, "state": state,
+            "redirect_uri": self.redirect_uri, "state": state,
             "code_challenge": challenge, "code_challenge_method": "S256",
         })
         return LoginStart(
@@ -47,13 +49,13 @@ class CampusUISBridgeProvider(DashboardAuthProvider):
         )
 
     def complete_login(self, *, code, state, code_verifier, redirect_uri):
-        del state
+        del state, redirect_uri
         try:
             response = httpx.post(
                 f"{self.issuer}/token",
                 data={
                     "grant_type": "authorization_code", "code": code,
-                    "redirect_uri": redirect_uri, "client_id": self.client_id,
+                    "redirect_uri": self.redirect_uri, "client_id": self.client_id,
                     "client_secret": self.client_secret,
                     "code_verifier": code_verifier,
                 },
@@ -115,6 +117,7 @@ def register(ctx):
     values = [os.environ.get(name, "").strip() for name in (
         "HERMES_UIS_BRIDGE_ISSUER", "HERMES_UIS_BRIDGE_CLIENT_ID",
         "HERMES_UIS_BRIDGE_CLIENT_SECRET", "HERMES_UIS_BRIDGE_INSTANCE_ID",
+        "HERMES_UIS_BRIDGE_REDIRECT_URI",
     )]
     if all(values):
         ctx.register_dashboard_auth_provider(CampusUISBridgeProvider(*values))

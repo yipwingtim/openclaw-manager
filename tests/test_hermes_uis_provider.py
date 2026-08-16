@@ -2,6 +2,7 @@
 
 import importlib.util
 import sys
+import tempfile
 import types
 import unittest
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from cryptography.hazmat.primitives import serialization
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "manager-control"))
 from hermes_auth_bridge import BridgePrincipal, SigningKeys
+from tests.tls_fixtures import write_test_ca
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -83,13 +85,43 @@ class HermesUISProviderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.plugin = load_plugin()
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.ca_file = Path(cls.temp.name) / "manager-ca.crt"
+        write_test_ca(cls.ca_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp.cleanup()
 
     def provider(self):
         return self.plugin.CampusUISBridgeProvider(
             "https://manager.example.test:30015/auth/hermes",
             "client-1", "secret-1", self.INSTANCE_ID,
             "https://manager.example.test:39119/auth/callback",
+            str(self.ca_file),
         )
+
+    def test_provider_uses_one_ca_context_for_token_and_jwks(self):
+        context = object()
+        with patch.object(
+            self.plugin.ssl, "create_default_context", return_value=context
+        ) as create_context, patch.object(
+            self.plugin.jwt, "PyJWKClient"
+        ) as jwks:
+            provider = self.provider()
+
+        create_context.assert_called_once_with(cafile=str(self.ca_file))
+        self.assertIs(provider.ssl_context, context)
+        self.assertIs(jwks.call_args.kwargs["ssl_context"], context)
+
+        response = types.SimpleNamespace(status_code=400, json=lambda: {})
+        with patch.object(self.plugin.httpx, "post", return_value=response) as post:
+            with self.assertRaises(self.plugin.InvalidCodeError):
+                provider.complete_login(
+                    code="one-time-code", state="state", code_verifier="verifier",
+                    redirect_uri="http://manager.example.test/auth/callback",
+                )
+        self.assertIs(post.call_args.kwargs["verify"], context)
 
     def valid_claims(self, **overrides):
         claims = {

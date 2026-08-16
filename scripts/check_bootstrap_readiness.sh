@@ -239,6 +239,7 @@ NGINX_AUTH_USERS_DIR="${NGINX_AUTH_USERS_DIR:-$NGINX_AUTH_DIR/users}"
 NGINX_HTPASSWD_FILE="${NGINX_HTPASSWD_FILE:-$NGINX_AUTH_DIR/.htpasswd}"
 NGINX_SSL_CERT="${NGINX_SSL_CERT:-/etc/nginx/certs/openclaw.crt}"
 NGINX_SSL_KEY="${NGINX_SSL_KEY:-/etc/nginx/certs/openclaw.key}"
+HERMES_AUTH_BRIDGE_CA_HOST_FILE="${HERMES_AUTH_BRIDGE_CA_HOST_FILE:-}"
 
 check_dir "$OPENCLAW_PUBLIC_DIR"
 check_dir "$OPENCLAW_PUBLIC_DIR/users"
@@ -277,6 +278,11 @@ case "$key_host_path" in
 esac
 check_file "$cert_host_path"
 check_file "$key_host_path"
+if [ -n "$HERMES_AUTH_BRIDGE_CA_HOST_FILE" ]; then
+  check_file "$HERMES_AUTH_BRIDGE_CA_HOST_FILE"
+else
+  missing "HERMES_AUTH_BRIDGE_CA_HOST_FILE is not configured"
+fi
 
 check_docker_data_root
 check_containerd_paths

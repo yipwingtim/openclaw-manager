@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from tests.tls_fixtures import write_test_ca
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CHECKER = runpy.run_path(str(ROOT_DIR / "scripts" / "check_metadata_consistency.py"))
@@ -141,12 +143,18 @@ class MetadataConsistencyTests(unittest.TestCase):
             (plugin / "plugin.yaml").chmod(0o640)
             (plugin / "__init__.py").write_text("def register(ctx): pass\n")
             (plugin / "__init__.py").chmod(0o640)
+            ca_file = data_path / "manager-auth" / "bridge-ca.crt"
+            ca_file.parent.mkdir()
+            ca_file.parent.chmod(0o750)
+            write_test_ca(ca_file)
+            ca_file.chmod(0o640)
             (data_path / ".env").write_text(
                 "HERMES_UIS_BRIDGE_ISSUER=https://manager.test/auth/hermes\n"
                 "HERMES_UIS_BRIDGE_CLIENT_ID=client\n"
                 "HERMES_UIS_BRIDGE_CLIENT_SECRET=secret\n"
                 "HERMES_UIS_BRIDGE_INSTANCE_ID=i\n"
                 "HERMES_UIS_BRIDGE_REDIRECT_URI=https://wrong.test/auth/callback\n"
+                "HERMES_UIS_BRIDGE_CA_FILE=/opt/data/manager-auth/bridge-ca.crt\n"
             )
             (data_path / ".env").chmod(0o600)
             (data_path / "config.yaml").write_text(
@@ -167,6 +175,27 @@ class MetadataConsistencyTests(unittest.TestCase):
             check_hermes_auth_bridge(db_file, reporter)
             self.assertIn(
                 "hermes_auth_provider_redirect_mismatch",
+                {issue.code for issue in reporter.issues},
+            )
+            self.assertNotIn(
+                "hermes_auth_provider_ca_invalid",
+                {issue.code for issue in reporter.issues},
+            )
+
+            ca_file.write_text("not a certificate\n", encoding="utf-8")
+            reporter = Reporter()
+            check_hermes_auth_bridge(db_file, reporter)
+            self.assertIn(
+                "hermes_auth_provider_ca_invalid",
+                {issue.code for issue in reporter.issues},
+            )
+
+            write_test_ca(ca_file, include_private_key=True)
+            ca_file.chmod(0o640)
+            reporter = Reporter()
+            check_hermes_auth_bridge(db_file, reporter)
+            self.assertIn(
+                "hermes_auth_provider_ca_invalid",
                 {issue.code for issue in reporter.issues},
             )
 

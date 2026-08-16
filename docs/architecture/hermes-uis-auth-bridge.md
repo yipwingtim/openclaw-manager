@@ -276,6 +276,7 @@ consumed_at             nullable
 
 ```text
 HERMES_AUTH_BRIDGE_ISSUER
+HERMES_AUTH_BRIDGE_CA_HOST_FILE
 HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE
 HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE
 HERMES_AUTH_BRIDGE_SIGNING_KEYS=kid-current=/run/secrets/current.pem,kid-old=/run/secrets/old.pem
@@ -293,10 +294,15 @@ HERMES_UIS_BRIDGE_ISSUER
 HERMES_UIS_BRIDGE_CLIENT_ID
 HERMES_UIS_BRIDGE_CLIENT_SECRET
 HERMES_UIS_BRIDGE_INSTANCE_ID
-HERMES_DASHBOARD_PUBLIC_URL
+HERMES_UIS_BRIDGE_REDIRECT_URI
+HERMES_UIS_BRIDGE_CA_FILE=/opt/data/manager-auth/bridge-ca.crt
 ```
 
 实例 secret 写入 Hermes 私有 `.env`，文件权限保持 `0600`，不显示在 Manager 页面、操作输出或审计详情中。创建、恢复和轮换使用一次性 provisioning secret，沿用现有敏感信息处理原则。
+CA 文件只包含公钥证书，由 Manager 以 `0640` 暂存；Provider 为 token 和
+JWKS 请求共用一个启用主机名与证书链校验的 `SSLContext`。服务端证书的 SAN
+必须覆盖 `HERMES_AUTH_BRIDGE_ISSUER` 使用的主机名或 IP，不允许使用
+`verify=False` 绕过验证。
 
 ## 11. 网络拓扑
 

@@ -12,7 +12,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 MANAGER_WEB_DIR = ROOT_DIR / "services" / "manager-web"
 sys.path.insert(0, str(MANAGER_WEB_DIR))
 
-from instance_adapters import HermesDockerAdapter, stage_hermes_plugin
+from instance_adapters import (
+    HermesDockerAdapter,
+    stage_hermes_bridge_ca,
+    stage_hermes_plugin,
+)
+from tests.tls_fixtures import write_test_ca
 
 
 class HermesAdapterTests(unittest.TestCase):
@@ -197,8 +202,10 @@ class HermesAdapterTests(unittest.TestCase):
                 return 0, "ok"
 
             clients = []
+            ca_source = write_test_ca(root / "manager-ca.crt")
             with patch.dict(os.environ, {
                 "HERMES_AUTH_BRIDGE_ISSUER": "https://manager.example.test:30015/auth/hermes",
+                "HERMES_AUTH_BRIDGE_CA_FILE": str(ca_source),
             }), patch.object(adapter, "run_command", side_effect=run), patch.object(
                 adapter, "apply_nginx_compose", return_value=(0, "applied")
             ), patch.object(adapter, "reload_nginx", return_value=(0, "reloaded")), patch.object(
@@ -215,6 +222,15 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertFalse(adapter.hermes_recycle_dir(instance).exists())
             self.assertEqual(clients[0]["redirect_uri"], "https://manager.example.test:39119/auth/callback")
             self.assertNotEqual(clients[0]["client_id"], "old-client")
+            env_text = (data_path / ".env").read_text(encoding="utf-8")
+            self.assertIn(
+                "HERMES_UIS_BRIDGE_CA_FILE=/opt/data/manager-auth/bridge-ca.crt",
+                env_text,
+            )
+            self.assertEqual(
+                (data_path / "manager-auth" / "bridge-ca.crt").read_bytes(),
+                ca_source.read_bytes(),
+            )
             self.assertIn(
                 ["docker", "network", "connect", adapter.tenant_network(instance),
                  "openclaw-model-proxy"],
@@ -413,6 +429,8 @@ class HermesAdapterTests(unittest.TestCase):
             template.chmod(0o770)
             (template / "plugin.yaml").chmod(0o660)
             (template / "__init__.py").chmod(0o660)
+            ca_source = root / "manager-ca.crt"
+            ca_source.write_text("test CA certificate\n", encoding="utf-8")
 
             def run(command, **kwargs):
                 calls.append(command)
@@ -427,9 +445,12 @@ class HermesAdapterTests(unittest.TestCase):
                 os.environ,
                 {
                     "HERMES_AUTH_BRIDGE_ISSUER": "https://manager.example.test:30015/auth/hermes",
+                    "HERMES_AUTH_BRIDGE_CA_FILE": str(ca_source),
                     "PUBLIC_HOST": "manager.example.test",
                 },
-            ), patch("instance_adapters.os.chown") as chown:
+            ), patch("instance_adapters.ssl.create_default_context"), patch(
+                "instance_adapters.os.chown"
+            ) as chown:
                 code, _ = adapter.create(
                     instance, "true", "unused-password",
                     hermes_auth_client_callback=created_clients.append,
@@ -450,6 +471,14 @@ class HermesAdapterTests(unittest.TestCase):
                 "HERMES_UIS_BRIDGE_REDIRECT_URI=https://manager.example.test:39119/auth/callback",
                 env_text,
             )
+            self.assertIn(
+                "HERMES_UIS_BRIDGE_CA_FILE=/opt/data/manager-auth/bridge-ca.crt",
+                env_text,
+            )
+            ca_target = Path(instance["data_path"]) / "manager-auth" / "bridge-ca.crt"
+            self.assertEqual(ca_target.read_text(encoding="utf-8"), "test CA certificate\n")
+            self.assertEqual(ca_target.parent.stat().st_mode & 0o777, 0o750)
+            self.assertEqual(ca_target.stat().st_mode & 0o777, 0o640)
             self.assertEqual(created_clients[0]["redirect_uri"], "https://manager.example.test:39119/auth/callback")
             self.assertTrue(
                 (Path(instance["data_path"]) / "plugins" / "campus-uis-bridge" / "plugin.yaml").is_file()
@@ -481,6 +510,32 @@ class HermesAdapterTests(unittest.TestCase):
 
             self.assertFalse(target.exists())
 
+    def test_stage_hermes_bridge_ca_rejects_symlink_source(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "manager-ca.crt"
+            source.symlink_to(root / "outside.crt")
+
+            with self.assertRaisesRegex(RuntimeError, "cannot be a symlink"):
+                stage_hermes_bridge_ca(
+                    source, root / "data" / "manager-auth" / "bridge-ca.crt",
+                    10000, 10000,
+                )
+
+    def test_stage_hermes_bridge_ca_rejects_private_key_material(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = write_test_ca(
+                root / "manager-ca.crt", include_private_key=True
+            )
+
+            with patch("instance_adapters.os.chown"), self.assertRaisesRegex(
+                RuntimeError, "must not contain a private key"):
+                stage_hermes_bridge_ca(
+                    source, root / "data" / "manager-auth" / "bridge-ca.crt",
+                    10000, 10000,
+                )
+
     def test_create_failure_removes_container_data_and_new_network(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -490,6 +545,7 @@ class HermesAdapterTests(unittest.TestCase):
                 "data_path": str(root / "public" / "hermes" / "alice"),
             }
             calls = []
+            ca_source = write_test_ca(root / "manager-ca.crt")
 
             def run(command, **kwargs):
                 calls.append(command)
@@ -501,7 +557,12 @@ class HermesAdapterTests(unittest.TestCase):
                     return 1, "start failed"
                 return 0, "ok"
 
-            with patch.object(adapter, "run_command", side_effect=run):
+            with patch.dict(os.environ, {
+                "HERMES_AUTH_BRIDGE_ISSUER": "https://manager.example.test:30015/auth/hermes",
+                "HERMES_AUTH_BRIDGE_CA_FILE": str(ca_source),
+            }), patch.object(adapter, "run_command", side_effect=run), patch(
+                "instance_adapters.os.chown"
+            ):
                 code, output = adapter.create(instance, "true", "password")
 
             self.assertEqual(code, 1)

@@ -6,6 +6,8 @@ import re
 import secrets
 import signal
 import shutil
+import ssl
+import stat
 import subprocess
 import tempfile
 import threading
@@ -17,6 +19,53 @@ from product_capabilities import product_auth_contract, product_capabilities
 
 HERMES_RUNTIME_UID = 10000
 HERMES_RUNTIME_GID = 10000
+HERMES_BRIDGE_CA_RELATIVE_PATH = Path("manager-auth") / "bridge-ca.crt"
+HERMES_BRIDGE_CA_CONTAINER_FILE = "/opt/data/manager-auth/bridge-ca.crt"
+
+
+def validate_hermes_bridge_ca(source):
+    """Reject unsafe paths and ensure the source contains parseable CA data."""
+    try:
+        source_stat = source.lstat()
+    except OSError as exc:
+        raise RuntimeError(f"Hermes Bridge CA cannot be read: {source}") from exc
+    if source.is_symlink():
+        raise RuntimeError(f"Hermes Bridge CA cannot be a symlink: {source}")
+    if not stat.S_ISREG(source_stat.st_mode):
+        raise RuntimeError(f"Hermes Bridge CA must be a regular file: {source}")
+    try:
+        source_bytes = source.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(f"Hermes Bridge CA cannot be read: {source}") from exc
+    if b"PRIVATE KEY-----" in source_bytes:
+        raise RuntimeError("Hermes Bridge CA must not contain a private key")
+    try:
+        ssl.create_default_context(cafile=str(source))
+    except (OSError, ssl.SSLError) as exc:
+        raise RuntimeError(f"Hermes Bridge CA is not a valid certificate: {source}") from exc
+
+
+def stage_hermes_bridge_ca(source, target, uid, gid):
+    """Validate and atomically stage the public CA certificate for Hermes."""
+    validate_hermes_bridge_ca(source)
+
+    parent = target.parent
+    if parent.exists() and (parent.is_symlink() or not parent.is_dir()):
+        raise RuntimeError(f"Hermes Bridge CA directory is invalid: {parent}")
+    parent.mkdir(parents=True, exist_ok=True)
+    os.chown(parent, uid, gid, follow_symlinks=False)
+    parent.chmod(0o750)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".bridge-ca-", dir=parent)
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        shutil.copyfile(source, temporary)
+        os.chown(temporary, uid, gid, follow_symlinks=False)
+        temporary.chmod(0o640)
+        temporary.replace(target)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def stage_hermes_plugin(source, target, uid, gid):
@@ -1927,6 +1976,13 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             redirect_uri = f"https://{os.environ.get('PUBLIC_HOST', '').strip()}:{instance['_created_port']}/auth/callback"
             if not os.environ.get("PUBLIC_HOST", "").strip():
                 raise RuntimeError("PUBLIC_HOST is required for Hermes UIS authentication")
+            ca_source_value = os.environ.get("HERMES_AUTH_BRIDGE_CA_FILE", "").strip()
+            if not ca_source_value:
+                raise RuntimeError("HERMES_AUTH_BRIDGE_CA_FILE is required")
+            stage_hermes_bridge_ca(
+                Path(ca_source_value), data_path / HERMES_BRIDGE_CA_RELATIVE_PATH,
+                HERMES_RUNTIME_UID, HERMES_RUNTIME_GID,
+            )
             plugin_source = self.manager_dir / "templates" / "hermes" / "plugins" / "campus-uis-bridge"
             plugin_target = data_path / "plugins" / "campus-uis-bridge"
             if not plugin_source.is_dir():
@@ -1942,6 +1998,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                     f"HERMES_UIS_BRIDGE_CLIENT_SECRET={client_secret}\n"
                     f"HERMES_UIS_BRIDGE_INSTANCE_ID={instance['public_id']}\n"
                     f"HERMES_UIS_BRIDGE_REDIRECT_URI={redirect_uri}\n"
+                    f"HERMES_UIS_BRIDGE_CA_FILE={HERMES_BRIDGE_CA_CONTAINER_FILE}\n"
                 )
             (data_path / "config.yaml").write_text(
                 "security:\n  allow_lazy_installs: false\n"
@@ -2161,6 +2218,14 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 issuer = os.environ.get("HERMES_AUTH_BRIDGE_ISSUER", "").rstrip("/")
                 if not issuer.startswith("https://"):
                     raise RuntimeError("HERMES_AUTH_BRIDGE_ISSUER must use HTTPS")
+                ca_source_value = os.environ.get("HERMES_AUTH_BRIDGE_CA_FILE", "").strip()
+                if not ca_source_value:
+                    raise RuntimeError("HERMES_AUTH_BRIDGE_CA_FILE is required")
+                data_stat = data_path.stat()
+                stage_hermes_bridge_ca(
+                    Path(ca_source_value), data_path / HERMES_BRIDGE_CA_RELATIVE_PATH,
+                    data_stat.st_uid, data_stat.st_gid,
+                )
                 client_id, client_secret = secrets.token_urlsafe(24), secrets.token_urlsafe(48)
                 values = {
                     "HERMES_UIS_BRIDGE_ISSUER": issuer,
@@ -2168,6 +2233,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                     "HERMES_UIS_BRIDGE_CLIENT_SECRET": client_secret,
                     "HERMES_UIS_BRIDGE_INSTANCE_ID": instance["public_id"],
                     "HERMES_UIS_BRIDGE_REDIRECT_URI": f"{instance['access_url'].rstrip('/')}/auth/callback",
+                    "HERMES_UIS_BRIDGE_CA_FILE": HERMES_BRIDGE_CA_CONTAINER_FILE,
                 }
                 lines = [
                     line for line in env_text.splitlines()

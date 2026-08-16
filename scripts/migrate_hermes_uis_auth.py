@@ -16,7 +16,13 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR / "services" / "manager-web"))
 sys.path.insert(0, str(ROOT_DIR / "services" / "manager-control"))
 from hermes_auth_bridge import BridgeStore, verify_client_secret
-from instance_adapters import stage_hermes_plugin
+from instance_adapters import (
+    HERMES_BRIDGE_CA_CONTAINER_FILE,
+    HERMES_BRIDGE_CA_RELATIVE_PATH,
+    stage_hermes_bridge_ca,
+    stage_hermes_plugin,
+    validate_hermes_bridge_ca,
+)
 
 
 BASIC_KEYS = {
@@ -50,6 +56,7 @@ def bridge_env(
         f"HERMES_UIS_BRIDGE_CLIENT_SECRET={client_secret}",
         f"HERMES_UIS_BRIDGE_INSTANCE_ID={instance_id}",
         f"HERMES_UIS_BRIDGE_REDIRECT_URI={redirect_uri}",
+        f"HERMES_UIS_BRIDGE_CA_FILE={HERMES_BRIDGE_CA_CONTAINER_FILE}",
     ])
     return "\n".join(kept) + "\n"
 
@@ -67,11 +74,12 @@ def run(command):
     return subprocess.run(command, text=True, capture_output=True, check=False)
 
 
-def apply(instance, db_file, issuer):
+def apply(instance, db_file, issuer, ca_file):
     data_path = Path(instance["data_path"])
     env_file = data_path / ".env"
     config_file = data_path / "config.yaml"
     plugin = data_path / "plugins" / "campus-uis-bridge"
+    ca_target = data_path / HERMES_BRIDGE_CA_RELATIVE_PATH
     source = ROOT_DIR / "templates" / "hermes" / "plugins" / "campus-uis-bridge"
     if not env_file.is_file() or not config_file.is_file() or not source.is_dir():
         raise RuntimeError("Hermes instance files or provider template are incomplete")
@@ -80,6 +88,21 @@ def apply(instance, db_file, issuer):
         raise RuntimeError("Hermes access_url must be an explicit HTTPS host and port")
     redirect_uri = f"https://{parsed.hostname}:{parsed.port}/auth/callback"
     old_env, old_config = env_file.read_bytes(), config_file.read_bytes()
+    if ca_target.is_symlink():
+        raise RuntimeError("existing Hermes Bridge CA cannot be a symlink")
+    if ca_target.parent.exists() and (
+        ca_target.parent.is_symlink() or not ca_target.parent.is_dir()
+    ):
+        raise RuntimeError("existing Hermes Bridge CA directory is invalid")
+    old_ca = ca_target.read_bytes() if ca_target.is_file() else None
+    if ca_target.exists() and old_ca is None:
+        raise RuntimeError("existing Hermes Bridge CA path is not a regular file")
+    old_ca_stat = ca_target.stat(follow_symlinks=False) if old_ca is not None else None
+    ca_parent_created = not ca_target.parent.exists()
+    ca_parent_stat = (
+        ca_target.parent.stat(follow_symlinks=False)
+        if not ca_parent_created else None
+    )
     current_env = env_values(old_env.decode())
     with BridgeStore(db_file).connect() as conn:
         existing_client = conn.execute(
@@ -108,6 +131,9 @@ def apply(instance, db_file, issuer):
     (backup / ".env").chmod(0o600)
     (backup / "config.yaml").write_bytes(old_config)
     (backup / "config.yaml").chmod(0o600)
+    if old_ca is not None:
+        (backup / "bridge-ca.crt").write_bytes(old_ca)
+        (backup / "bridge-ca.crt").chmod(0o600)
     old_plugin = plugin.parent / f".{plugin.name}.pre-uis"
     if old_plugin.exists():
         raise RuntimeError(f"rollback path already exists: {old_plugin}")
@@ -123,6 +149,9 @@ def apply(instance, db_file, issuer):
         plugin.parent.mkdir(parents=True, exist_ok=True)
         data_stat = data_path.stat()
         stage_hermes_plugin(source, plugin, data_stat.st_uid, data_stat.st_gid)
+        stage_hermes_bridge_ca(
+            ca_file, ca_target, data_stat.st_uid, data_stat.st_gid
+        )
         env_file.write_text(bridge_env(
             old_env.decode(), issuer=issuer, client_id=client_id,
             client_secret=client_secret, instance_id=instance["public_id"],
@@ -149,6 +178,29 @@ def apply(instance, db_file, issuer):
     except Exception:
         env_file.write_bytes(old_env)
         config_file.write_bytes(old_config)
+        if old_ca is None:
+            ca_target.unlink(missing_ok=True)
+            if ca_parent_created:
+                try:
+                    ca_target.parent.rmdir()
+                except OSError:
+                    pass
+        else:
+            stage_hermes_bridge_ca(
+                backup / "bridge-ca.crt", ca_target,
+                old_ca_stat.st_uid, old_ca_stat.st_gid,
+            )
+            os.chown(
+                ca_target, old_ca_stat.st_uid, old_ca_stat.st_gid,
+                follow_symlinks=False,
+            )
+            ca_target.chmod(old_ca_stat.st_mode & 0o777)
+        if ca_parent_stat is not None:
+            os.chown(
+                ca_target.parent, ca_parent_stat.st_uid, ca_parent_stat.st_gid,
+                follow_symlinks=False,
+            )
+            ca_target.parent.chmod(ca_parent_stat.st_mode & 0o777)
         shutil.rmtree(plugin, ignore_errors=True)
         if old_plugin.exists():
             shutil.move(old_plugin, plugin)
@@ -175,6 +227,10 @@ def main(argv=None):
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--instance", required=True, help="exact Hermes instance public UUID")
     parser.add_argument("--issuer", default=os.environ.get("HERMES_AUTH_BRIDGE_ISSUER", ""))
+    parser.add_argument(
+        "--ca-file", type=Path,
+        default=os.environ.get("HERMES_AUTH_BRIDGE_CA_HOST_FILE", ""),
+    )
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     instance = load_instance(args.db, args.instance)
@@ -183,6 +239,13 @@ def main(argv=None):
     issuer = args.issuer.strip().rstrip("/")
     if not issuer.startswith("https://"):
         parser.error("--issuer must use HTTPS")
+    ca_file = Path(args.ca_file) if args.ca_file else None
+    if ca_file is None:
+        parser.error("--ca-file is required")
+    try:
+        validate_hermes_bridge_ca(ca_file)
+    except RuntimeError as exc:
+        parser.error(str(exc))
     print(f"[PLAN] switch Hermes instance {instance['public_id']} to campus-uis-bridge")
     if not args.apply:
         print("[INFO] Preview completed; no files, clients, or containers were changed")
@@ -190,7 +253,7 @@ def main(argv=None):
     if os.geteuid() != 0:
         parser.error("--apply must be run as root")
     try:
-        apply(instance, args.db, issuer)
+        apply(instance, args.db, issuer, ca_file)
     except Exception as exc:
         print(f"[ERROR] migration failed and was rolled back: {exc}", file=sys.stderr)
         return 1

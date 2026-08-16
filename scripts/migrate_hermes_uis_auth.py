@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR / "services" / "manager-web"))
 sys.path.insert(0, str(ROOT_DIR / "services" / "manager-control"))
-from hermes_auth_bridge import BridgeStore
+from hermes_auth_bridge import BridgeStore, verify_client_secret
 from instance_adapters import stage_hermes_plugin
 
 
@@ -36,7 +36,9 @@ def load_instance(db_file, public_id):
     return dict(row) if row else None
 
 
-def bridge_env(old_text, *, issuer, client_id, client_secret, instance_id):
+def bridge_env(
+    old_text, *, issuer, client_id, client_secret, instance_id, redirect_uri
+):
     kept = [
         line for line in old_text.splitlines()
         if line.split("=", 1)[0] not in BASIC_KEYS
@@ -47,8 +49,18 @@ def bridge_env(old_text, *, issuer, client_id, client_secret, instance_id):
         f"HERMES_UIS_BRIDGE_CLIENT_ID={client_id}",
         f"HERMES_UIS_BRIDGE_CLIENT_SECRET={client_secret}",
         f"HERMES_UIS_BRIDGE_INSTANCE_ID={instance_id}",
+        f"HERMES_UIS_BRIDGE_REDIRECT_URI={redirect_uri}",
     ])
     return "\n".join(kept) + "\n"
+
+
+def env_values(text):
+    return {
+        key: value
+        for line in text.splitlines()
+        if "=" in line
+        for key, value in [line.split("=", 1)]
+    }
 
 
 def run(command):
@@ -66,9 +78,27 @@ def apply(instance, db_file, issuer):
     parsed = urllib.parse.urlsplit(instance.get("access_url") or "")
     if parsed.scheme != "https" or not parsed.hostname or not parsed.port:
         raise RuntimeError("Hermes access_url must be an explicit HTTPS host and port")
-    client_id, client_secret = secrets.token_urlsafe(24), secrets.token_urlsafe(48)
     redirect_uri = f"https://{parsed.hostname}:{parsed.port}/auth/callback"
     old_env, old_config = env_file.read_bytes(), config_file.read_bytes()
+    current_env = env_values(old_env.decode())
+    with BridgeStore(db_file).connect() as conn:
+        existing_client = conn.execute(
+            "SELECT client_id, client_secret_hash, redirect_uri, revoked_at "
+            "FROM hermes_auth_clients WHERE instance_id = ?", (instance["id"],),
+        ).fetchone()
+    if existing_client:
+        client_id = current_env.get("HERMES_UIS_BRIDGE_CLIENT_ID", "")
+        client_secret = current_env.get("HERMES_UIS_BRIDGE_CLIENT_SECRET", "")
+        if (
+            existing_client[3] is not None
+            or existing_client[0] != client_id
+            or existing_client[2] != redirect_uri
+            or not verify_client_secret(client_secret, existing_client[1])
+        ):
+            raise RuntimeError("existing Hermes Bridge client does not match instance config")
+    else:
+        client_id = secrets.token_urlsafe(24)
+        client_secret = secrets.token_urlsafe(48)
     backup = data_path.parent.parent / ".manager-auth-backups" / (
         "hermes-uis-" + instance["public_id"] + "-"
         + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -96,6 +126,7 @@ def apply(instance, db_file, issuer):
         env_file.write_text(bridge_env(
             old_env.decode(), issuer=issuer, client_id=client_id,
             client_secret=client_secret, instance_id=instance["public_id"],
+            redirect_uri=redirect_uri,
         ), encoding="utf-8")
         env_file.chmod(0o600)
         enabled = run([
@@ -104,10 +135,11 @@ def apply(instance, db_file, issuer):
         ])
         if enabled.returncode != 0:
             raise RuntimeError(enabled.stderr.strip() or "could not enable Hermes UIS provider")
-        BridgeStore(db_file).create_client(
-            instance["id"], client_id, client_secret, redirect_uri,
-        )
-        created_client = True
+        if existing_client is None:
+            BridgeStore(db_file).create_client(
+                instance["id"], client_id, client_secret, redirect_uri,
+            )
+            created_client = True
         restarted = run(["docker", "restart", instance["runtime_identifier"]])
         if restarted.returncode != 0:
             raise RuntimeError(restarted.stderr.strip() or "could not restart Hermes")

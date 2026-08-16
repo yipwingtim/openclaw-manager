@@ -1941,6 +1941,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                     f"HERMES_UIS_BRIDGE_CLIENT_ID={client_id}\n"
                     f"HERMES_UIS_BRIDGE_CLIENT_SECRET={client_secret}\n"
                     f"HERMES_UIS_BRIDGE_INSTANCE_ID={instance['public_id']}\n"
+                    f"HERMES_UIS_BRIDGE_REDIRECT_URI={redirect_uri}\n"
                 )
             (data_path / "config.yaml").write_text(
                 "security:\n  allow_lazy_installs: false\n"
@@ -2166,6 +2167,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                     "HERMES_UIS_BRIDGE_CLIENT_ID": client_id,
                     "HERMES_UIS_BRIDGE_CLIENT_SECRET": client_secret,
                     "HERMES_UIS_BRIDGE_INSTANCE_ID": instance["public_id"],
+                    "HERMES_UIS_BRIDGE_REDIRECT_URI": f"{instance['access_url'].rstrip('/')}/auth/callback",
                 }
                 lines = [
                     line for line in env_text.splitlines()

@@ -24,6 +24,8 @@ support the legacy two-container topology.
   The secret exists only in the instance's mode `0600` `.env`; Manager metadata
   stores only its scrypt verifier. The Provider is installed under
   `/opt/data/plugins/campus-uis-bridge` and enabled in `config.yaml` before startup.
+  Its registered HTTPS callback is pinned in `HERMES_UIS_BRIDGE_REDIRECT_URI`;
+  values dynamically inferred by Hermes from reverse-proxy requests are ignored.
 - Runtime dependency lazy installation is disabled in `config.yaml` so a
   missing optional package cannot block agent initialization. Optional
   dependencies must be included in the image before enabling their features.

@@ -88,6 +88,7 @@ class HermesUISProviderTests(unittest.TestCase):
         return self.plugin.CampusUISBridgeProvider(
             "https://manager.example.test:30015/auth/hermes",
             "client-1", "secret-1", self.INSTANCE_ID,
+            "https://manager.example.test:39119/auth/callback",
         )
 
     def valid_claims(self, **overrides):
@@ -102,10 +103,14 @@ class HermesUISProviderTests(unittest.TestCase):
 
     def test_start_login_creates_s256_pkce_and_state_cookie(self):
         start = self.provider().start_login(
-            redirect_uri="https://manager.example.test:39119/auth/callback"
+            redirect_uri="http://manager.example.test/auth/callback"
         )
         self.assertIn("code_challenge_method=S256", start.redirect_url)
         self.assertIn("client_id=client-1", start.redirect_url)
+        self.assertIn(
+            "redirect_uri=https%3A%2F%2Fmanager.example.test%3A39119%2Fauth%2Fcallback",
+            start.redirect_url,
+        )
         self.assertRegex(start.cookie_payload["hermes_session_pkce"], r"^state=.+;verifier=.{43,128}$")
 
     def test_verify_session_pins_algorithm_claims_and_instance(self):
@@ -138,11 +143,15 @@ class HermesUISProviderTests(unittest.TestCase):
             with self.assertRaises(self.plugin.InvalidCodeError):
                 provider.complete_login(
                     code="one-time-code", state="state", code_verifier="verifier",
-                    redirect_uri="https://manager.example.test:39119/auth/callback",
+                    redirect_uri="http://manager.example.test/auth/callback",
                 )
         data = post.call_args.kwargs["data"]
         self.assertEqual(data["client_secret"], "secret-1")
         self.assertEqual(data["code_verifier"], "verifier")
+        self.assertEqual(
+            data["redirect_uri"],
+            "https://manager.example.test:39119/auth/callback",
+        )
 
     def test_bridge_token_establishes_official_hermes_session(self):
         private_key = serialization.load_pem_private_key(

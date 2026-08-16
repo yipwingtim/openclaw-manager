@@ -408,8 +408,8 @@ def check_hermes_auth_bridge(path, reporter):
                 "hermes_auth_grant_instance_mismatch",
                 f"{mismatches} grant(s) do not match their client instance",
             )
-        for client_id, data_path, status in conn.execute(
-            "SELECT c.client_id, i.data_path, i.status FROM hermes_auth_clients c "
+        for client_id, redirect_uri, data_path, status in conn.execute(
+            "SELECT c.client_id, c.redirect_uri, i.data_path, i.status FROM hermes_auth_clients c "
             "JOIN instances i ON i.id = c.instance_id WHERE c.revoked_at IS NULL"
         ):
             if status not in {"active", "stopped"}:
@@ -462,15 +462,27 @@ def check_hermes_auth_bridge(path, reporter):
                         "hermes_auth_provider_permissions_invalid",
                         f"client_id={client_id} provider permissions cannot be checked: {exc}",
                     )
+            env = {
+                key: value
+                for line in env_text.splitlines()
+                if "=" in line
+                for key, value in [line.split("=", 1)]
+            }
             if mode & 0o077 or any(
                 f"{key}=" not in env_text for key in (
                     "HERMES_UIS_BRIDGE_ISSUER", "HERMES_UIS_BRIDGE_CLIENT_ID",
                     "HERMES_UIS_BRIDGE_CLIENT_SECRET", "HERMES_UIS_BRIDGE_INSTANCE_ID",
+                    "HERMES_UIS_BRIDGE_REDIRECT_URI",
                 )
             ):
                 reporter.error(
                     "hermes_auth_provider_env_invalid",
                     f"client_id={client_id} provider env is incomplete or not private",
+                )
+            elif env["HERMES_UIS_BRIDGE_REDIRECT_URI"] != redirect_uri:
+                reporter.error(
+                    "hermes_auth_provider_redirect_mismatch",
+                    f"client_id={client_id} provider redirect URI does not match metadata",
                 )
 
 

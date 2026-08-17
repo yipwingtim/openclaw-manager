@@ -409,12 +409,13 @@ EvoScientist，CSV 表头为：
 ```csv
 owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled
 local,alice,alice-openclaw,Alice OpenClaw,openclaw,2026.7.1,false,example-password,true
-campus-uis,12345,alice-hermes,Alice Hermes,hermes,v2026.7.20,false,example-password,true
+campus-uis,12345,alice-hermes,Alice Hermes,hermes,v2026.7.20,false,,
 campus-uis,12345,alice-evo,Alice Evo,evoscientist,latest,true,example-password,true
 ```
 
-`version` 留空时使用该产品的默认版本。Hermes 和 EvoScientist 必须启用 Basic
-Auth；EvoScientist 使用 `latest` 时必须将 `confirm_latest` 设为 `true`。
+`version` 留空时使用该产品的默认版本。Hermes 使用 `campus-uis-bridge`，其
+`basic_auth_password` 和 `basic_auth_enabled` 留空；EvoScientist 必须启用 Basic Auth，
+使用 `latest` 时必须将 `confirm_latest` 设为 `true`。
 `owner_identity_type` 支持 `local`（`owner_identity` 填平台用户名）和
 `campus-uis`（填写 UIS `user_id/work_id`）。身份必须已导入或绑定到 active 平台用户，
 批量创建不会自动创建用户。旧 `owner_username` 表头继续兼容。

@@ -452,7 +452,7 @@ class HermesAdapterTests(unittest.TestCase):
                 "instance_adapters.os.chown"
             ) as chown:
                 code, _ = adapter.create(
-                    instance, "true", "unused-password",
+                    instance, "false", "",
                     hermes_auth_client_callback=created_clients.append,
                 )
 
@@ -563,7 +563,7 @@ class HermesAdapterTests(unittest.TestCase):
             }), patch.object(adapter, "run_command", side_effect=run), patch(
                 "instance_adapters.os.chown"
             ):
-                code, output = adapter.create(instance, "true", "password")
+                code, output = adapter.create(instance, "false", "")
 
             self.assertEqual(code, 1)
             self.assertIn("rolled back", output)

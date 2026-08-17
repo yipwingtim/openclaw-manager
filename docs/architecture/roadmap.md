@@ -37,9 +37,9 @@ for completing the multi-product control plane.
   使用 `legacy_user_id` 兼容数据。
 - Existing instances use product-aware ingress: OpenClaw may expose its configured
   Control UI base path, while Hermes and EvoScientist retain per-instance HTTPS
-  ports unless their adapters prove path compatibility. Basic Auth remains enabled.
+  ports unless their adapters prove path compatibility. Hermes uses its UIS bridge.
 - 现有实例按产品能力使用入口：OpenClaw 可以暴露其配置的 Control UI 路径；在验证
-  路径兼容性前，Hermes 和 EvoScientist 继续使用实例独立 HTTPS 端口。Basic Auth 仍保留。
+  路径兼容性前，Hermes 和 EvoScientist 继续使用实例独立 HTTPS 端口；Hermes 使用 UIS bridge。
 
 ## Completed Foundations | 已完成基础工作
 

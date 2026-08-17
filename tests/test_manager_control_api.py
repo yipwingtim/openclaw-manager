@@ -1095,8 +1095,6 @@ class ManagerControlApiTests(unittest.TestCase):
             "legacy_user_id": "alice-hermes",
             "instance_name": "Alice Hermes",
             "product": "hermes",
-            "basic_auth_enabled": True,
-            "basic_auth_password": "secret",
         }
         with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
             self.control.request, "headers", {"Authorization": "Bearer admin-token"}
@@ -1111,6 +1109,33 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertRegex(
             instance["data_path"],
             r"/instances/hermes/[0-9a-f-]{36}$",
+        )
+        self.assertFalse(instance["basic_auth_enabled"])
+        self.assertFalse(secret_dir.exists())
+
+    def test_admin_rejects_hermes_dummy_basic_auth_credentials(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        payload = {
+            "request_id": "create-hermes-dummy-auth",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-hermes-dummy",
+            "instance_name": "Alice Hermes",
+            "product": "hermes",
+            "basic_auth_enabled": True,
+            "basic_auth_password": "dummy",
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_admin_instance())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            response.get_json(),
+            {"error": "Hermes does not accept Basic Auth credentials"},
         )
 
     def test_admin_create_accepts_version_and_requires_latest_confirmation(self):
@@ -1350,8 +1375,7 @@ class ManagerControlApiTests(unittest.TestCase):
                     "product": "hermes",
                     "version": "v2026.7.20",
                     "confirm_latest": False,
-                    "basic_auth_enabled": True,
-                    "basic_auth_password": "h-secret",
+                    "basic_auth_enabled": False,
                 },
                 {
                     "owner_user_public_id": self.user["public_id"],
@@ -1401,6 +1425,30 @@ class ManagerControlApiTests(unittest.TestCase):
             ["v2026.7.20", "latest"],
         )
 
+    def test_admin_batch_accepts_hermes_without_basic_auth(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        row = {
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-hermes-no-auth",
+            "instance_name": "Alice Hermes",
+            "product": "hermes",
+        }
+        payload = {
+            "request_id": "batch-hermes-no-auth",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [row],
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 202, response.get_json())
+        self.assertFalse(secret_dir.exists())
+
     def test_admin_batch_rejects_product_auth_and_latest_violations(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file
@@ -1412,11 +1460,6 @@ class ManagerControlApiTests(unittest.TestCase):
             "basic_auth_password": "secret",
         }
         cases = (
-            (
-                "batch-hermes-no-auth",
-                {**base, "product": "hermes", "basic_auth_enabled": False},
-                "hermes requires Basic Auth in row 1",
-            ),
             (
                 "batch-evo-latest-unconfirmed",
                 {
@@ -1477,8 +1520,10 @@ class ManagerControlApiTests(unittest.TestCase):
 
         payload["request_id"] = "batch-hermes-invalid-digest"
         payload["instances"][0].update(
-            product="hermes", version="sha256:" + "a" * 64
+            product="hermes", version="sha256:" + "a" * 64,
+            basic_auth_enabled=False,
         )
+        payload["instances"][0].pop("basic_auth_password")
         with patch.object(
             self.control.request, "headers", {"Authorization": "Bearer admin-token"}
         ), patch.object(self.control.request, "get_json", return_value=payload):
@@ -1536,8 +1581,7 @@ class ManagerControlApiTests(unittest.TestCase):
                 "legacy_user_id": "alice-hermes-default",
                 "instance_name": "Alice Hermes",
                 "product": "hermes",
-                "basic_auth_enabled": True,
-                "basic_auth_password": "secret",
+                "basic_auth_enabled": False,
             }],
         }
         self.control.metadata_store.set_setting(

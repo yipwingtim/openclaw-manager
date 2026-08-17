@@ -48,7 +48,17 @@ class WebServiceSplitTests(unittest.TestCase):
             "${NGINX_AUTH_DIR:-/data/docker/nginx/auth}\n",
             executor_block,
         )
+        self.assertIn(
+            "HERMES_AUTH_BRIDGE_CA_FILE: /run/secrets/hermes-auth-bridge-ca.crt",
+            executor_block,
+        )
+        self.assertIn(
+            "${HERMES_AUTH_BRIDGE_CA_HOST_FILE:-/dev/null}:"
+            "/run/secrets/hermes-auth-bridge-ca.crt:ro",
+            executor_block,
+        )
         self.assertIn("healthcheck:", executor_api_block)
+        self.assertNotIn("HERMES_AUTH_BRIDGE_CA_HOST_FILE", executor_api_block)
         self.assertNotIn("NGINX_AUTH_DIR", executor_api_block)
         self.assertNotIn("NGINX_USERS_CONF_DIR", executor_api_block)
 

@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.tls_fixtures import write_test_ca
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT_DIR / "scripts" / "migrate_hermes_uis_auth.py"
@@ -49,6 +51,7 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.template.chmod(0o770)
         (self.template / "plugin.yaml").chmod(0o660)
         (self.template / "__init__.py").chmod(0o660)
+        self.ca_file = write_test_ca(self.root / "manager-ca.crt")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -59,6 +62,7 @@ class HermesUISMigrationTests(unittest.TestCase):
             status = migration.main([
                 "--db", str(self.db), "--instance", "11111111-1111-1111-1111-111111111111",
                 "--issuer", "https://manager.example.test:30015/auth/hermes",
+                "--ca-file", str(self.ca_file),
             ])
         self.assertEqual(status, 0)
         self.assertEqual((self.data / ".env").read_bytes(), before)
@@ -71,7 +75,10 @@ class HermesUISMigrationTests(unittest.TestCase):
         with patch.object(migration, "ROOT_DIR", self.root), patch.object(
             migration, "run", return_value=success
         ) as run, patch.object(migration.os, "chown") as chown:
-            migration.apply(instance, self.db, "https://manager.example.test:30015/auth/hermes")
+            migration.apply(
+                instance, self.db, "https://manager.example.test:30015/auth/hermes",
+                self.ca_file,
+            )
         env = (self.data / ".env").read_text()
         self.assertIn("KEEP=value", env)
         self.assertNotIn("HERMES_DASHBOARD_BASIC_AUTH", env)
@@ -80,6 +87,12 @@ class HermesUISMigrationTests(unittest.TestCase):
             "HERMES_UIS_BRIDGE_REDIRECT_URI=https://manager.example.test:39119/auth/callback",
             env,
         )
+        self.assertIn(
+            "HERMES_UIS_BRIDGE_CA_FILE=/opt/data/manager-auth/bridge-ca.crt", env
+        )
+        staged_ca = self.data / "manager-auth" / "bridge-ca.crt"
+        self.assertEqual(staged_ca.read_bytes(), self.ca_file.read_bytes())
+        self.assertEqual(staged_ca.stat().st_mode & 0o777, 0o640)
         self.assertEqual(run.call_args_list[-1].args[0], ["docker", "restart", "hermes_alice"])
         with sqlite3.connect(self.db) as conn:
             client = conn.execute("SELECT client_secret_hash,redirect_uri FROM hermes_auth_clients").fetchone()
@@ -120,11 +133,15 @@ class HermesUISMigrationTests(unittest.TestCase):
             migration.apply(
                 instance, self.db,
                 "https://manager.example.test:30015/auth/hermes",
+                self.ca_file,
             )
         env = self.data.joinpath(".env").read_text(encoding="utf-8")
         self.assertIn("HERMES_UIS_BRIDGE_CLIENT_ID=existing-client", env)
         self.assertIn(f"HERMES_UIS_BRIDGE_CLIENT_SECRET={secret}", env)
         self.assertIn(f"HERMES_UIS_BRIDGE_REDIRECT_URI={redirect_uri}", env)
+        self.assertIn(
+            "HERMES_UIS_BRIDGE_CA_FILE=/opt/data/manager-auth/bridge-ca.crt", env
+        )
         with sqlite3.connect(self.db) as conn:
             self.assertEqual(
                 conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 1
@@ -140,6 +157,7 @@ class HermesUISMigrationTests(unittest.TestCase):
                     "--db", str(self.db),
                     "--instance", "11111111-1111-1111-1111-111111111111",
                     "--issuer", "https://manager.example.test:30015/auth/hermes",
+                    "--ca-file", str(self.ca_file),
                     "--apply",
                 ])
         self.assertEqual((self.data / ".env").read_bytes(), before)
@@ -158,12 +176,42 @@ class HermesUISMigrationTests(unittest.TestCase):
             migration, "run", side_effect=results
         ):
             with self.assertRaises(RuntimeError):
-                migration.apply(instance, self.db, "https://manager.example.test:30015/auth/hermes")
+                migration.apply(
+                    instance, self.db,
+                    "https://manager.example.test:30015/auth/hermes", self.ca_file,
+                )
         self.assertEqual((self.data / ".env").read_bytes(), before_env)
         self.assertEqual((self.data / "config.yaml").read_bytes(), before_config)
         self.assertFalse((self.data / "plugins").exists())
+        self.assertFalse((self.data / "manager-auth").exists())
         with sqlite3.connect(self.db) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 0)
+
+    def test_restart_failure_restores_existing_ca(self):
+        old_ca = self.data / "manager-auth" / "bridge-ca.crt"
+        old_ca.parent.mkdir()
+        old_ca.parent.chmod(0o750)
+        write_test_ca(old_ca)
+        old_ca.chmod(0o640)
+        before = old_ca.read_bytes()
+        results = [
+            types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+            types.SimpleNamespace(returncode=1, stdout="", stderr="restart failed"),
+            types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ]
+        instance = migration.load_instance(
+            self.db, "11111111-1111-1111-1111-111111111111"
+        )
+        with patch.object(migration, "ROOT_DIR", self.root), patch.object(
+            migration, "run", side_effect=results
+        ), patch.object(migration.os, "chown"):
+            with self.assertRaises(RuntimeError):
+                migration.apply(
+                    instance, self.db,
+                    "https://manager.example.test:30015/auth/hermes", self.ca_file,
+                )
+        self.assertEqual(old_ca.read_bytes(), before)
+        self.assertEqual(old_ca.stat().st_mode & 0o777, 0o640)
 
 
 if __name__ == "__main__":

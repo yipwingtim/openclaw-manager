@@ -3,6 +3,7 @@ import base64
 import hashlib
 import os
 import secrets
+import ssl
 import time
 import urllib.parse
 import uuid
@@ -23,13 +24,19 @@ class CampusUISBridgeProvider(DashboardAuthProvider):
     name = "campus-uis-bridge"
     display_name = "Campus UIS"
 
-    def __init__(self, issuer, client_id, client_secret, instance_id, redirect_uri):
+    def __init__(
+        self, issuer, client_id, client_secret, instance_id, redirect_uri, ca_file
+    ):
         self.issuer = issuer.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
         self.instance_id = str(uuid.UUID(instance_id))
         self.redirect_uri = redirect_uri
-        self.jwks = jwt.PyJWKClient(f"{self.issuer}/jwks.json", cache_keys=True, lifespan=300)
+        self.ssl_context = ssl.create_default_context(cafile=ca_file)
+        self.jwks = jwt.PyJWKClient(
+            f"{self.issuer}/jwks.json", cache_keys=True, lifespan=300,
+            ssl_context=self.ssl_context,
+        )
 
     def start_login(self, *, redirect_uri):
         del redirect_uri
@@ -60,6 +67,7 @@ class CampusUISBridgeProvider(DashboardAuthProvider):
                     "code_verifier": code_verifier,
                 },
                 headers={"Accept": "application/json"}, timeout=10.0,
+                verify=self.ssl_context,
             )
         except httpx.HTTPError as exc:
             raise ProviderError("Manager authentication bridge is unavailable") from exc
@@ -117,7 +125,7 @@ def register(ctx):
     values = [os.environ.get(name, "").strip() for name in (
         "HERMES_UIS_BRIDGE_ISSUER", "HERMES_UIS_BRIDGE_CLIENT_ID",
         "HERMES_UIS_BRIDGE_CLIENT_SECRET", "HERMES_UIS_BRIDGE_INSTANCE_ID",
-        "HERMES_UIS_BRIDGE_REDIRECT_URI",
+        "HERMES_UIS_BRIDGE_REDIRECT_URI", "HERMES_UIS_BRIDGE_CA_FILE",
     )]
     if all(values):
         ctx.register_dashboard_auth_provider(CampusUISBridgeProvider(*values))

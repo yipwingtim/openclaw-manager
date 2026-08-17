@@ -17,11 +17,18 @@ COMPOSE_TEMPLATE = ROOT_DIR / "templates" / "docker-compose.tpl.yml"
 SERVICES_COMPOSE = ROOT_DIR / "services" / "docker-compose.yml"
 DEPLOY_SERVICES = ROOT_DIR / "scripts" / "deploy_services.sh"
 RUNTIME_SECURITY_CHECK = ROOT_DIR / "scripts" / "check_runtime_security.sh"
+BOOTSTRAP_READINESS = ROOT_DIR / "scripts" / "check_bootstrap_readiness.sh"
 MODEL_PROXY_DEPLOYMENT_DOC = ROOT_DIR / "docs" / "deployment" / "model-proxy.md"
 BOOTSTRAP_DOC = ROOT_DIR / "docs" / "deployment" / "bootstrap.md"
 
 
 class TenantNetworkIsolationTests(unittest.TestCase):
+    def test_bootstrap_readiness_requires_hermes_bridge_ca_public_file(self):
+        script = BOOTSTRAP_READINESS.read_text(encoding="utf-8")
+
+        self.assertIn("HERMES_AUTH_BRIDGE_CA_HOST_FILE", script)
+        self.assertIn('check_file "$HERMES_AUTH_BRIDGE_CA_HOST_FILE"', script)
+
     def test_manager_services_do_not_join_legacy_agent_network(self):
         compose = SERVICES_COMPOSE.read_text(encoding="utf-8")
 

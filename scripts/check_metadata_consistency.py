@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sqlite3
+import ssl
 import sys
 import subprocess
 import urllib.parse
@@ -18,6 +19,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = SCRIPT_DIR.parent
 CONFIG_FILE = MANAGER_DIR / "config" / "openclaw-manager.env"
+HERMES_BRIDGE_CA_CONTAINER_FILE = "/opt/data/manager-auth/bridge-ca.crt"
 
 
 def load_env_file(path):
@@ -472,7 +474,7 @@ def check_hermes_auth_bridge(path, reporter):
                 f"{key}=" not in env_text for key in (
                     "HERMES_UIS_BRIDGE_ISSUER", "HERMES_UIS_BRIDGE_CLIENT_ID",
                     "HERMES_UIS_BRIDGE_CLIENT_SECRET", "HERMES_UIS_BRIDGE_INSTANCE_ID",
-                    "HERMES_UIS_BRIDGE_REDIRECT_URI",
+                    "HERMES_UIS_BRIDGE_REDIRECT_URI", "HERMES_UIS_BRIDGE_CA_FILE",
                 )
             ):
                 reporter.error(
@@ -484,6 +486,37 @@ def check_hermes_auth_bridge(path, reporter):
                     "hermes_auth_provider_redirect_mismatch",
                     f"client_id={client_id} provider redirect URI does not match metadata",
                 )
+            if "HERMES_UIS_BRIDGE_CA_FILE" in env:
+                ca_file = root / "manager-auth" / "bridge-ca.crt"
+                try:
+                    root_stat = root.stat()
+                    ca_parent_stat = ca_file.parent.stat(follow_symlinks=False)
+                    ca_stat = ca_file.stat(follow_symlinks=False)
+                    ca_valid = bool(
+                        env["HERMES_UIS_BRIDGE_CA_FILE"]
+                        == HERMES_BRIDGE_CA_CONTAINER_FILE
+                        and not ca_file.parent.is_symlink()
+                        and ca_file.parent.is_dir()
+                        and not ca_file.is_symlink()
+                        and ca_file.is_file()
+                        and ca_parent_stat.st_uid == root_stat.st_uid
+                        and ca_parent_stat.st_gid == root_stat.st_gid
+                        and ca_parent_stat.st_mode & 0o777 == 0o750
+                        and ca_stat.st_uid == root_stat.st_uid
+                        and ca_stat.st_gid == root_stat.st_gid
+                        and ca_stat.st_mode & 0o777 == 0o640
+                    )
+                    if ca_valid and b"PRIVATE KEY-----" in ca_file.read_bytes():
+                        ca_valid = False
+                    if ca_valid:
+                        ssl.create_default_context(cafile=str(ca_file))
+                except (OSError, ssl.SSLError):
+                    ca_valid = False
+                if not ca_valid:
+                    reporter.error(
+                        "hermes_auth_provider_ca_invalid",
+                        f"client_id={client_id} provider CA is missing, unsafe, or invalid",
+                    )
 
 
 def container_htpasswd_path(user_id):

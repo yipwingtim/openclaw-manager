@@ -26,6 +26,10 @@ support the legacy two-container topology.
   `/opt/data/plugins/campus-uis-bridge` and enabled in `config.yaml` before startup.
   Its registered HTTPS callback is pinned in `HERMES_UIS_BRIDGE_REDIRECT_URI`;
   values dynamically inferred by Hermes from reverse-proxy requests are ignored.
+  Token and JWKS requests share an explicit TLS context built from the public
+  CA staged at `/opt/data/manager-auth/bridge-ca.crt`; TLS verification is never
+  disabled. The Manager certificate must contain a SAN matching the issuer host
+  name or IP address.
 - Runtime dependency lazy installation is disabled in `config.yaml` so a
   missing optional package cannot block agent initialization. Optional
   dependencies must be included in the image before enabling their features.
@@ -70,13 +74,16 @@ Preview one exact instance first:
 python3 scripts/migrate_hermes_uis_auth.py \
   --db /data/docker/openclaw-public/manager.db \
   --instance <instance-public-uuid> \
-  --issuer https://<manager-host>:30015/auth/hermes
+  --issuer https://<manager-host>:30015/auth/hermes \
+  --ca-file /path/to/manager-ca.crt
 ```
 
 The `--apply` operation must run as root. Before changing files it verifies
 that privilege is available, then copies the Provider with the Hermes data
 directory owner and explicit modes (`0750` for directories and `0640` for
-files). Template ownership and inherited ACLs are never trusted.
+files). The CA source must be a regular, non-symlink public certificate that
+validates the issuer certificate. Template ownership and inherited ACLs are
+never trusted.
 
 After reviewing the plan, repeat with `--apply`. Apply removes the legacy Basic
 Auth entries, installs/enables the Provider, creates one client, and restarts only

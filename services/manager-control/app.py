@@ -2424,7 +2424,16 @@ def update_execution_job(request_id):
                     field == "openclaw_token" and product == "openclaw"
                     and result.get("auth_mode") == "token" and not result[field]
                 )
-                for field in required - {"port", "openclaw_token"}
+                for field in required - {"port", "openclaw_token", "basic_auth_password_ref"}
+            )
+            or (
+                product == "hermes" and result["basic_auth_password_ref"] is not None
+            )
+            or (
+                product != "hermes" and (
+                    not isinstance(result["basic_auth_password_ref"], str)
+                    or not result["basic_auth_password_ref"]
+                )
             )
             or not isinstance(result["openclaw_token"], str)
             or result["auth_mode"] not in (

@@ -105,19 +105,23 @@ def hermes_bridge_store():
     return BridgeStore(DB_FILE)
 
 
+def load_hermes_signing_keys():
+    kid = os.environ.get("HERMES_AUTH_BRIDGE_ACTIVE_KID", "").strip()
+    configured = os.environ.get("HERMES_AUTH_BRIDGE_SIGNING_KEYS", "").strip()
+    if configured:
+        key_files = dict(item.split("=", 1) for item in configured.split(","))
+    else:
+        key_file = os.environ.get("HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE", "").strip()
+        key_files = {kid: key_file} if kid and key_file else {}
+    if not key_files or not kid:
+        raise ValueError("Hermes auth bridge signing key is not configured")
+    return SigningKeys.from_pem_files(key_files, kid)
+
+
 def hermes_signing_keys():
     global _hermes_signing_keys
     if _hermes_signing_keys is None:
-        kid = os.environ.get("HERMES_AUTH_BRIDGE_ACTIVE_KID", "").strip()
-        configured = os.environ.get("HERMES_AUTH_BRIDGE_SIGNING_KEYS", "").strip()
-        if configured:
-            key_files = dict(item.split("=", 1) for item in configured.split(","))
-        else:
-            key_file = os.environ.get("HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE", "").strip()
-            key_files = {kid: key_file} if kid and key_file else {}
-        if not key_files or not kid:
-            raise ValueError("Hermes auth bridge signing key is not configured")
-        _hermes_signing_keys = SigningKeys.from_pem_files(key_files, kid)
+        _hermes_signing_keys = load_hermes_signing_keys()
     return _hermes_signing_keys
 
 
@@ -399,6 +403,11 @@ def require_instance_auth(view):
 def health():
     tokens_valid = service_tokens_valid(configured_tokens())
     try:
+        load_hermes_signing_keys()
+        signing_ready = True
+    except (OSError, TypeError, ValueError):
+        signing_ready = False
+    try:
         database_uri = f"{DB_FILE.resolve().as_uri()}?mode=ro"
         with sqlite3.connect(database_uri, uri=True) as conn:
             version = conn.execute(
@@ -408,14 +417,16 @@ def health():
         return jsonify(
             {
                 "ok": False,
+                "hermes_signing_ready": signing_ready,
                 "schema_version": None,
                 "service_tokens_configured": tokens_valid,
             }
         ), 503
-    ready = version == 8 and tokens_valid
+    ready = version == 8 and tokens_valid and signing_ready
     return jsonify(
         {
             "ok": ready,
+            "hermes_signing_ready": signing_ready,
             "schema_version": version,
             "service_tokens_configured": tokens_valid,
         }

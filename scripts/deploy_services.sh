@@ -11,6 +11,8 @@ if [ -f "$CONFIG_FILE" ]; then
   source "$CONFIG_FILE"
 fi
 
+python3 "$SCRIPT_DIR/check_hermes_uis_readiness.py"
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib_tenant_network.sh"
 

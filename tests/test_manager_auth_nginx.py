@@ -33,10 +33,18 @@ class ManagerAuthNginxTests(unittest.TestCase):
         script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
 
         self.assertLess(
-            script.index("docker compose up -d --no-build --wait"),
+            script.index('"${compose[@]}" up -d --no-build --wait'),
             script.index('bash "$SCRIPT_DIR/update_manager_auth.sh"'),
         )
         self.assertIn("Nginx configuration was not changed", script)
+
+    def test_deploy_runs_hermes_readiness_before_build(self):
+        script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index("check_hermes_uis_readiness.py"),
+            script.index('"${compose[@]}" build'),
+        )
 
     def test_new_instance_guard_uses_configured_public_host(self):
         result = subprocess.run(

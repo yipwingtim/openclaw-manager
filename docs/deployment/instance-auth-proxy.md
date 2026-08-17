@@ -18,9 +18,10 @@ through the Manager UIS session before proxying the request.
 
 EvoScientist no longer uses Nginx Basic Auth after migration. Existing
 `.htpasswd` files are retained for rollback but are not referenced by ingress.
-Hermes keeps its official Dashboard authentication, so users pass UIS first and
-then the Hermes login until the upstream product has a verified way to disable
-its built-in authentication.
+Hermes uses its official Dashboard authentication extension point through the
+`campus-uis-bridge` Provider. After Manager UIS authorization, the bridge creates
+an official Hermes session without a second password. See
+[Hermes UIS authentication deployment](hermes-uis-auth.md).
 
 New OpenClaw instances created through Manager use OpenClaw's official
 `trusted-proxy` mode. Shared Nginx receives the authenticated UIS user UUID,

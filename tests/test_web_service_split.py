@@ -53,10 +53,12 @@ class WebServiceSplitTests(unittest.TestCase):
             executor_block,
         )
         self.assertIn(
-            "${HERMES_AUTH_BRIDGE_CA_HOST_FILE:-/dev/null}:"
+            "${HERMES_AUTH_BRIDGE_CA_HOST_FILE:?required}:"
             "/run/secrets/hermes-auth-bridge-ca.crt:ro",
             executor_block,
         )
+        self.assertIn("healthcheck:", executor_block)
+        self.assertIn("ssl.create_default_context(cafile=", executor_block)
         self.assertIn("healthcheck:", executor_api_block)
         self.assertNotIn("HERMES_AUTH_BRIDGE_CA_HOST_FILE", executor_api_block)
         self.assertNotIn("NGINX_AUTH_DIR", executor_api_block)

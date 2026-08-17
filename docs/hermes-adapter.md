@@ -1,5 +1,8 @@
 # Hermes Instance Adapter
 
+For production signing-key, TLS, verification and rollback steps, see
+[Hermes UIS authentication deployment](deployment/hermes-uis-auth.md).
+
 The Hermes MVP creates deployments using the official `v2026.7.20` (Hermes
 Agent v0.19.0) single-container image. Managed instances can later be upgraded
 to another explicitly selected `nousresearch/hermes-agent` tag. It does not

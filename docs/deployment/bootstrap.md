@@ -28,6 +28,7 @@ Install these before running `scripts/bootstrap_runtime.sh`:
 
 - `bash`
 - `python3`
+- `python3-cryptography`, for Hermes signing-key and certificate readiness
 - `sudo`
 - `flock`, usually provided by `util-linux`
 - Docker Engine
@@ -45,7 +46,7 @@ Ubuntu 上通常可使用以下方式安装依赖：
 
 ```bash
 sudo apt update
-sudo apt install -y python3 util-linux apache2-utils ca-certificates curl gnupg
+sudo apt install -y python3 python3-cryptography util-linux apache2-utils ca-certificates curl gnupg
 ```
 
 Install Docker Engine and the Docker Compose plugin using Docker's official Ubuntu installation guide.
@@ -184,6 +185,10 @@ Run the read-only readiness check:
 ./scripts/check_bootstrap_readiness.sh
 ```
 
+Hermes UIS signing, TLS and migration preparation are documented in
+[Hermes UIS authentication deployment](hermes-uis-auth.md). The readiness
+command delegates those global checks to the shared Hermes checker.
+
 Review Docker/containerd path warnings before continuing. Do not ignore large `/var/lib/containerd` usage on production hosts.
 
 继续前应检查 Docker/containerd 路径 warning。生产主机不要忽略 `/var/lib/containerd` 的大容量占用。
@@ -215,7 +220,7 @@ Recommended order:
 建议顺序：
 
 1. Install Ubuntu 22.04 LTS or Ubuntu 24.04 LTS.
-2. Install `python3`, Docker Engine, Docker Compose plugin, and `apache2-utils`.
+2. Install `python3`, `python3-cryptography`, Docker Engine, Docker Compose plugin, and `apache2-utils`.
 3. Ensure the current user can run `docker ps`.
 4. Clone this repository to `/data/docker/openclaw-manager`.
 5. Copy `config/openclaw-manager.env.example` to `config/openclaw-manager.env`.
@@ -225,7 +230,7 @@ Recommended order:
 9. Place TLS certificate and key files.
 10. Create the global manager Basic Auth user.
 11. Start Nginx from `/data/docker/nginx/compose`.
-12. Start manager services from `/data/docker/openclaw-manager/services`.
+12. Start manager services with `bash scripts/deploy_services.sh`.
 13. Verify Nginx can reach `openclaw-manager-web:8080`.
 14. Run `./scripts/check_metadata_consistency.py`.
 15. Create one test instance before creating real users.
@@ -233,7 +238,7 @@ Recommended order:
 中文步骤：
 
 1. 安装 Ubuntu 22.04 LTS 或 Ubuntu 24.04 LTS。
-2. 安装 `python3`、Docker Engine、Docker Compose plugin 和 `apache2-utils`。
+2. 安装 `python3`、`python3-cryptography`、Docker Engine、Docker Compose plugin 和 `apache2-utils`。
 3. 确认当前用户可以执行 `docker ps`。
 4. 将本仓库克隆到 `/data/docker/openclaw-manager`。
 5. 复制 `config/openclaw-manager.env.example` 为 `config/openclaw-manager.env`。
@@ -243,7 +248,7 @@ Recommended order:
 9. 放置 TLS 证书和 key。
 10. 创建全局管理端 Basic Auth 用户。
 11. 从 `/data/docker/nginx/compose` 启动 Nginx。
-12. 从 `/data/docker/openclaw-manager/services` 启动管理端服务。
+12. 使用 `bash scripts/deploy_services.sh` 启动管理端服务。
 13. 验证 Nginx 可以访问 `openclaw-manager-web:8080`。
 14. 执行 `./scripts/check_metadata_consistency.py`。
 15. 先创建一个测试实例，再创建正式用户。

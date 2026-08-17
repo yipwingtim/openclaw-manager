@@ -1,3 +1,6 @@
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,14 +56,33 @@ class WebServiceSplitTests(unittest.TestCase):
             executor_block,
         )
         self.assertIn(
-            "${HERMES_AUTH_BRIDGE_CA_HOST_FILE:-/dev/null}:"
+            "${HERMES_AUTH_BRIDGE_CA_HOST_FILE:?required}:"
             "/run/secrets/hermes-auth-bridge-ca.crt:ro",
             executor_block,
         )
+        self.assertIn("healthcheck:", executor_block)
+        self.assertIn("ssl.create_default_context(cafile=", executor_block)
         self.assertIn("healthcheck:", executor_api_block)
         self.assertNotIn("HERMES_AUTH_BRIDGE_CA_HOST_FILE", executor_api_block)
         self.assertNotIn("NGINX_AUTH_DIR", executor_api_block)
         self.assertNotIn("NGINX_USERS_CONF_DIR", executor_api_block)
+
+    def test_executor_ca_health_command_rejects_invalid_ca(self):
+        with tempfile.NamedTemporaryFile() as ca:
+            ca.write(b"not a certificate")
+            ca.flush()
+            result = subprocess.run(
+                [
+                    "python3", "-c",
+                    "import os,ssl; p=os.environ['HERMES_AUTH_BRIDGE_CA_FILE']; "
+                    "assert os.path.isfile(p) and os.access(p, os.R_OK); "
+                    "ssl.create_default_context(cafile=p)",
+                ],
+                env={**os.environ, "HERMES_AUTH_BRIDGE_CA_FILE": ca.name},
+                capture_output=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
 
     def test_split_web_entrypoints_do_not_access_metadata_or_runtime(self):
         for filename in ("user_app.py", "admin_app.py"):

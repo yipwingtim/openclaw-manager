@@ -37,9 +37,11 @@ for completing the multi-product control plane.
   使用 `legacy_user_id` 兼容数据。
 - Existing instances use product-aware ingress: OpenClaw may expose its configured
   Control UI base path, while Hermes and EvoScientist retain per-instance HTTPS
-  ports unless their adapters prove path compatibility. Basic Auth remains enabled.
+  ports unless their adapters prove path compatibility. Hermes uses its UIS bridge;
+  authentication remains product-specific.
 - 现有实例按产品能力使用入口：OpenClaw 可以暴露其配置的 Control UI 路径；在验证
-  路径兼容性前，Hermes 和 EvoScientist 继续使用实例独立 HTTPS 端口。Basic Auth 仍保留。
+  路径兼容性前，Hermes 和 EvoScientist 继续使用实例独立 HTTPS 端口。Hermes 使用 UIS
+  bridge，认证方式仍按产品区分。
 
 ## Completed Foundations | 已完成基础工作
 
@@ -101,7 +103,7 @@ for completing the multi-product control plane.
 - 基于统一实例和能力模型支持 Hermes 实例登记、单容器创建、启停、重启、状态、日志、
   访问、可恢复删除、恢复和版本升级。
 - 已登记 Hermes 的 Dashboard 通过独立外部端口经 `openclaw-nginx` 转发到单容器
-  `9119`；Nginx 负责 TLS 和路由，Dashboard 登录继续使用 Hermes 自身认证。
+  `9119`；Nginx 负责 TLS 和路由，`campus-uis-bridge` 建立官方 Hermes Session。
 - Hermes 创建固定使用官方 `v2026.7.20` 单容器镜像；旧版双容器部署不在支持范围内。
 - Require owner/member authorization and operation audit for every action.
 - 每个动作必须校验所有者或成员权限并记录审计日志。
@@ -126,10 +128,9 @@ for completing the multi-product control plane.
   moving existing `LegacyPortIngress` instances to subdomains.
 - 迁移既有 `LegacyPortIngress` 实例前，先完成通配符 DNS/TLS、访问授权、迁移与回滚方案。
 - EvoScientist dedicated-port ingress uses the UIS instance authorization proxy;
-  Hermes keeps its built-in authentication as a second layer until upstream
-  support for disabling it is verified.
-- EvoScientist 独立端口入口使用 UIS 实例授权代理；Hermes 在确认官方支持关闭认证前，
-  继续保留内置认证作为第二层。
+  Hermes combines that ingress check with its `campus-uis-bridge` Provider.
+- EvoScientist 独立端口入口使用 UIS 实例授权代理；Hermes 在该入口校验后通过
+  `campus-uis-bridge` Provider 建立 Dashboard Session。
 
 ## Ongoing Rules | 持续规则
 

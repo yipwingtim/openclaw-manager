@@ -413,8 +413,10 @@ campus-uis,12345,alice-hermes,Alice Hermes,hermes,v2026.7.20,false,example-passw
 campus-uis,12345,alice-evo,Alice Evo,evoscientist,latest,true,example-password,true
 ```
 
-`version` 留空时使用该产品的默认版本。Hermes 和 EvoScientist 必须启用 Basic
-Auth；EvoScientist 使用 `latest` 时必须将 `confirm_latest` 设为 `true`。
+`version` 留空时使用该产品的默认版本。Hermes 已通过 `campus-uis-bridge` 直接建立
+Dashboard Session；当前创建表单/CSV 中的 Basic Auth 字段仅为旧契约兼容，后续独立
+清理。部署前参见 [Hermes UIS 认证部署手册](deployment/hermes-uis-auth.md)。
+EvoScientist 必须启用 Basic Auth；使用 `latest` 时必须将 `confirm_latest` 设为 `true`。
 `owner_identity_type` 支持 `local`（`owner_identity` 填平台用户名）和
 `campus-uis`（填写 UIS `user_id/work_id`）。身份必须已导入或绑定到 active 平台用户，
 批量创建不会自动创建用户。旧 `owner_username` 表头继续兼容。

@@ -278,10 +278,8 @@ case "$key_host_path" in
 esac
 check_file "$cert_host_path"
 check_file "$key_host_path"
-if [ -n "$HERMES_AUTH_BRIDGE_CA_HOST_FILE" ]; then
-  check_file "$HERMES_AUTH_BRIDGE_CA_HOST_FILE"
-else
-  missing "HERMES_AUTH_BRIDGE_CA_HOST_FILE is not configured"
+if ! python3 "$SCRIPT_DIR/check_hermes_uis_readiness.py"; then
+  missing "Hermes UIS global readiness check failed"
 fi
 
 check_docker_data_root

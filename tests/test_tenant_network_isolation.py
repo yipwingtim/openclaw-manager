@@ -23,16 +23,25 @@ BOOTSTRAP_DOC = ROOT_DIR / "docs" / "deployment" / "bootstrap.md"
 
 
 class TenantNetworkIsolationTests(unittest.TestCase):
-    def test_bootstrap_readiness_requires_hermes_bridge_ca_public_file(self):
+    def test_bootstrap_readiness_delegates_hermes_checks(self):
         script = BOOTSTRAP_READINESS.read_text(encoding="utf-8")
 
-        self.assertIn("HERMES_AUTH_BRIDGE_CA_HOST_FILE", script)
-        self.assertIn('check_file "$HERMES_AUTH_BRIDGE_CA_HOST_FILE"', script)
+        self.assertIn('python3 "$SCRIPT_DIR/check_hermes_uis_readiness.py"', script)
+
+    def test_runtime_check_probes_hermes_mounts_jwks_and_token_endpoint(self):
+        script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")
+
+        self.assertIn("HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE", script)
+        self.assertIn("HERMES_AUTH_BRIDGE_CA_FILE", script)
+        self.assertIn("mount_is_readonly", script)
+        self.assertIn('"${HERMES_AUTH_BRIDGE_ISSUER%/}/jwks.json"', script)
+        self.assertIn('grant_type=readiness_probe', script)
 
     def test_manager_services_do_not_join_legacy_agent_network(self):
         compose = SERVICES_COMPOSE.read_text(encoding="utf-8")
 
         self.assertNotIn("agent-net", compose)
+        self.assertNotIn("/dev/null}:/run/secrets/hermes-auth-bridge", compose)
         self.assertIn("- manager-net", compose)
 
     def test_services_deploy_reconnects_shared_services_after_compose(self):
@@ -160,7 +169,9 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             shutil.copy2(RUNTIME_SECURITY_CHECK, scripts_dir / RUNTIME_SECURITY_CHECK.name)
             shutil.copy2(NETWORK_HELPER, scripts_dir / NETWORK_HELPER.name)
             (config_dir / "openclaw-manager.env").write_text(
-                f"OPENCLAW_INTERNAL_TOKEN=current\nNGINX_CONF_DIR={conf_dir}\n",
+                f"OPENCLAW_INTERNAL_TOKEN=current\nNGINX_CONF_DIR={conf_dir}\n"
+                "HERMES_AUTH_BRIDGE_ISSUER=https://manager.example.test/auth/hermes\n"
+                "HERMES_AUTH_BRIDGE_CA_HOST_FILE=/test/ca.crt\n",
                 encoding="utf-8",
             )
             active = conf_dir / "manager-web.conf"
@@ -175,8 +186,30 @@ class TenantNetworkIsolationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_docker = bin_dir / "docker"
-            fake_docker.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            fake_docker.write_text(
+                "#!/bin/sh\n"
+                "source_path=/test/key.pem; ca_source=/test/ca.crt; writable=false; ca_writable=false\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = devnull ] && source_path=/dev/null\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = writable ] && writable=true\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = ca-devnull ] && ca_source=/dev/null\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = ca-writable ] && ca_writable=true\n"
+                "case \"$*\" in\n"
+                "  *openclaw-manager-control*) echo \"/run/secrets/hermes-auth-bridge-ed25519.pem $source_path $writable\"; exit 0 ;;\n"
+                "  *openclaw-manager-executor*) echo \"/run/secrets/hermes-auth-bridge-ca.crt $ca_source $ca_writable\"; exit 0 ;;\n"
+                "esac\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
             fake_docker.chmod(0o755)
+            fake_curl = bin_dir / "curl"
+            fake_curl.write_text(
+                "#!/bin/sh\n"
+                "[ \"${FAKE_CURL_FAIL:-}\" = 1 ] && exit 1\n"
+                "case \"$*\" in *--write-out*) printf 400 ;; esac\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fake_curl.chmod(0o755)
             env = os.environ.copy()
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
 
@@ -186,6 +219,21 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("[SUMMARY] errors=0", result.stdout)
+
+            for variable, value in (
+                ("FAKE_MOUNT_MODE", "writable"),
+                ("FAKE_MOUNT_MODE", "devnull"),
+                ("FAKE_MOUNT_MODE", "ca-writable"),
+                ("FAKE_MOUNT_MODE", "ca-devnull"),
+                ("FAKE_CURL_FAIL", "1"),
+            ):
+                with self.subTest(variable=variable, value=value):
+                    failed_env = {**env, variable: value}
+                    failed = subprocess.run(
+                        ["bash", str(scripts_dir / RUNTIME_SECURITY_CHECK.name)],
+                        text=True, capture_output=True, env=failed_env, check=False,
+                    )
+                    self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
 
             active.write_text(
                 'server openclaw-manager-web:8080;\nproxy_set_header X-OpenClaw-Internal-Token "old";\n',

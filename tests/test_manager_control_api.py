@@ -1775,6 +1775,57 @@ class ManagerControlApiTests(unittest.TestCase):
             )
         self.assertIsNone(credentials["basic_auth_password_ref"])
 
+    def test_executor_creation_result_rejects_wrong_product_auth_mode(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        for index, (product, auth_mode, basic_ref) in enumerate((
+            ("hermes", "none", None),
+            ("evoscientist", "session", "nginx-auth:/example/.htpasswd"),
+            ("hermes", "session", "hermes-env:/example/.env"),
+            ("openclaw", "trusted-proxy", None),
+            ("evoscientist", "none", ""),
+        ), 1):
+            with self.subTest(product=product, auth_mode=auth_mode, basic_ref=basic_ref):
+                suffix = f"case-{index}"
+                request_id = f"create-{product}-invalid-result-{suffix}"
+                instance = self.control.metadata_store.create_instance(
+                    owner_public_id=self.user["public_id"], product=product,
+                    instance_name=f"{product}-{suffix}", legacy_user_id=f"{product}-{suffix}",
+                    runtime_identifier=f"{product}_{suffix}", status="provisioning",
+                    basic_auth_enabled=False, db_file=self.db_file,
+                )
+                self.control.metadata_store.create_execution_job(
+                    request_id=request_id, actor_user_id=self.user["id"],
+                    instance_public_id=instance["public_id"], action="instance.create",
+                    params={}, db_file=self.db_file,
+                )
+                result = {
+                    "port": 39119, "version": "v1",
+                    "access_url": "https://example.test:39119",
+                    "admin_url": "https://example.test:39119",
+                    "basic_auth_password_ref": basic_ref,
+                    "openclaw_token": "runtime-token" if product == "openclaw" else "",
+                    "auth_mode": auth_mode,
+                }
+                with patch.object(
+                    self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+                ), patch.object(
+                    self.control.request, "get_json",
+                    return_value={"status": "succeeded", "result": result},
+                ):
+                    response, status = response_parts(
+                        self.control.update_execution_job(request_id)
+                    )
+                self.assertEqual(status, 400)
+                self.assertEqual(
+                    response.get_json(), {"error": "invalid instance creation result"}
+                )
+                stored = self.control.metadata_store.get_instance_by_public_id(
+                    instance["public_id"], db_file=self.db_file
+                )
+                self.assertEqual(stored["status"], "provisioning")
+
     def test_health_does_not_create_a_missing_database(self):
         missing = Path(self.temp_dir.name) / "missing.db"
         self.control.DB_FILE = missing

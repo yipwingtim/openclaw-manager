@@ -2436,9 +2436,11 @@ def update_execution_job(request_id):
                 )
             )
             or not isinstance(result["openclaw_token"], str)
-            or result["auth_mode"] not in (
-                {"token", "trusted-proxy"} if product == "openclaw" else {"session", "none"}
-            )
+            or result["auth_mode"] not in {
+                "openclaw": {"token", "trusted-proxy"},
+                "hermes": {"session"},
+                "evoscientist": {"none"},
+            }[product]
         ):
             return jsonify({"error": "invalid instance creation result"}), 400
     try:

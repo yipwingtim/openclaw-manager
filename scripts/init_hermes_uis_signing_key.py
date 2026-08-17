@@ -4,6 +4,7 @@ import argparse
 import datetime
 import os
 import shutil
+import stat
 import sys
 from pathlib import Path
 
@@ -32,20 +33,32 @@ def main():
     args = parser.parse_args()
     config, key = Path(args.config), Path(args.key_file)
 
-    if key.exists() and not valid_key(key):
+    try:
+        key_mode = key.lstat().st_mode
+    except FileNotFoundError:
+        key_mode = None
+    if key_mode is not None and (stat.S_ISLNK(key_mode) or not stat.S_ISREG(key_mode)):
+        print("[ERROR] Existing signing key must be a regular file, not a symlink", file=sys.stderr)
+        return 1
+    if key_mode is not None and not valid_key(key):
         print("[ERROR] Existing signing key is invalid; refusing to overwrite it", file=sys.stderr)
         return 1
     if not args.apply:
         print(f"[PREVIEW] Would ensure an Ed25519 signing key and configure kid {args.kid}")
         return 0
 
-    if not key.exists():
+    if key_mode is None:
         key.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        key.write_bytes(ed25519.Ed25519PrivateKey.generate().private_bytes(
+        contents = ed25519.Ed25519PrivateKey.generate().private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
-        ))
+        )
+        key.parent.chmod(0o700)
+        os.chown(key.parent, args.uid, args.gid)
+        fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as output:
+            output.write(contents)
     key.parent.chmod(0o700)
     key.chmod(0o600)
     os.chown(key.parent, args.uid, args.gid)

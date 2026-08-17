@@ -46,6 +46,14 @@ class ManagerAuthNginxTests(unittest.TestCase):
             script.index('"${compose[@]}" build'),
         )
 
+    def test_deploy_runs_runtime_smoke_before_success(self):
+        script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index('bash "$SCRIPT_DIR/check_runtime_security.sh"'),
+            script.index('echo "==> Services deployed successfully!"'),
+        )
+
     def test_new_instance_guard_uses_configured_public_host(self):
         result = subprocess.run(
             [

@@ -188,8 +188,11 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             fake_docker = bin_dir / "docker"
             fake_docker.write_text(
                 "#!/bin/sh\n"
+                "source_path=/test/key.pem; writable=false\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = devnull ] && source_path=/dev/null\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = writable ] && writable=true\n"
                 "case \"$*\" in\n"
-                "  *openclaw-manager-control*) echo '/run/secrets/hermes-auth-bridge-ed25519.pem /test/key.pem false'; exit 0 ;;\n"
+                "  *openclaw-manager-control*) echo \"/run/secrets/hermes-auth-bridge-ed25519.pem $source_path $writable\"; exit 0 ;;\n"
                 "  *openclaw-manager-executor*) echo '/run/secrets/hermes-auth-bridge-ca.crt /test/ca.crt false'; exit 0 ;;\n"
                 "esac\n"
                 "exit 1\n",
@@ -199,6 +202,7 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             fake_curl = bin_dir / "curl"
             fake_curl.write_text(
                 "#!/bin/sh\n"
+                "[ \"${FAKE_CURL_FAIL:-}\" = 1 ] && exit 1\n"
                 "case \"$*\" in *--write-out*) printf 400 ;; esac\n"
                 "exit 0\n",
                 encoding="utf-8",
@@ -213,6 +217,19 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("[SUMMARY] errors=0", result.stdout)
+
+            for variable, value in (
+                ("FAKE_MOUNT_MODE", "writable"),
+                ("FAKE_MOUNT_MODE", "devnull"),
+                ("FAKE_CURL_FAIL", "1"),
+            ):
+                with self.subTest(variable=variable, value=value):
+                    failed_env = {**env, variable: value}
+                    failed = subprocess.run(
+                        ["bash", str(scripts_dir / RUNTIME_SECURITY_CHECK.name)],
+                        text=True, capture_output=True, env=failed_env, check=False,
+                    )
+                    self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
 
             active.write_text(
                 'server openclaw-manager-web:8080;\nproxy_set_header X-OpenClaw-Internal-Token "old";\n',

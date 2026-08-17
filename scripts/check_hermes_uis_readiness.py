@@ -64,6 +64,17 @@ def main():
     cert_value = required("NGINX_SSL_CERT")
     valid = all((issuer_value, key_host_value, key_file, kid, ca_value, cert_value))
 
+    configured_keys = os.environ.get("HERMES_AUTH_BRIDGE_SIGNING_KEYS", "").strip()
+    if configured_keys:
+        try:
+            key_files = dict(item.split("=", 1) for item in configured_keys.split(","))
+        except ValueError:
+            key_files = {}
+        if not kid or key_files.get(kid) != EXPECTED_KEY_FILE:
+            valid = fail(
+                "HERMES_AUTH_BRIDGE_SIGNING_KEYS must map the active KID to the mounted signing key"
+            ) and valid
+
     parsed = urlparse(issuer_value or "")
     if parsed.scheme != "https" or not parsed.hostname:
         valid = fail("HERMES_AUTH_BRIDGE_ISSUER must be an HTTPS URL with a host") and valid
@@ -95,17 +106,28 @@ def main():
     if ca_value and not ca_path:
         valid = False
     ca = load_certificate(ca_path, "HERMES_AUTH_BRIDGE_CA_HOST_FILE") if ca_path else None
+    if ca_path and not ca:
+        valid = False
     if ca_path and b"PRIVATE KEY" in ca_path.read_bytes():
         valid = fail("HERMES_AUTH_BRIDGE_CA_HOST_FILE must not contain a private key") and valid
 
     cert_path_value = cert_value
     if cert_value and cert_value.startswith("/etc/nginx/certs/"):
-        cert_path_value = str(Path(os.environ.get("NGINX_CERTS_DIR", "/data/docker/nginx/certs")) / Path(cert_value).name)
+        cert_path_value = str(
+            Path(os.environ.get("NGINX_CERTS_DIR", "/data/docker/nginx/certs"))
+            / cert_value.removeprefix("/etc/nginx/certs/")
+        )
     cert_path = regular_file("NGINX_SSL_CERT", cert_path_value) if cert_path_value else None
     if cert_path_value and not cert_path:
         valid = False
     leaf = load_certificate(cert_path, "NGINX_SSL_CERT") if cert_path else None
+    if cert_path and not leaf:
+        valid = False
     if ca and leaf:
+        try:
+            leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        except x509.ExtensionNotFound:
+            valid = fail("NGINX_SSL_CERT must contain a SAN") and valid
         host = parsed.hostname
         try:
             ipaddress.ip_address(host)

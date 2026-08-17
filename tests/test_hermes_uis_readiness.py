@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import datetime
+import ipaddress
 import os
 import subprocess
 import sys
@@ -19,7 +20,7 @@ CHECKER = ROOT / "scripts" / "check_hermes_uis_readiness.py"
 INIT = ROOT / "scripts" / "init_hermes_uis_signing_key.py"
 
 
-def write_tls_pair(root, host="localhost"):
+def write_tls_pair(root, host="localhost", *, include_san=True, ip_san=False):
     now = datetime.datetime.now(datetime.timezone.utc)
     ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
@@ -33,16 +34,18 @@ def write_tls_pair(root, host="localhost"):
         .sign(ca_key, hashes.SHA256())
     )
     leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    leaf = (
+    builder = (
         x509.CertificateBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)]))
         .issuer_name(ca_name).public_key(leaf_key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - datetime.timedelta(minutes=1))
         .not_valid_after(now + datetime.timedelta(days=1))
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName(host)]), critical=False)
-        .sign(ca_key, hashes.SHA256())
     )
+    if include_san:
+        san = x509.IPAddress(ipaddress.ip_address(host)) if ip_san else x509.DNSName(host)
+        builder = builder.add_extension(x509.SubjectAlternativeName([san]), critical=False)
+    leaf = builder.sign(ca_key, hashes.SHA256())
     ca_path, leaf_path = root / "ca.crt", root / "leaf.crt"
     ca_path.write_bytes(ca.public_bytes(serialization.Encoding.PEM))
     leaf_path.write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
@@ -89,12 +92,25 @@ class HermesUisReadinessTests(unittest.TestCase):
         self.assertNotIn("must-not-appear", result.stdout + result.stderr)
 
     def test_rejects_missing_values_and_dev_null_fallbacks(self):
-        for name in ("HERMES_AUTH_BRIDGE_ISSUER", "HERMES_AUTH_BRIDGE_ACTIVE_KID", "HERMES_AUTH_BRIDGE_CA_HOST_FILE"):
+        for name in ("HERMES_AUTH_BRIDGE_ISSUER", "HERMES_AUTH_BRIDGE_ACTIVE_KID", "HERMES_AUTH_BRIDGE_CA_HOST_FILE", "HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE"):
             with self.subTest(name=name):
                 result = self.run_checker(**{name: ""})
                 self.assertNotEqual(result.returncode, 0)
         result = self.run_checker(HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE="/dev/null")
         self.assertNotEqual(result.returncode, 0)
+
+    def test_validates_active_kid_in_multi_key_configuration(self):
+        valid = self.run_checker(
+            HERMES_AUTH_BRIDGE_SIGNING_KEYS=(
+                "old=/run/secrets/old.pem,"
+                "current=/run/secrets/hermes-auth-bridge-ed25519.pem"
+            )
+        )
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        invalid = self.run_checker(
+            HERMES_AUTH_BRIDGE_SIGNING_KEYS="old=/run/secrets/old.pem"
+        )
+        self.assertNotEqual(invalid.returncode, 0)
 
     def test_rejects_invalid_signing_keys_and_permissions(self):
         cases = (({"rsa_key": True}, "Ed25519"), ({"encrypted": True}, "unencrypted"))
@@ -126,6 +142,30 @@ class HermesUisReadinessTests(unittest.TestCase):
         _, wrong_leaf = write_tls_pair(self.root, "wrong.example")
         result = self.run_checker(NGINX_SSL_CERT=str(wrong_leaf))
         self.assertNotEqual(result.returncode, 0)
+
+    def test_rejects_invalid_certificate_and_missing_san(self):
+        self.leaf.write_text("not a certificate", encoding="utf-8")
+        self.assertNotEqual(self.run_checker().returncode, 0)
+        _, no_san = write_tls_pair(self.root, include_san=False)
+        self.assertNotEqual(self.run_checker(NGINX_SSL_CERT=str(no_san)).returncode, 0)
+
+    def test_checks_ip_san(self):
+        self.ca, self.leaf = write_tls_pair(self.root, "127.0.0.1", ip_san=True)
+        good = self.run_checker(HERMES_AUTH_BRIDGE_ISSUER="https://127.0.0.1/auth/hermes")
+        self.assertEqual(good.returncode, 0, good.stderr)
+        bad = self.run_checker(HERMES_AUTH_BRIDGE_ISSUER="https://127.0.0.2/auth/hermes")
+        self.assertNotEqual(bad.returncode, 0)
+
+    def test_maps_nested_nginx_certificate_path(self):
+        nested = self.root / "certs" / "site"
+        nested.mkdir(parents=True)
+        target = nested / "fullchain.pem"
+        target.write_bytes(self.leaf.read_bytes())
+        result = self.run_checker(
+            NGINX_SSL_CERT="/etc/nginx/certs/site/fullchain.pem",
+            NGINX_CERTS_DIR=str(self.root / "certs"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class HermesUisSigningKeyInitTests(unittest.TestCase):
@@ -167,12 +207,28 @@ class HermesUisSigningKeyInitTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.key.read_bytes(), original)
 
+    def test_apply_secures_existing_parent_before_creating_key(self):
+        self.key.parent.mkdir(mode=0o755)
+        result = self.run_init("--apply")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.key.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.key.stat().st_mode & 0o777, 0o600)
+
     def test_apply_refuses_to_overwrite_existing_invalid_file(self):
         self.key.parent.mkdir()
         self.key.write_text("do not overwrite", encoding="utf-8")
         result = self.run_init("--apply")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.key.read_text(), "do not overwrite")
+
+    def test_apply_refuses_symlinked_key(self):
+        target = self.root / "target.pem"
+        write_signing_key(target)
+        self.key.parent.mkdir()
+        self.key.symlink_to(target)
+        result = self.run_init("--apply")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
 
     def test_apply_preserves_existing_valid_key_and_tightens_permissions(self):
         self.key.parent.mkdir()

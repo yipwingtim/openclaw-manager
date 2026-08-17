@@ -50,5 +50,6 @@ connect_shared_services_to_tenant_networks \
   "${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 
 bash "$SCRIPT_DIR/migrate_nginx_upstreams.sh"
+bash "$SCRIPT_DIR/check_runtime_security.sh"
 
 echo "==> Services deployed successfully!"

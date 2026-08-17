@@ -21,6 +21,7 @@ INIT = ROOT / "scripts" / "init_hermes_uis_signing_key.py"
 
 
 def write_tls_pair(root, host="localhost", *, include_san=True, ip_san=False):
+    root.mkdir(parents=True, exist_ok=True)
     now = datetime.datetime.now(datetime.timezone.utc)
     ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
@@ -102,15 +103,17 @@ class HermesUisReadinessTests(unittest.TestCase):
     def test_validates_active_kid_in_multi_key_configuration(self):
         valid = self.run_checker(
             HERMES_AUTH_BRIDGE_SIGNING_KEYS=(
-                "old=/run/secrets/old.pem,"
                 "current=/run/secrets/hermes-auth-bridge-ed25519.pem"
             )
         )
         self.assertEqual(valid.returncode, 0, valid.stderr)
-        invalid = self.run_checker(
-            HERMES_AUTH_BRIDGE_SIGNING_KEYS="old=/run/secrets/old.pem"
-        )
-        self.assertNotEqual(invalid.returncode, 0)
+        for configured in (
+            "old=/run/secrets/old.pem",
+            "old=/run/secrets/old.pem,current=/run/secrets/hermes-auth-bridge-ed25519.pem",
+        ):
+            with self.subTest(configured=configured):
+                invalid = self.run_checker(HERMES_AUTH_BRIDGE_SIGNING_KEYS=configured)
+                self.assertNotEqual(invalid.returncode, 0)
 
     def test_rejects_invalid_signing_keys_and_permissions(self):
         cases = (({"rsa_key": True}, "Ed25519"), ({"encrypted": True}, "unencrypted"))
@@ -132,11 +135,15 @@ class HermesUisReadinessTests(unittest.TestCase):
             0,
         )
 
-    def test_rejects_ca_with_private_key_and_certificate_mismatch(self):
+    def test_rejects_ca_with_private_key_invalid_ca_and_chain_mismatch(self):
         self.ca.write_bytes(self.ca.read_bytes() + self.key.read_bytes())
         self.assertNotEqual(self.run_checker().returncode, 0)
-        other_ca, _ = write_tls_pair(self.root, "other.example")
-        self.assertNotEqual(self.run_checker(HERMES_AUTH_BRIDGE_CA_HOST_FILE=str(other_ca)).returncode, 0)
+        self.ca.write_text("not a certificate", encoding="utf-8")
+        self.assertNotEqual(self.run_checker().returncode, 0)
+        ca_a, leaf_a = write_tls_pair(self.root / "a")
+        ca_b, _ = write_tls_pair(self.root / "b")
+        self.ca, self.leaf = ca_b, leaf_a
+        self.assertNotEqual(self.run_checker().returncode, 0)
 
     def test_rejects_certificate_without_matching_san(self):
         _, wrong_leaf = write_tls_pair(self.root, "wrong.example")

@@ -13,6 +13,8 @@ TLS trust and JWT signing are independent:
   must cover the hostname or IP in `HERMES_AUTH_BRIDGE_ISSUER`.
 - `HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE` is the dedicated Ed25519 PKCS#8
   private key. `HERMES_AUTH_BRIDGE_ACTIVE_KID` identifies it in JWT/JWKS.
+  Current Compose mounts one key; do not configure secondary rotation keys
+  without adding and validating their explicit read-only mounts.
 - `HERMES_AUTH_BRIDGE_CA_HOST_FILE` contains only the public CA chain used to
   validate the issuer. Never put a private key in this file.
 

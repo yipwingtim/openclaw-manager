@@ -70,9 +70,9 @@ def main():
             key_files = dict(item.split("=", 1) for item in configured_keys.split(","))
         except ValueError:
             key_files = {}
-        if not kid or key_files.get(kid) != EXPECTED_KEY_FILE:
+        if key_files != {kid: EXPECTED_KEY_FILE}:
             valid = fail(
-                "HERMES_AUTH_BRIDGE_SIGNING_KEYS must map the active KID to the mounted signing key"
+                "HERMES_AUTH_BRIDGE_SIGNING_KEYS only supports the active mounted key in this Compose deployment"
             ) and valid
 
     parsed = urlparse(issuer_value or "")

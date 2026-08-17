@@ -188,12 +188,14 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             fake_docker = bin_dir / "docker"
             fake_docker.write_text(
                 "#!/bin/sh\n"
-                "source_path=/test/key.pem; writable=false\n"
+                "source_path=/test/key.pem; ca_source=/test/ca.crt; writable=false; ca_writable=false\n"
                 "[ \"${FAKE_MOUNT_MODE:-}\" = devnull ] && source_path=/dev/null\n"
                 "[ \"${FAKE_MOUNT_MODE:-}\" = writable ] && writable=true\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = ca-devnull ] && ca_source=/dev/null\n"
+                "[ \"${FAKE_MOUNT_MODE:-}\" = ca-writable ] && ca_writable=true\n"
                 "case \"$*\" in\n"
                 "  *openclaw-manager-control*) echo \"/run/secrets/hermes-auth-bridge-ed25519.pem $source_path $writable\"; exit 0 ;;\n"
-                "  *openclaw-manager-executor*) echo '/run/secrets/hermes-auth-bridge-ca.crt /test/ca.crt false'; exit 0 ;;\n"
+                "  *openclaw-manager-executor*) echo \"/run/secrets/hermes-auth-bridge-ca.crt $ca_source $ca_writable\"; exit 0 ;;\n"
                 "esac\n"
                 "exit 1\n",
                 encoding="utf-8",
@@ -221,6 +223,8 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             for variable, value in (
                 ("FAKE_MOUNT_MODE", "writable"),
                 ("FAKE_MOUNT_MODE", "devnull"),
+                ("FAKE_MOUNT_MODE", "ca-writable"),
+                ("FAKE_MOUNT_MODE", "ca-devnull"),
                 ("FAKE_CURL_FAIL", "1"),
             ):
                 with self.subTest(variable=variable, value=value):

@@ -27,6 +27,38 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         script = BOOTSTRAP_READINESS.read_text(encoding="utf-8")
 
         self.assertIn('python3 "$SCRIPT_DIR/check_hermes_uis_readiness.py"', script)
+        self.assertLess(script.index("set -a"), script.index('. "$CONFIG_FILE"'))
+        self.assertLess(
+            script.index('. "$CONFIG_FILE"'),
+            script.index('python3 "$SCRIPT_DIR/check_hermes_uis_readiness.py"'),
+        )
+
+    def test_bootstrap_exports_config_for_hermes_readiness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            config = root / "config"
+            marker = root / "readiness-env"
+            scripts.mkdir()
+            config.mkdir()
+            shutil.copy2(BOOTSTRAP_READINESS, scripts / "check_bootstrap_readiness.sh")
+            (config / "openclaw-manager.env").write_text(
+                f"HERMES_READINESS_TEST={marker}\n", encoding="utf-8",
+            )
+            (scripts / "check_hermes_uis_readiness.py").write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['HERMES_READINESS_TEST']).write_text('exported')\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                ["bash", str(scripts / "check_bootstrap_readiness.sh")],
+                text=True, capture_output=True, check=False,
+            )
+            exported = marker.read_text(encoding="utf-8")
+
+        self.assertEqual(exported, "exported")
 
     def test_runtime_check_probes_hermes_mounts_jwks_and_token_endpoint(self):
         script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")

@@ -46,6 +46,15 @@ class ManagerAuthNginxTests(unittest.TestCase):
             script.index('"${compose[@]}" build'),
         )
 
+    def test_deploy_exports_config_for_hermes_readiness(self):
+        script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertLess(script.index("set -a"), script.index('source "$CONFIG_FILE"'))
+        self.assertLess(
+            script.index('source "$CONFIG_FILE"'),
+            script.index("check_hermes_uis_readiness.py"),
+        )
+
     def test_deploy_runs_runtime_smoke_before_success(self):
         script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
 
@@ -63,9 +72,19 @@ class ManagerAuthNginxTests(unittest.TestCase):
             scripts.mkdir()
             services.mkdir()
             fake_bin.mkdir()
+            readiness_marker = root / "readiness-env"
+            (root / "config").mkdir()
+            (root / "config" / "openclaw-manager.env").write_text(
+                f"HERMES_READINESS_TEST={readiness_marker}\n", encoding="utf-8",
+            )
             shutil.copy2(DEPLOY_SERVICES_SCRIPT, scripts / "deploy_services.sh")
             for name, contents in {
-                "check_hermes_uis_readiness.py": "#!/usr/bin/env python3\n",
+                "check_hermes_uis_readiness.py": (
+                    "#!/usr/bin/env python3\n"
+                    "import os\n"
+                    "from pathlib import Path\n"
+                    "Path(os.environ['HERMES_READINESS_TEST']).write_text('exported')\n"
+                ),
                 "lib_tenant_network.sh": "connect_shared_services_to_tenant_networks() { :; }\n",
                 "update_manager_auth.sh": "#!/bin/sh\nexit 0\n",
                 "migrate_nginx_upstreams.sh": "#!/bin/sh\nexit 0\n",
@@ -82,8 +101,10 @@ class ManagerAuthNginxTests(unittest.TestCase):
                 env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
                 text=True, capture_output=True, check=False,
             )
+            readiness_exported = readiness_marker.read_text(encoding="utf-8")
 
         self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(readiness_exported, "exported")
         self.assertNotIn("Services deployed successfully", result.stdout)
 
     def test_new_instance_guard_uses_configured_public_host(self):

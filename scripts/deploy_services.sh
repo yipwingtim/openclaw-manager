@@ -7,8 +7,10 @@ MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
 
 if [ -f "$CONFIG_FILE" ]; then
+  set -a
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
+  set +a
 fi
 
 python3 "$SCRIPT_DIR/check_hermes_uis_readiness.py"

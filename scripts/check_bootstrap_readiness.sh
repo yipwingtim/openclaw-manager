@@ -213,8 +213,10 @@ fi
 
 if [ -f "$CONFIG_FILE" ]; then
   ok "config exists: $CONFIG_FILE"
+  set -a
   # shellcheck disable=SC1090
   . "$CONFIG_FILE"
+  set +a
 else
   missing "config missing: $CONFIG_FILE"
 fi

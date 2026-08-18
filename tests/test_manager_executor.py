@@ -249,7 +249,7 @@ class ManagerExecutorTests(unittest.TestCase):
         instance = {
             "public_id": "instance-1", "product": "hermes",
             "legacy_user_id": "alice", "runtime_identifier": "hermes_alice",
-            "data_path": "/data/hermes/alice", "basic_auth_enabled": True,
+            "data_path": "/data/hermes/alice", "basic_auth_enabled": False,
             "status": "provisioning",
         }
         adapter = Mock()
@@ -267,11 +267,9 @@ class ManagerExecutorTests(unittest.TestCase):
         adapter.configure_ingress.return_value = (0, "published")
         with tempfile.TemporaryDirectory() as directory:
             secret_dir = Path(directory)
-            secret_path = secret_dir / "secret"
-            secret_path.write_text("password", encoding="utf-8")
             control.claim.return_value = {
                 "job": {"request_id": "create-1", "action": "instance.create",
-                        "params": {"secret_path": str(secret_path)}},
+                        "params": {}},
                 "instance": instance,
             }
             with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir), patch.dict(
@@ -280,6 +278,7 @@ class ManagerExecutorTests(unittest.TestCase):
                 self.executor.run_once(control, lambda product: adapter)
 
         adapter.configure_ingress.assert_called_once_with(instance)
+        self.assertEqual(adapter.create.call_args.args[1:3], ("false", ""))
         control.create_hermes_auth_client.assert_called_once_with(
             "instance-1",
             {"client_id": "client", "client_secret": "secret",

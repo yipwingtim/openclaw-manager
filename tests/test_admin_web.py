@@ -94,6 +94,15 @@ def load_admin_app():
 
 
 class AdminWebTests(unittest.TestCase):
+    def test_create_template_marks_hermes_basic_auth_as_not_required(self):
+        template = (
+            ROOT_DIR / "services" / "manager-web" / "templates"
+            / "admin_create_instance.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Hermes 使用 campus-uis-bridge，不需要 Basic Auth 密码", template)
+        self.assertIn("password.required = !hermes", template)
+
     @classmethod
     def setUpClass(cls):
         cls.admin = load_admin_app()
@@ -617,6 +626,26 @@ class AdminWebTests(unittest.TestCase):
         self.assertTrue(create_instance.call_args.args[0]["request_id"].startswith("instance-create-"))
         url_for.assert_called_once_with("create_instance_job", request_id="create-1")
 
+    def test_admin_creates_hermes_without_basic_auth_fields(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {
+            "owner_identity_type": "campus-uis",
+            "owner_identity": "12345",
+            "legacy_user_id": "alice-hermes",
+            "instance_name": "Alice Hermes",
+            "product": "hermes",
+        }
+        result = {"job": {"request_id": "create-hermes-1"}}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "create_admin_instance", return_value=result
+        ) as create_instance, patch.object(self.admin, "url_for", return_value="job-url"):
+            response = self.admin.create_instance()
+
+        self.assertEqual(response, "job-url")
+        payload = create_instance.call_args.args[0]
+        self.assertNotIn("basic_auth_enabled", payload)
+        self.assertNotIn("basic_auth_password", payload)
+
     def test_admin_batch_create_resolves_owner_and_submits_rows(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         upload = types.SimpleNamespace(read=lambda: (
@@ -655,7 +684,7 @@ class AdminWebTests(unittest.TestCase):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         upload = types.SimpleNamespace(read=lambda: (
             b"owner_username,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled\n"
-            b"alice,alice-hermes,Alice Hermes,hermes,v2026.7.20,false,h-secret,true\n"
+            b"alice,alice-hermes,Alice Hermes,hermes,v2026.7.20,false,,\n"
             b"alice,alice-evo,Alice Evo,evoscientist,latest,true,e-secret,true\n"
         ))
         self.admin.request.files = {"input_csv": upload}
@@ -681,8 +710,6 @@ class AdminWebTests(unittest.TestCase):
                     "product": "hermes",
                     "version": "v2026.7.20",
                     "confirm_latest": False,
-                    "basic_auth_enabled": True,
-                    "basic_auth_password": "h-secret",
                 },
                 {
                     "owner_user_public_id": "user-1",
@@ -701,7 +728,7 @@ class AdminWebTests(unittest.TestCase):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         upload = types.SimpleNamespace(read=lambda: (
             b"owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled\n"
-            b"local,alice,alice-hermes,Alice Hermes,hermes,,false,h-secret,true\n"
+            b"local,alice,alice-hermes,Alice Hermes,hermes,,false,,\n"
             b"campus-uis,12345,alice-evo,Alice Evo,evoscientist,latest,true,e-secret,true\n"
         ))
         self.admin.request.files = {"input_csv": upload}
@@ -721,8 +748,7 @@ class AdminWebTests(unittest.TestCase):
             {
                 "owner_identity_type": "local", "owner_identity": "alice",
                 "legacy_user_id": "alice-hermes", "instance_name": "Alice Hermes",
-                "product": "hermes", "basic_auth_enabled": True,
-                "basic_auth_password": "h-secret", "confirm_latest": False,
+                "product": "hermes", "confirm_latest": False,
             },
             {
                 "owner_identity_type": "campus-uis", "owner_identity": "12345",

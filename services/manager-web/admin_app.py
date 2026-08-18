@@ -264,8 +264,12 @@ def create_instance():
         return redirect(url_for("create_instance_page", error="请填写有效的实例 ID。"))
     if product not in {"openclaw", "hermes", "evoscientist"}:
         return redirect(url_for("create_instance_page", error="不支持该实例产品。"))
-    if not instance_name or len(instance_name) > 128 or not password:
-        return redirect(url_for("create_instance_page", error="实例名称和 Basic Auth 密码不能为空。"))
+    if not instance_name or len(instance_name) > 128:
+        return redirect(url_for("create_instance_page", error="实例名称不能为空。"))
+    if product != "hermes" and not password:
+        return redirect(url_for("create_instance_page", error="Basic Auth 密码不能为空。"))
+    if product == "hermes":
+        basic_auth_enabled = False
     if version and not VERSION_RE.fullmatch(version):
         return redirect(url_for("create_instance_page", error="请填写有效的实例版本。"))
     if product == "evoscientist" and version == "latest" and not confirm_latest:
@@ -280,9 +284,10 @@ def create_instance():
                 "legacy_user_id": legacy_user_id,
                 "instance_name": instance_name,
                 "product": product,
-                "basic_auth_enabled": basic_auth_enabled,
-                "basic_auth_password": password,
         }
+        if product != "hermes":
+            payload["basic_auth_enabled"] = basic_auth_enabled
+            payload["basic_auth_password"] = password
         if version:
             payload["version"] = version
         if confirm_latest:
@@ -491,11 +496,13 @@ def create_instance_batch():
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行实例 ID 无效或重复。",
             ))
-        if not instance_name or len(instance_name) > 128 or not password:
+        if not instance_name or len(instance_name) > 128 or (product != "hermes" and not password):
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行名称或密码无效。",
             ))
-        if enabled not in {"true", "false"}:
+        if product == "hermes":
+            enabled = "false"
+        elif enabled not in {"true", "false"}:
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行 Basic Auth 开关无效。",
             ))
@@ -521,7 +528,7 @@ def create_instance_batch():
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行 latest 确认值无效。",
             ))
-        if product in {"hermes", "evoscientist"} and enabled != "true":
+        if product == "evoscientist" and enabled != "true":
             return redirect(url_for(
                 "create_instance_page", error=f"第 {line_number} 行必须启用 Basic Auth。",
             ))
@@ -539,9 +546,10 @@ def create_instance_batch():
             "instance_name": instance_name,
             "product": product,
             **({"version": version} if version else {}),
-            "basic_auth_enabled": enabled == "true",
-            "basic_auth_password": password,
         }
+        if product != "hermes":
+            instance["basic_auth_enabled"] = enabled == "true"
+            instance["basic_auth_password"] = password
         if fields in {frozenset(product_fields), frozenset(identity_product_fields)}:
             instance["confirm_latest"] = confirm_latest == "true"
         instances.append(instance)

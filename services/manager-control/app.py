@@ -983,11 +983,15 @@ def create_admin_instance():
         return jsonify({"error": "invalid instance_name"}), 400
     if product not in {"openclaw", "hermes", "evoscientist"} or not product_supports(product, "create"):
         return jsonify({"error": "instance product does not support create"}), 400
-    if not isinstance(basic_auth_enabled, bool):
+    if product == "hermes":
+        if password is not None or basic_auth_enabled not in {None, False}:
+            return jsonify({"error": "Hermes does not accept Basic Auth credentials"}), 400
+        basic_auth_enabled = False
+    elif not isinstance(basic_auth_enabled, bool):
         return jsonify({"error": "basic_auth_enabled must be a boolean"}), 400
-    if product in {"hermes", "evoscientist"} and not basic_auth_enabled:
+    if product == "evoscientist" and not basic_auth_enabled:
         return jsonify({"error": f"{product} requires Basic Auth"}), 400
-    if not isinstance(password, str) or not password:
+    if product != "hermes" and (not isinstance(password, str) or not password):
         return jsonify({"error": "basic_auth_password is required"}), 400
     if version is not None and (not isinstance(version, str) or not VERSION_RE.fullmatch(version)):
         return jsonify({"error": "version must be valid"}), 400
@@ -1032,11 +1036,14 @@ def create_admin_instance():
         if owner is None or owner["status"] != "active":
             raise ValueError("active owner user not found")
         owner_public_id = owner["public_id"]
-        PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-        PROVISIONING_SECRET_DIR.chmod(0o700)
-        descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as secret_file:
-            secret_file.write(password)
+        params = {"version": version} if version else {}
+        if product != "hermes":
+            PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            PROVISIONING_SECRET_DIR.chmod(0o700)
+            descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as secret_file:
+                secret_file.write(password)
+            params["secret_path"] = str(secret_path)
         with metadata_store.connect(DB_FILE) as conn:
             instance = metadata_store.create_instance(
                 owner_public_id=owner_public_id,
@@ -1053,7 +1060,7 @@ def create_admin_instance():
                 actor_user_id=actor["id"],
                 instance_public_id=instance["public_id"],
                 action="instance.create",
-                params={"secret_path": str(secret_path), **({"version": version} if version else {})},
+                params=params,
                 conn=conn,
             )
     except ValueError as exc:
@@ -1118,11 +1125,15 @@ def create_instance_batch():
         product = row.get("product")
         if product not in {"openclaw", "hermes", "evoscientist"} or not product_supports(product, "create"):
             return jsonify({"error": f"unsupported product in row {index}"}), 400
-        if not isinstance(row.get("basic_auth_enabled"), bool):
+        if product == "hermes":
+            if row.get("basic_auth_password") is not None or row.get("basic_auth_enabled") not in {None, False}:
+                return jsonify({"error": f"Hermes does not accept Basic Auth credentials in row {index}"}), 400
+            row["basic_auth_enabled"] = False
+        elif not isinstance(row.get("basic_auth_enabled"), bool):
             return jsonify({"error": f"invalid basic_auth_enabled in row {index}"}), 400
-        if not isinstance(row.get("basic_auth_password"), str) or not row["basic_auth_password"]:
+        if product != "hermes" and (not isinstance(row.get("basic_auth_password"), str) or not row["basic_auth_password"]):
             return jsonify({"error": f"basic_auth_password is required in row {index}"}), 400
-        if product in {"hermes", "evoscientist"} and not row["basic_auth_enabled"]:
+        if product == "evoscientist" and not row["basic_auth_enabled"]:
             return jsonify({"error": f"{product} requires Basic Auth in row {index}"}), 400
         requested_version = row.get("version")
         version = requested_version
@@ -1179,8 +1190,9 @@ def create_instance_batch():
 
     secret_paths = []
     try:
-        PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-        PROVISIONING_SECRET_DIR.chmod(0o700)
+        if any(row["product"] != "hermes" for row in prepared_rows):
+            PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            PROVISIONING_SECRET_DIR.chmod(0o700)
         with metadata_store.connect(DB_FILE) as conn:
             conn.execute("BEGIN IMMEDIATE")
             for row in prepared_rows:
@@ -1204,16 +1216,19 @@ def create_instance_batch():
                 request_id, "running", current_step="creating instances", conn=conn
             )
             for index, row in enumerate(prepared_rows, 1):
-                secret_path = PROVISIONING_SECRET_DIR / secrets.token_urlsafe(32)
-                descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                secret_paths.append(secret_path)
-                try:
-                    secret_file = os.fdopen(descriptor, "w", encoding="utf-8")
-                except Exception:
-                    os.close(descriptor)
-                    raise
-                with secret_file:
-                    secret_file.write(row["basic_auth_password"])
+                params = {"version": row["version"]} if row["version"] else {}
+                if row["product"] != "hermes":
+                    secret_path = PROVISIONING_SECRET_DIR / secrets.token_urlsafe(32)
+                    descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    secret_paths.append(secret_path)
+                    try:
+                        secret_file = os.fdopen(descriptor, "w", encoding="utf-8")
+                    except Exception:
+                        os.close(descriptor)
+                        raise
+                    with secret_file:
+                        secret_file.write(row["basic_auth_password"])
+                    params["secret_path"] = str(secret_path)
                 instance = metadata_store.create_instance(
                     owner_public_id=row["owner_user_public_id"], product=row["product"],
                     instance_name=row["instance_name"].strip(),
@@ -1225,10 +1240,7 @@ def create_instance_batch():
                 metadata_store.create_execution_job(
                     request_id=f"{request_id}:{index}", parent_request_id=request_id,
                     actor_user_id=actor["id"], instance_public_id=instance["public_id"],
-                    action="instance.create", params={
-                        "secret_path": str(secret_path),
-                        **({"version": row["version"]} if row["version"] else {}),
-                    },
+                    action="instance.create", params=params,
                     conn=conn,
                 )
             parent = metadata_store.update_execution_job(
@@ -2423,12 +2435,23 @@ def update_execution_job(request_id):
                     field == "openclaw_token" and product == "openclaw"
                     and result.get("auth_mode") == "token" and not result[field]
                 )
-                for field in required - {"port", "openclaw_token"}
+                for field in required - {"port", "openclaw_token", "basic_auth_password_ref"}
+            )
+            or (
+                product == "hermes" and result["basic_auth_password_ref"] is not None
+            )
+            or (
+                product != "hermes" and (
+                    not isinstance(result["basic_auth_password_ref"], str)
+                    or not result["basic_auth_password_ref"]
+                )
             )
             or not isinstance(result["openclaw_token"], str)
-            or result["auth_mode"] not in (
-                {"token", "trusted-proxy"} if product == "openclaw" else {"session", "none"}
-            )
+            or result["auth_mode"] not in {
+                "openclaw": {"token", "trusted-proxy"},
+                "hermes": {"session"},
+                "evoscientist": {"none"},
+            }[product]
         ):
             return jsonify({"error": "invalid instance creation result"}), 400
     try:

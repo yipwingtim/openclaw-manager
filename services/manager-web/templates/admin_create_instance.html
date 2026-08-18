@@ -89,21 +89,22 @@
         <input class="form-check-input" id="confirm_latest" name="confirm_latest" type="checkbox" value="true">
         <label class="form-check-label" for="confirm_latest">确认使用 latest（版本可能随镜像更新而变化）</label>
       </div>
-      <div class="mb-3">
+      <div class="mb-3" data-basic-auth-row>
         <label class="form-label" for="basic_auth_password">访问认证密码</label>
         <input class="form-control" id="basic_auth_password" name="basic_auth_password" type="password" required autocomplete="new-password">
       </div>
-      <div class="form-check mb-3">
+      <div class="form-check mb-3" data-basic-auth-row>
         <input class="form-check-input" id="basic_auth_enabled" name="basic_auth_enabled" type="checkbox" value="true" checked>
-        <label class="form-check-label" for="basic_auth_enabled">启用访问认证（Hermes 和 EvoScientist 必须启用）</label>
+        <label class="form-check-label" for="basic_auth_enabled">启用访问认证（EvoScientist 必须启用）</label>
       </div>
+      <div class="muted-small mb-3" data-hermes-auth-hint hidden>Hermes 使用 campus-uis-bridge，不需要 Basic Auth 密码。</div>
       <button class="btn btn-oc" type="submit">创建实例</button>
     </form>
 
     <form class="surface p-3 p-lg-4 mt-3" method="post" action="/admin/create-instance/batch" enctype="multipart/form-data" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="section-title mb-2">批量创建实例</div>
-      <div class="muted-small mb-3">CSV 表头：owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled。Owner 类型支持 local（平台用户名）和 campus-uis（UIS user_id/work_id）；身份必须已导入或绑定。product 支持 openclaw、hermes、evoscientist；version 留空时使用默认版本。最多 100 行。</div>
+      <div class="muted-small mb-3">CSV 表头：owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled。Hermes 的两个 Basic Auth 字段留空；Owner 类型支持 local（平台用户名）和 campus-uis（UIS user_id/work_id）；身份必须已导入或绑定。product 支持 openclaw、hermes、evoscientist；version 留空时使用默认版本。最多 100 行。</div>
       <input class="form-control mb-3" name="input_csv" type="file" accept=".csv,text/csv" required>
       <button class="btn btn-oc-outline" type="submit">提交批量创建</button>
     </form>
@@ -117,11 +118,19 @@
       var version = document.getElementById('version');
       var hint = document.querySelector('[data-version-hint]');
       var confirmRow = document.getElementById('latest-confirm-row');
+      var password = document.getElementById('basic_auth_password');
+      var authRows = document.querySelectorAll('[data-basic-auth-row]');
+      var hermesHint = document.querySelector('[data-hermes-auth-hint]');
       if (!product || !version) return;
       function update() {
         var value = defaults[product.value] || '';
         version.value = value;
         hint.textContent = value ? '默认版本：' + value : '请配置该产品的默认版本。';
+        var hermes = product.value === 'hermes';
+        authRows.forEach(function(row) { row.hidden = hermes; });
+        hermesHint.hidden = !hermes;
+        password.required = !hermes;
+        if (hermes) password.value = '';
         updateConfirmation();
       }
       function updateConfirmation() {

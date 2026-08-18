@@ -1912,13 +1912,12 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         version=None, hermes_auth_client_callback=None,
     ):
         del skip_nginx_reload, skip_metadata_write
+        del basic_auth_enabled, basic_auth_password
         runtime_target = self.get_runtime_target(instance)
         data_path = self._hermes_data_path(instance)
         user_id = self.get_legacy_user_id(instance)
         if (
-            basic_auth_enabled != "true"
-            or not basic_auth_password
-            or not self._SAFE_DOCKER_NAME.fullmatch(runtime_target)
+            not self._SAFE_DOCKER_NAME.fullmatch(runtime_target)
             or data_path.parent not in {
                 self.public_dir / "hermes",
                 self.public_dir / "instances" / "hermes",

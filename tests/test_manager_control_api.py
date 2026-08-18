@@ -1123,8 +1123,6 @@ class ManagerControlApiTests(unittest.TestCase):
             "legacy_user_id": "alice-hermes",
             "instance_name": "Alice Hermes",
             "product": "hermes",
-            "basic_auth_enabled": True,
-            "basic_auth_password": "secret",
         }
         with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
             self.control.request, "headers", {"Authorization": "Bearer admin-token"}
@@ -1140,6 +1138,35 @@ class ManagerControlApiTests(unittest.TestCase):
             instance["data_path"],
             r"/instances/hermes/[0-9a-f-]{36}$",
         )
+        self.assertFalse(instance["basic_auth_enabled"])
+        self.assertFalse(secret_dir.exists())
+
+    def test_admin_rejects_hermes_dummy_basic_auth_credentials(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        base = {
+            "request_id": "create-hermes-dummy-auth",
+            "actor_user_public_id": self.user["public_id"],
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-hermes-dummy",
+            "instance_name": "Alice Hermes",
+            "product": "hermes",
+        }
+        for suffix, field in (
+            ("password", {"basic_auth_password": "dummy"}),
+            ("enabled", {"basic_auth_enabled": True}),
+        ):
+            payload = {**base, "request_id": f"create-hermes-dummy-{suffix}", **field}
+            with self.subTest(field=field), patch.object(
+                self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+            ), patch.object(self.control.request, "get_json", return_value=payload):
+                response, status = response_parts(self.control.create_admin_instance())
+            self.assertEqual(status, 400)
+            self.assertEqual(
+                response.get_json(),
+                {"error": "Hermes does not accept Basic Auth credentials"},
+            )
 
     def test_admin_create_accepts_version_and_requires_latest_confirmation(self):
         self.control.metadata_store.set_user_role(
@@ -1378,8 +1405,7 @@ class ManagerControlApiTests(unittest.TestCase):
                     "product": "hermes",
                     "version": "v2026.7.20",
                     "confirm_latest": False,
-                    "basic_auth_enabled": True,
-                    "basic_auth_password": "h-secret",
+                    "basic_auth_enabled": False,
                 },
                 {
                     "owner_user_public_id": self.user["public_id"],
@@ -1429,6 +1455,59 @@ class ManagerControlApiTests(unittest.TestCase):
             ["v2026.7.20", "latest"],
         )
 
+    def test_admin_batch_accepts_hermes_without_basic_auth(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        secret_dir = Path(self.temp_dir.name) / "secrets"
+        row = {
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-hermes-no-auth",
+            "instance_name": "Alice Hermes",
+            "product": "hermes",
+        }
+        payload = {
+            "request_id": "batch-hermes-no-auth",
+            "actor_user_public_id": self.user["public_id"],
+            "instances": [row],
+        }
+        with patch.object(self.control, "PROVISIONING_SECRET_DIR", secret_dir), patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.create_instance_batch())
+
+        self.assertEqual(status, 202, response.get_json())
+        self.assertFalse(secret_dir.exists())
+
+    def test_admin_batch_rejects_hermes_dummy_basic_auth_credentials(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        base = {
+            "owner_user_public_id": self.user["public_id"],
+            "legacy_user_id": "alice-hermes-dummy-batch",
+            "instance_name": "Alice Hermes",
+            "product": "hermes",
+        }
+        for suffix, field in (
+            ("password", {"basic_auth_password": "dummy"}),
+            ("enabled", {"basic_auth_enabled": True}),
+        ):
+            payload = {
+                "request_id": f"batch-hermes-dummy-{suffix}",
+                "actor_user_public_id": self.user["public_id"],
+                "instances": [{**base, **field}],
+            }
+            with self.subTest(field=field), patch.object(
+                self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+            ), patch.object(self.control.request, "get_json", return_value=payload):
+                response, status = response_parts(self.control.create_instance_batch())
+            self.assertEqual(status, 400)
+            self.assertEqual(
+                response.get_json(),
+                {"error": "Hermes does not accept Basic Auth credentials in row 1"},
+            )
+
     def test_admin_batch_rejects_product_auth_and_latest_violations(self):
         self.control.metadata_store.set_user_role(
             self.user["id"], "admin", db_file=self.db_file
@@ -1440,11 +1519,6 @@ class ManagerControlApiTests(unittest.TestCase):
             "basic_auth_password": "secret",
         }
         cases = (
-            (
-                "batch-hermes-no-auth",
-                {**base, "product": "hermes", "basic_auth_enabled": False},
-                "hermes requires Basic Auth in row 1",
-            ),
             (
                 "batch-evo-latest-unconfirmed",
                 {
@@ -1505,8 +1579,10 @@ class ManagerControlApiTests(unittest.TestCase):
 
         payload["request_id"] = "batch-hermes-invalid-digest"
         payload["instances"][0].update(
-            product="hermes", version="sha256:" + "a" * 64
+            product="hermes", version="sha256:" + "a" * 64,
+            basic_auth_enabled=False,
         )
+        payload["instances"][0].pop("basic_auth_password")
         with patch.object(
             self.control.request, "headers", {"Authorization": "Bearer admin-token"}
         ), patch.object(self.control.request, "get_json", return_value=payload):
@@ -1564,8 +1640,7 @@ class ManagerControlApiTests(unittest.TestCase):
                 "legacy_user_id": "alice-hermes-default",
                 "instance_name": "Alice Hermes",
                 "product": "hermes",
-                "basic_auth_enabled": True,
-                "basic_auth_password": "secret",
+                "basic_auth_enabled": False,
             }],
         }
         self.control.metadata_store.set_setting(
@@ -1679,6 +1754,105 @@ class ManagerControlApiTests(unittest.TestCase):
                 "alice-instance", conn=conn
             )
         self.assertEqual(credentials["openclaw_token"], "runtime-token")
+
+    def test_executor_finishes_hermes_without_basic_auth_reference(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="hermes",
+            instance_name="Alice Hermes", legacy_user_id="alice-hermes-result",
+            runtime_identifier="hermes_alice-hermes-result", status="provisioning",
+            basic_auth_enabled=False, db_file=self.db_file,
+        )
+        self.control.metadata_store.create_execution_job(
+            request_id="create-hermes-result", actor_user_id=self.user["id"],
+            instance_public_id=instance["public_id"], action="instance.create",
+            params={}, db_file=self.db_file,
+        )
+        self.control.metadata_store.update_execution_job(
+            "create-hermes-result", "running", db_file=self.db_file
+        )
+        result = {
+            "port": 39119,
+            "version": "v2026.7.20",
+            "access_url": "https://example.test:39119",
+            "admin_url": "https://example.test:39119",
+            "basic_auth_password_ref": None,
+            "openclaw_token": "",
+            "auth_mode": "session",
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+        ), patch.object(
+            self.control.request, "get_json",
+            return_value={"status": "succeeded", "output": "instance created", "result": result},
+        ):
+            response, status = response_parts(
+                self.control.update_execution_job("create-hermes-result")
+            )
+
+        self.assertEqual(status, 200, response.get_json())
+        stored = self.control.metadata_store.get_instance_by_public_id(
+            instance["public_id"], db_file=self.db_file
+        )
+        self.assertEqual(stored["status"], "active")
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            credentials = self.control.metadata_store.get_credentials(
+                "alice-hermes-result", conn=conn
+            )
+        self.assertIsNone(credentials["basic_auth_password_ref"])
+
+    def test_executor_creation_result_rejects_wrong_product_auth_mode(self):
+        self.control.metadata_store.set_user_role(
+            self.user["id"], "admin", db_file=self.db_file
+        )
+        for index, (product, auth_mode, basic_ref) in enumerate((
+            ("hermes", "none", None),
+            ("evoscientist", "session", "nginx-auth:/example/.htpasswd"),
+            ("hermes", "session", "hermes-env:/example/.env"),
+            ("openclaw", "trusted-proxy", None),
+            ("evoscientist", "none", ""),
+        ), 1):
+            with self.subTest(product=product, auth_mode=auth_mode, basic_ref=basic_ref):
+                suffix = f"case-{index}"
+                request_id = f"create-{product}-invalid-result-{suffix}"
+                instance = self.control.metadata_store.create_instance(
+                    owner_public_id=self.user["public_id"], product=product,
+                    instance_name=f"{product}-{suffix}", legacy_user_id=f"{product}-{suffix}",
+                    runtime_identifier=f"{product}_{suffix}", status="provisioning",
+                    basic_auth_enabled=False, db_file=self.db_file,
+                )
+                self.control.metadata_store.create_execution_job(
+                    request_id=request_id, actor_user_id=self.user["id"],
+                    instance_public_id=instance["public_id"], action="instance.create",
+                    params={}, db_file=self.db_file,
+                )
+                result = {
+                    "port": 39119, "version": "v1",
+                    "access_url": "https://example.test:39119",
+                    "admin_url": "https://example.test:39119",
+                    "basic_auth_password_ref": basic_ref,
+                    "openclaw_token": "runtime-token" if product == "openclaw" else "",
+                    "auth_mode": auth_mode,
+                }
+                with patch.object(
+                    self.control.request, "headers", {"Authorization": "Bearer executor-token"}
+                ), patch.object(
+                    self.control.request, "get_json",
+                    return_value={"status": "succeeded", "result": result},
+                ):
+                    response, status = response_parts(
+                        self.control.update_execution_job(request_id)
+                    )
+                self.assertEqual(status, 400)
+                self.assertEqual(
+                    response.get_json(), {"error": "invalid instance creation result"}
+                )
+                stored = self.control.metadata_store.get_instance_by_public_id(
+                    instance["public_id"], db_file=self.db_file
+                )
+                self.assertEqual(stored["status"], "provisioning")
 
     def test_health_does_not_create_a_missing_database(self):
         missing = Path(self.temp_dir.name) / "missing.db"

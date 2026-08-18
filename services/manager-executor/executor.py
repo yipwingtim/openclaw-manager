@@ -221,7 +221,7 @@ def hermes_creation_result(instance):
         "version": instance.get("_creation_version") or os.environ.get("HERMES_VERSION", "v2026.7.20"),
         "access_url": access_url,
         "admin_url": access_url,
-        "basic_auth_password_ref": f"hermes-env:{instance['data_path']}/.env",
+        "basic_auth_password_ref": None,
         "openclaw_token": "",
         "auth_mode": "session",
     }
@@ -348,7 +348,10 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             return True
         if action == "create":
             control.update(request_id, "running", current_step="creating instance")
-            password = consume_provisioning_secret(job["params"]["secret_path"])
+            password = (
+                "" if instance["product"] == "hermes"
+                else consume_provisioning_secret(job["params"]["secret_path"])
+            )
             instance["_creation_version"] = job["params"].get("version")
             if instance["product"] == "openclaw":
                 instance["_creation_auth_mode"] = "trusted-proxy"

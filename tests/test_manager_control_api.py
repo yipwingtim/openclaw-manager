@@ -95,6 +95,10 @@ class ManagerControlApiTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_file = Path(self.temp_dir.name) / "manager.db"
+        from hermes_auth_bridge import SigningKeys
+        self.signing_key = Path(self.temp_dir.name) / "hermes-signing.pem"
+        self.signing_key.write_bytes(SigningKeys.generate_private_key_pem())
+        self.control._hermes_signing_keys = None
         self.control.DB_FILE = self.db_file
         self.control.metadata_store.initialize(self.db_file, SCHEMA_FILE)
         self.user = self.control.metadata_store.create_user(
@@ -108,6 +112,9 @@ class ManagerControlApiTests(unittest.TestCase):
                 "MANAGER_CONTROL_EXECUTOR_TOKEN": "executor-token",
                 "MANAGER_CONTROL_INSTANCE_AUTH_TOKEN": "instance-auth-token",
                 "MANAGER_AUTH_PROVIDER": "campus-uis",
+                "HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE": str(self.signing_key),
+                "HERMES_AUTH_BRIDGE_ACTIVE_KID": "current",
+                "HERMES_AUTH_BRIDGE_SIGNING_KEYS": "",
             },
             clear=False,
         )
@@ -125,10 +132,31 @@ class ManagerControlApiTests(unittest.TestCase):
             response.get_json(),
             {
                 "ok": True,
+                "hermes_signing_ready": True,
                 "schema_version": 8,
                 "service_tokens_configured": True,
             },
         )
+
+    def test_health_fails_when_hermes_signing_key_is_not_ready(self):
+        self.control._hermes_signing_keys = None
+        with patch.dict(os.environ, {
+            "HERMES_AUTH_BRIDGE_ACTIVE_KID": "missing",
+            "HERMES_AUTH_BRIDGE_SIGNING_KEYS": f"current={self.signing_key}",
+        }, clear=False):
+            response, status = response_parts(self.control.health())
+
+        self.assertEqual(status, 503)
+        self.assertFalse(response.get_json()["hermes_signing_ready"])
+
+    def test_health_rechecks_signing_key_after_it_was_loaded(self):
+        self.control.hermes_signing_keys()
+        self.signing_key.unlink()
+
+        response, status = response_parts(self.control.health())
+
+        self.assertEqual(status, 503)
+        self.assertFalse(response.get_json()["hermes_signing_ready"])
 
     def test_web_resolves_session_and_admin_service_rejects_user_role(self):
         expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -1837,6 +1865,7 @@ class ManagerControlApiTests(unittest.TestCase):
             response.get_json(),
             {
                 "ok": False,
+                "hermes_signing_ready": True,
                 "schema_version": None,
                 "service_tokens_configured": True,
             },

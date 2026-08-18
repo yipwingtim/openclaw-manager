@@ -33,10 +33,58 @@ class ManagerAuthNginxTests(unittest.TestCase):
         script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
 
         self.assertLess(
-            script.index("docker compose up -d --no-build --wait"),
+            script.index('"${compose[@]}" up -d --no-build --wait'),
             script.index('bash "$SCRIPT_DIR/update_manager_auth.sh"'),
         )
         self.assertIn("Nginx configuration was not changed", script)
+
+    def test_deploy_runs_hermes_readiness_before_build(self):
+        script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index("check_hermes_uis_readiness.py"),
+            script.index('"${compose[@]}" build'),
+        )
+
+    def test_deploy_runs_runtime_smoke_before_success(self):
+        script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index('bash "$SCRIPT_DIR/check_runtime_security.sh"'),
+            script.index('echo "==> Services deployed successfully!"'),
+        )
+
+    def test_deploy_does_not_report_success_when_runtime_smoke_fails(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            services = root / "services"
+            fake_bin = root / "bin"
+            scripts.mkdir()
+            services.mkdir()
+            fake_bin.mkdir()
+            shutil.copy2(DEPLOY_SERVICES_SCRIPT, scripts / "deploy_services.sh")
+            for name, contents in {
+                "check_hermes_uis_readiness.py": "#!/usr/bin/env python3\n",
+                "lib_tenant_network.sh": "connect_shared_services_to_tenant_networks() { :; }\n",
+                "update_manager_auth.sh": "#!/bin/sh\nexit 0\n",
+                "migrate_nginx_upstreams.sh": "#!/bin/sh\nexit 0\n",
+                "check_runtime_security.sh": "#!/bin/sh\nexit 1\n",
+            }.items():
+                path = scripts / name
+                path.write_text(contents, encoding="utf-8")
+                path.chmod(0o755)
+            docker = fake_bin / "docker"
+            docker.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            docker.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(scripts / "deploy_services.sh")],
+                env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+                text=True, capture_output=True, check=False,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Services deployed successfully", result.stdout)
 
     def test_new_instance_guard_uses_configured_public_host(self):
         result = subprocess.run(

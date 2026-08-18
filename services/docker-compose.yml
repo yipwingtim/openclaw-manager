@@ -9,7 +9,7 @@ services:
       - ../config/openclaw-manager.env
     volumes:
       - ${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}:${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}
-      - ${HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE:-/dev/null}:/run/secrets/hermes-auth-bridge-ed25519.pem:ro
+      - ${HERMES_AUTH_BRIDGE_SIGNING_KEY_HOST_FILE:?required}:/run/secrets/hermes-auth-bridge-ed25519.pem:ro
     healthcheck:
       test:
         - CMD
@@ -44,8 +44,13 @@ services:
       - ${NGINX_COMPOSE_DIR:-/data/docker/nginx/compose}:${NGINX_COMPOSE_DIR:-/data/docker/nginx/compose}
       - ${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}:${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}
       - ${NGINX_AUTH_DIR:-/data/docker/nginx/auth}:${NGINX_AUTH_DIR:-/data/docker/nginx/auth}
-      - ${HERMES_AUTH_BRIDGE_CA_HOST_FILE:-/dev/null}:/run/secrets/hermes-auth-bridge-ca.crt:ro
+      - ${HERMES_AUTH_BRIDGE_CA_HOST_FILE:?required}:/run/secrets/hermes-auth-bridge-ca.crt:ro
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,ssl; p=os.environ['HERMES_AUTH_BRIDGE_CA_FILE']; assert os.path.isfile(p) and os.access(p, os.R_OK); ssl.create_default_context(cafile=p)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     networks:
       - manager-net
 

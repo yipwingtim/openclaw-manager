@@ -138,9 +138,18 @@ MANAGER_USER_WEB_CONTAINER_NAME="${MANAGER_USER_WEB_CONTAINER_NAME:-openclaw-man
 MANAGER_ADMIN_WEB_CONTAINER_NAME="${MANAGER_ADMIN_WEB_CONTAINER_NAME:-openclaw-manager-admin-web}"
 MODEL_PROXY_CONTAINER_NAME="${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 INSTANCE_AUTH_CONTAINER_NAME="${INSTANCE_AUTH_CONTAINER_NAME:-openclaw-instance-auth-proxy}"
+MANAGER_CONTROL_CONTAINER_NAME="${MANAGER_CONTROL_CONTAINER_NAME:-openclaw-manager-control}"
+MANAGER_EXECUTOR_CONTAINER_NAME="${MANAGER_EXECUTOR_CONTAINER_NAME:-openclaw-manager-executor}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 OPENCLAW_TENANT_NETWORK_PREFIX="${OPENCLAW_TENANT_NETWORK_PREFIX:-openclaw-user}"
 USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"
+HERMES_AUTH_BRIDGE_CA_HOST_FILE="${HERMES_AUTH_BRIDGE_CA_HOST_FILE:-}"
+
+mount_is_readonly() {
+  local container="$1" destination="$2"
+  docker inspect "$container" --format '{{range .Mounts}}{{println .Destination .Source .RW}}{{end}}' 2>/dev/null \
+    | awk -v destination="$destination" '$1 == destination && $2 != "/dev/null" && $3 == "false" { found=1 } END { exit !found }'
+}
 for hermes_root in "$OPENCLAW_PUBLIC_DIR/hermes" "$OPENCLAW_PUBLIC_DIR/instances/hermes"; do
   [ -d "$hermes_root" ] || continue
   while IFS= read -r -d '' instance_dir; do
@@ -207,6 +216,36 @@ else
 fi
 
 if has_cmd docker; then
+  if mount_is_readonly "$MANAGER_CONTROL_CONTAINER_NAME" "${HERMES_AUTH_BRIDGE_SIGNING_KEY_FILE:-/run/secrets/hermes-auth-bridge-ed25519.pem}"; then
+    ok "Manager control Hermes signing key mount is read-only and not /dev/null"
+  else
+    error "Manager control Hermes signing key mount is missing, writable, or /dev/null"
+  fi
+  if mount_is_readonly "$MANAGER_EXECUTOR_CONTAINER_NAME" "${HERMES_AUTH_BRIDGE_CA_FILE:-/run/secrets/hermes-auth-bridge-ca.crt}"; then
+    ok "Manager executor Hermes CA mount is read-only and not /dev/null"
+  else
+    error "Manager executor Hermes CA mount is missing, writable, or /dev/null"
+  fi
+  if [ -n "${HERMES_AUTH_BRIDGE_ISSUER:-}" ] && [ -n "$HERMES_AUTH_BRIDGE_CA_HOST_FILE" ]; then
+    if curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+      --cacert "$HERMES_AUTH_BRIDGE_CA_HOST_FILE" \
+      "${HERMES_AUTH_BRIDGE_ISSUER%/}/jwks.json" >/dev/null; then
+      ok "Hermes bridge JWKS is reachable over configured TLS"
+    else
+      error "Hermes bridge JWKS or TLS validation failed"
+    fi
+    token_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+      --connect-timeout 3 --max-time 10 \
+      --cacert "$HERMES_AUTH_BRIDGE_CA_HOST_FILE" --data 'grant_type=readiness_probe' \
+      "${HERMES_AUTH_BRIDGE_ISSUER%/}/token" || true)"
+    if [ "$token_status" = 400 ]; then
+      ok "Hermes bridge token endpoint rejected readiness probe as expected"
+    else
+      error "Hermes bridge token readiness probe returned HTTP ${token_status:-unavailable}; expected 400"
+    fi
+  else
+    error "Hermes bridge issuer or CA host file is empty"
+  fi
   if [ -n "${MANAGER_CONTROL_INSTANCE_AUTH_TOKEN:-}" ]; then
     if docker inspect "$INSTANCE_AUTH_CONTAINER_NAME" >/dev/null 2>&1; then
       ok "container exists: $INSTANCE_AUTH_CONTAINER_NAME"

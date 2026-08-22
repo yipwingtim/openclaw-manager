@@ -192,6 +192,14 @@ def update_admin_user_status(actor_public_id, user_public_id, status):
     )["user"]
 
 
+def import_platform_users(actor_public_id, provider, rows):
+    return request_json(
+        "POST", "/internal/v1/admin/platform-users/import",
+        actor_public_id=actor_public_id,
+        payload={"provider": provider, "rows": rows},
+    )
+
+
 def create_admin_instance(payload):
     return request_json("POST", "/internal/v1/admin/instances", payload=payload)
 

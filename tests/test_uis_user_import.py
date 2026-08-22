@@ -100,6 +100,23 @@ class UISUserImportTests(unittest.TestCase):
             ).fetchall()
             self.assertEqual(users, [("alice", "Local Alice"), ("uis_a665a45920422f9d", "Alice")])
 
+    def test_generated_username_collision_fails_without_partial_write(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                "INSERT INTO users (public_id, username, normalized_username) VALUES (?, ?, ?)",
+                ("collision", "uis_a665a45920422f9d", "uis_a665a45920422f9d"),
+            )
+        self.write_rows([
+            {"user_id": "123", "name": "Alice", "email": "", "status": "active"},
+        ])
+
+        result = self.run_import("--apply")
+
+        self.assertNotEqual(result.returncode, 0)
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM user_identities").fetchone()[0], 0)
+
     def test_invalid_row_rolls_back_the_whole_import(self):
         self.write_rows([
             {"user_id": "123", "name": "Alice", "email": "a@example.test", "status": "active"},

@@ -89,7 +89,7 @@ It creates or initializes:
 - `users.csv`
 - `ports.txt`
 - `manager.db`
-- external Docker networks: `agent-net`, `manager-net`
+- external Docker networks: `agent-net`, `manager-net`, `instance-auth-net`
 - Nginx compose file, if missing
 - `manager-web.conf`, if missing
 - `config/openclaw-manager.env`, if missing
@@ -107,7 +107,7 @@ It creates or initializes:
 - `users.csv`
 - `ports.txt`
 - `manager.db`
-- 外部 Docker 网络：`agent-net`、`manager-net`
+- 外部 Docker 网络：`agent-net`、`manager-net`、`instance-auth-net`
 - Nginx compose 文件，如不存在
 - `manager-web.conf`，如不存在
 - `config/openclaw-manager.env`，如不存在
@@ -123,7 +123,7 @@ The bootstrap script does not:
 - overwrite existing runtime files
 - move or migrate Docker/containerd runtime data
 - start Nginx
-- start `manager-web`
+- start Manager Control, Executor, split Web services, or the instance auth proxy
 - create OpenClaw user instances
 
 脚本不会：
@@ -135,7 +135,7 @@ The bootstrap script does not:
 - 覆盖已有运行文件
 - 移动或迁移 Docker/containerd 运行时数据
 - 启动 Nginx
-- 启动 `manager-web`
+- 启动 Manager Control、Executor、拆分后的 Web 服务或实例授权代理
 - 创建 OpenClaw 用户实例
 
 ## Docker Runtime Data Paths | Docker 运行时数据路径
@@ -231,7 +231,8 @@ Recommended order:
 10. Create the global manager Basic Auth user.
 11. Start Nginx from `/data/docker/nginx/compose`.
 12. Start manager services with `bash scripts/deploy_services.sh`.
-13. Verify Nginx can reach `openclaw-manager-web:8080`.
+13. Verify Nginx can reach `openclaw-manager-user-web:8080`,
+    `openclaw-manager-admin-web:8080`, and `openclaw-instance-auth-proxy:8084`.
 14. Run `./scripts/check_metadata_consistency.py`.
 15. Create one test instance before creating real users.
 
@@ -249,7 +250,8 @@ Recommended order:
 10. 创建全局管理端 Basic Auth 用户。
 11. 从 `/data/docker/nginx/compose` 启动 Nginx。
 12. 使用 `bash scripts/deploy_services.sh` 启动管理端服务。
-13. 验证 Nginx 可以访问 `openclaw-manager-web:8080`。
+13. 验证 Nginx 可以访问 `openclaw-manager-user-web:8080`、
+    `openclaw-manager-admin-web:8080` 和 `openclaw-instance-auth-proxy:8084`。
 14. 执行 `./scripts/check_metadata_consistency.py`。
 15. 先创建一个测试实例，再创建正式用户。
 
@@ -288,6 +290,13 @@ docker exec openclaw-nginx nginx -s reload
 
 cd /data/docker/openclaw-manager
 bash scripts/deploy_services.sh
+
+docker exec openclaw-nginx sh -lc \
+  'wget -qO- -T 3 http://openclaw-manager-user-web:8080/health >/dev/null && echo "[OK] user web"'
+docker exec openclaw-nginx sh -lc \
+  'wget -qO- -T 3 http://openclaw-manager-admin-web:8080/health >/dev/null && echo "[OK] admin web"'
+docker exec openclaw-nginx sh -lc \
+  'wget -qO- -T 3 http://openclaw-instance-auth-proxy:8084/health >/dev/null && echo "[OK] instance auth proxy"'
 
 cd /data/docker/openclaw-manager
 ./scripts/check_metadata_consistency.py

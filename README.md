@@ -46,9 +46,8 @@ Runtime:  /data/docker/openclaw-public + /data/docker/nginx
 
 The user and global admin portals run as unprivileged services. Structured
 actions pass through Control and Executor before an Adapter performs privileged
-runtime work. The legacy `manager-web` container remains only as a temporary
-rollback target; current Nginx templates route global and per-instance manager
-traffic to the split Web services.
+runtime work. The legacy `manager-web` container has been retired; current Nginx
+templates route global and per-instance manager traffic to the split Web services.
 For the longer-term design, read [Agent Hosting Platform Architecture](docs/architecture/agent-hosting-platform.md).
 
 ## Requirements

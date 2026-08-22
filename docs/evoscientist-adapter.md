@@ -44,7 +44,10 @@ sudo -E python3 scripts/metadata_cli.py register-instance \
 
 The command detects the external port and Basic Auth state from the user Nginx configuration, records the port allocation, and creates an auditable `register_instance` operation.
 
-After registration, restart manager-web and verify the instance list. The Web UI exposes status, start, stop, and restart actions. OpenClaw-only actions remain hidden.
+After registration, deploy `manager-control`, `manager-executor`,
+`manager-executor-api`, and `manager-admin-web`, then verify the instance list.
+The Web UI exposes status, start, stop, and restart actions. OpenClaw-only
+actions remain hidden.
 
 ## Images and updates
 

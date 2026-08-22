@@ -36,9 +36,10 @@
 - 删除顶层用户生成文件或上传文件
 - 支持实例端口内的直链下载，例如 `/admin/files/report.pdf`
 - 提供实例端口内的中文操作说明页面 `/admin/help`
-- 管理员可在 `30015` 的 `/admin/create-user` 创建单个实例
-- 管理员可在 `30015` 的 `/admin/users` 启停、重启、删除实例，并切换 Basic Auth
-- 管理员可在 `30015` 的 `/admin/users` 为多个运行中的实例批量安装白名单 Skill
+- 管理员可在 `30015` 的 `/admin/create-instance` 创建或批量创建多产品实例
+- 管理员可在 `30015` 的 `/admin/instances` 启停、重启、删除实例；仅 OpenClaw
+  显示 Basic Auth 兼容操作
+- 管理员可在 `30015` 的 `/admin/instances` 为多个运行中的 OpenClaw 实例批量安装白名单 Skill
 
 审批动作背后调用：
 
@@ -92,16 +93,18 @@ https://<PUBLIC_HOST>:<USER_PORT>/admin/help
 User Browser
   -> https://<PUBLIC_HOST>:<USER_PORT>/admin/
   -> openclaw-nginx
-  -> HTTPS + Basic Auth
+  -> platform session + instance authorization
   -> openclaw-manager-user-web:8080/instance-admin/
   -> manager-control / manager-executor-api
 ```
 
-Nginx 会通过 `X-OpenClaw-User` header 将当前实例的 `user_id` 传给
-`manager-user-web`，因此用户不需要在 `/admin/` 页面再次选择自己的账号。
+旧兼容入口只传递服务端配置的 `legacy_user_id`，`manager-user-web` 再将其解析为当前
+用户有权访问的实例 UUID。Control 会再次校验当前用户是 active 管理员、Owner 或实例
+成员，再从元数据解析访问地址。浏览器不能传入容器名、宿主机目录或运行目标。
 
-`X-OpenClaw-User` 是内部信任 header，只应由 Nginx 注入。用户 OpenClaw 容器不应加入
-`manager-net`；拆分后的管理服务只加入 `manager-net`，Nginx 作为受信反向代理连接所需网络。
+用户产品容器不应加入 `manager-net`；拆分后的管理服务只加入管理网络，Nginx 作为
+受信反向代理连接所需网络。产品入口的认证契约见
+[UIS 实例授权代理](deployment/instance-auth-proxy.md)。
 
 生产环境启用网络隔离时，应先创建 `manager-net` 并让 Nginx 加入该网络，再重建拆分后的
 管理服务。Nginx 无法访问 `manager-user-web` 时，实例端口 `/admin/` 会返回 502。
@@ -138,7 +141,7 @@ https://<PUBLIC_HOST>:30007/admin/files/report.pdf
 User Browser
   -> https://<PUBLIC_HOST>:30015
   -> openclaw-nginx
-  -> HTTPS + Basic Auth
+  -> configured Manager Provider (Local, OAuth2/OIDC, or nginx-basic)
   -> openclaw-manager-admin-web:8080
   -> manager-control / manager-executor
 ```
@@ -183,9 +186,11 @@ curl -I http://127.0.0.1:18083/health
 
 当前建议通过 Nginx 暴露管理面板，而不是直接开放 Flask 服务端口。
 
-### 5.1 实例端口 `/admin/`
+### 5.1 旧 OpenClaw 实例端口 `/admin/` 兼容路由
 
-新建实例时，`scripts/create_user.sh` 会在用户 Nginx 配置中自动加入：
+旧 `scripts/create_user.sh` 流程会在 OpenClaw 用户 Nginx 配置中加入以下兼容路由。
+这里的 `X-OpenClaw-User` 只用于把旧实例入口映射到服务端实例记录，不是当前产品入口
+的 UIS 授权凭据：
 
 ```nginx
 upstream manager_user_web_backend_<port> {
@@ -325,12 +330,16 @@ Web 服务不挂载 Docker Socket、元数据库、仓库或 Nginx 配置。Dock
 - 不给用户 SSH 权限
 - 所有用户动作必须是白名单动作
 - 管理入口必须放在 Nginx HTTPS 后面
-- 管理入口必须启用 Basic Auth 或更强认证
+- 管理入口必须使用配置的 Manager Provider；`nginx-basic` 仅是可选兼容 Provider
 - Control 和 Executor 必须再次校验实例权限、产品能力并记录审计日志
 
-实例端口 `/admin/` 依赖 Nginx 注入的 `X-OpenClaw-User` header 来绑定当前实例用户；全局 `30015` 管理入口仍依赖认证用户或管理员权限。
+旧实例端口 `/admin/` 使用服务端配置的 `legacy_user_id` 映射实例，并由 Control 校验平台
+Session 与实例关系；全局 `30015` 管理入口要求 active 管理员权限。
 
-Basic Auth 可按实例关闭。关闭后，该实例端口的 `/` 和 `/admin/` 都不再弹出 Nginx Basic Auth，但仍保留 OpenClaw Token 和 Device Approval。该模式只建议用于可信内网培训实例。
+新建 OpenClaw 实例使用官方 `trusted-proxy` 模式；历史 `token` 实例继续兼容，另行迁移。
+Hermes 使用 `campus-uis-bridge` 建立官方 Dashboard Session；EvoScientist 在迁移后使用
+UIS 实例授权代理，均不把 Nginx Basic Auth 作为当前产品入口认证。`.htpasswd` 可作为
+历史回滚材料保留，但不能作为自动降级路径。
 
 微信绑定功能只执行固定的腾讯微信 OpenClaw CLI 安装命令，并从命令输出中提取绑定 URL；它不向用户开放任意 shell 命令。该功能会在后台等待用户打开链接或扫码确认，依赖实例容器可访问 npm registry，并可运行 `npx -y @tencent-weixin/openclaw-weixin-cli install`。绑定命令默认等待 300 秒，可通过 `MANAGER_WECHAT_BIND_TIMEOUT` 调整。
 
@@ -342,7 +351,8 @@ docker exec openclaw-nginx nginx -t
 docker exec openclaw-nginx nginx -s reload
 ```
 
-管理员也可以在 `https://<PUBLIC_HOST>:30015/admin/users` 的用户列表中切换 Basic Auth。页面会先备份用户 Nginx 配置，测试配置有效后 reload Nginx；如果测试或 reload 失败，会恢复原配置。
+管理员也可以在 `https://<PUBLIC_HOST>:30015/admin/instances` 对 OpenClaw 兼容实例切换
+Basic Auth。结构化任务会备份 Nginx 配置、测试后 reload；失败时恢复原配置。
 
 ## 7. 与现有脚本的关系
 
@@ -383,14 +393,12 @@ Bulk Install Skill
   -> docker exec openclaw_<user_id> openclaw skills install <skill_id>
 ```
 
-后续可以继续纳入：
+当前 Web 已覆盖实例状态、日志、生命周期、访问地址和白名单 Skill 等支持能力；保留
+上述脚本对应关系仅用于运维兼容和故障排查。
 
-- `restart_instance`
-- `view_logs`
-- `update_skill`
-- `get_access_info`
-
-`https://<PUBLIC_HOST>:30015/admin/create-user` 已支持管理员创建单个实例和 Web 批量创建实例。单实例创建用于临时补开实例；批量创建用于培训名单，页面会上传或读取 CSV，先预检用户 ID、重复实例、端口余量和运行配置，再调用固定脚本 `scripts/batch_create_users.sh`。
+旧 `/admin/create-user` 页面和 `scripts/batch_create_users.sh` 仅作为 OpenClaw 兼容流程保留。
+当前管理员应使用 `https://<PUBLIC_HOST>:30015/admin/create-instance` 创建或批量创建
+OpenClaw、Hermes 和 EvoScientist 实例。
 创建成功后页面会显示访问地址、Basic Auth 状态、OpenClaw Login Token，并支持复制或下载账号 CSV。单实例记录会写入 `/data/docker/openclaw-public/accounts/<user_id>_account.csv`；批量创建结果保存在 `/data/docker/openclaw-public/batches/.../results.csv`，结果 CSV 包含账号、访问地址、端口、容器名、Token 和状态。
 
 批量创建输入 CSV 表头：
@@ -416,13 +424,16 @@ campus-uis,12345,alice-evo,Alice Evo,evoscientist,latest,true,example-password,t
 `version` 留空时使用该产品的默认版本。Hermes 已通过 `campus-uis-bridge` 直接建立
 Dashboard Session，其 `basic_auth_password` 和 `basic_auth_enabled` 留空。部署前参见
 [Hermes UIS 认证部署手册](deployment/hermes-uis-auth.md)。
-EvoScientist 必须启用 Basic Auth；使用 `latest` 时必须将 `confirm_latest` 设为 `true`。
+当前 EvoScientist 创建契约仍要求提供 Basic Auth 密码并启用开关；实例创建完成后，
+再按 [UIS 实例授权代理](deployment/instance-auth-proxy.md) 执行迁移。迁移后的活动入口
+不再引用 Basic Auth，`.htpasswd` 仅作为回滚材料。使用 `latest` 时必须将
+`confirm_latest` 设为 `true`。
 
 `owner_identity_type` 支持 `local`（`owner_identity` 填平台用户名）和
 `campus-uis`（填写 UIS `user_id/work_id`）。身份必须已导入或绑定到 active 平台用户，
 批量创建不会自动创建用户。旧 `owner_username` 表头继续兼容。
 
-`https://<PUBLIC_HOST>:30015/admin/users` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
+`https://<PUBLIC_HOST>:30015/admin/instances` 已支持管理员对单个实例执行 Start、Stop、Restart 和 Delete。Delete 是回收站删除，会移动用户数据并清理 Nginx 用户配置与端口映射。
 用户列表默认隐藏 stopped 实例，可通过筛选条件查看全部或指定状态。
 
 批量安装 Skill 功能只允许选择 `MANAGER_SKILL_PRESETS` 中配置的白名单 Skill。页面会默认填入当前筛选结果中的运行中实例，管理员可在提交前编辑目标实例列表。结构化安装动作会拒绝 OpenClaw 内置 Skill，以及 ClawHub 搜索中候选数量不等于一的 slug；实际执行的是固定模板 `docker exec openclaw_<user_id> openclaw skills install <skill_id>`。OpenClaw 2026.6.6 尚不接受搜索结果中的 `owner/slug` reference，因此当前校验只能拒绝提交时已存在的重名候选，不能固定安装来源；在上游 CLI 支持唯一 reference 前，不应将高风险通用 slug 加入白名单。

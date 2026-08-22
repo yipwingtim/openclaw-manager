@@ -9,7 +9,9 @@
 
 OpenClaw Manager 在不修改上游应用代码的前提下开通并管理相互隔离的 AI 智能体实例。元数据模型已经将平台用户、认证身份和实例拆分为独立实体，允许一个平台用户拥有多个产品实例，同时兼容现有 OpenClaw 部署。
 
-目前主要管理 OpenClaw 实例；适配器层也已支持对登记后的现有 EvoScientist 实例执行生命周期管理。当前能力范围请参阅 [EvoScientist 适配器](docs/evoscientist-adapter.md)。
+OpenClaw、Hermes 和 EvoScientist 均为已支持的托管产品。产品 Adapter 只暴露对应
+运行时支持的能力，所有运行操作都从服务端实例记录解析目标。产品契约请参阅
+[Hermes 适配器](docs/hermes-adapter.md)和 [EvoScientist 适配器](docs/evoscientist-adapter.md)。
 
 ## 核心特性
 
@@ -22,6 +24,7 @@ OpenClaw Manager 在不修改上游应用代码的前提下开通并管理相互
 - **多层访问控制：** 结合 Nginx Basic Auth、应用 Token 和设备审批。
 - **可恢复删除：** 删除时将实例数据移入回收目录。
 - **元数据可见性：** 使用 SQLite 记录状态，并检查运行数据一致性。
+- **使用成效统计：** 提供三个产品的只读 Activity 快照、数据字典和管理员总览。
 - **多产品扩展：** 通过能力适配器接入其他 AI 智能体运行时。
 
 ## 架构概览
@@ -33,15 +36,15 @@ OpenClaw Manager 在不修改上游应用代码的前提下开通并管理相互
                                        +-> manager-executor-api -+-> 产品 Adapter
                                                                  +-> Docker / Nginx / 宿主机数据
 
-OpenClaw 路径入口或实例 HTTPS 独立端口 -> Nginx -> 每实例独立租户网络 -> OpenClaw / EvoScientist
+OpenClaw 路径入口或实例 HTTPS 独立端口 -> Nginx -> 每实例独立租户网络 -> OpenClaw / Hermes / EvoScientist
 
 元数据：manager.db + 迁移期 users.csv / ports.txt
 运行数据：/data/docker/openclaw-public + /data/docker/nginx
 ```
 
 用户门户和全局管理门户均以非高权限服务运行。结构化动作经过 Control 与 Executor，
-再由 Adapter 执行高权限运行时操作。旧 `manager-web` 仅作为临时回滚目标保留；
-当前 Nginx 模板已将全局和实例管理流量转发到拆分后的 Web 服务。长期设计请参阅
+再由 Adapter 执行高权限运行时操作。旧 `manager-web` 已退役；当前 Nginx 模板已将
+全局和实例管理流量转发到拆分后的 Web 服务。长期设计请参阅
 [智能体托管平台架构](docs/architecture/agent-hosting-platform.md)。
 
 ## 环境要求
@@ -110,6 +113,8 @@ sudo -E python3 scripts/check_metadata_consistency.py
 - [运行时安全检查](docs/deployment/runtime-security-checks.md)
 - [用户自助面板](docs/user-self-service-panel.md)
 - [EvoScientist 适配器](docs/evoscientist-adapter.md)
+- [Hermes 适配器](docs/hermes-adapter.md)
+- [Activity Adapter 统计](docs/activity-adapters/README.md)
 - [模型代理部署](docs/deployment/model-proxy.md)
 - [Manager Web 认证](docs/deployment/local-auth.md)
 - [用户、身份与实例迁移](docs/architecture/user-identity-instance-migration.md)

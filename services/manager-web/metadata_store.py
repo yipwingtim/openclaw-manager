@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import sqlite3
 import unicodedata
@@ -74,6 +75,19 @@ def row_to_dict(row):
 
 def normalize_username(value):
     return unicodedata.normalize("NFKC", value).casefold()
+
+
+def valid_email(value):
+    return (
+        len(value) <= 320
+        and not any(character.isspace() for character in value)
+        and value.count("@") == 1
+        and all(value.split("@"))
+    )
+
+
+def uis_internal_username(user_id):
+    return "uis_" + hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
 
 
 def get_user_by_username(username, db_file=None, conn=None):
@@ -499,6 +513,57 @@ def create_user(
                 "SELECT * FROM users WHERE public_id = ?", (public_id,)
             ).fetchone()
         )
+
+
+def import_uis_users(rows, *, conn):
+    created = updated = linked = 0
+    for row in rows:
+        user = conn.execute(
+            """SELECT u.* FROM users u JOIN user_identities i ON i.user_id = u.id
+               WHERE i.provider = 'campus-uis' AND i.subject = ?""",
+            (row["user_id"],),
+        ).fetchone()
+        if user is None:
+            username = uis_internal_username(row["user_id"])
+            if conn.execute(
+                "SELECT 1 FROM users WHERE normalized_username = ?", (username,)
+            ).fetchone():
+                raise ValueError(
+                    f"generated username collision for user_id: {row['user_id']!r}"
+                )
+            user = create_user(
+                username, display_name=row["name"], email=row.get("email") or None,
+                status=row.get("status") or "active", provisioning_source="uis-import",
+                conn=conn,
+            )
+            created += 1
+        else:
+            conn.execute(
+                """UPDATE users SET display_name = ?,
+                   email = CASE WHEN ? = '' THEN email ELSE ? END,
+                   status = CASE WHEN ? = '' THEN status ELSE ? END,
+                   updated_at = ? WHERE id = ?""",
+                (row["name"], row.get("email", ""), row.get("email", ""),
+                 row.get("status", ""), row.get("status", ""), utc_now(), user["id"]),
+            )
+            updated += 1
+        profile = {
+            "source": "uis-import", "user_id": row["user_id"],
+            "user_name": row["name"],
+        }
+        if row.get("email"):
+            profile["email"] = row["email"]
+        upsert_identity(
+            user["id"], "campus-uis", row["user_id"], row["name"], conn=conn
+        )
+        conn.execute(
+            """UPDATE user_identities SET profile_json = ?, updated_at = ?
+               WHERE provider = 'campus-uis' AND subject = ?""",
+            (json.dumps(profile, ensure_ascii=False, separators=(",", ":")),
+             utc_now(), row["user_id"]),
+        )
+        linked += 1
+    return created, updated, linked
 
 
 def create_instance(

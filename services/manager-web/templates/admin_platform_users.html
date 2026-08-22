@@ -6,6 +6,30 @@
   <div class="page-subtitle mb-3">查看 Local 与 UIS 用户身份，并管理平台访问状态。</div>
 
   {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+  {% if imported %}<div class="alert alert-success">批量导入完成：{{ imported }}</div>{% endif %}
+
+  <form class="surface p-3 mb-3" method="post" action="/admin/platform-users/import" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-3">
+        <label class="form-label" for="import-provider">导入用户类型</label>
+        <select class="form-select" id="import-provider" name="provider" required>
+          <option value="campus-uis">UIS</option>
+          <option value="local">Local</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-7">
+        <label class="form-label" for="input-csv">CSV 文件</label>
+        <input class="form-control" id="input-csv" name="input_csv" type="file" accept=".csv,text/csv" required>
+      </div>
+      <div class="col-12 col-md-2">
+        <button class="btn btn-oc w-100" type="submit" onclick="return confirm('确认批量导入平台用户？');">批量导入</button>
+      </div>
+    </div>
+    <div class="form-text mt-2">
+      UIS 表头：<code>user_id,name,email,status</code>；Local 表头：<code>username,name,email,password</code>。最多 100 行，Local 初始密码至少 12 位且首次登录必须修改。
+    </div>
+  </form>
 
   <form class="surface p-3 mb-3" method="get" action="/admin/platform-users">
     <div class="row g-3 align-items-end">

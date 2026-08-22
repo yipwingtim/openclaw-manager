@@ -138,6 +138,24 @@ operation. It never accepts or stores passwords.
 管理员可通过 `/admin/platform-users` 查看 Local/UIS 身份来源并管理
 `active`、`disabled`、`locked` 状态。停用或锁定用户会注销其现有平台 Session。
 
+该页面也支持每批最多 100 行的 CSV 导入。一次导入必须选择一种身份来源：
+
+```csv
+user_id,name,email,status
+20260001,张三,zhangsan@example.edu,active
+```
+
+UIS 导入按 `campus-uis + user_id` 幂等创建或更新用户；`email` 和 `status` 可留空。
+
+```csv
+username,name,email,password
+alice,Alice,alice@example.edu,initial-pass-123
+```
+
+Local 导入仅创建新用户，默认角色和状态分别为 `user`、`active`。初始密码至少
+12 位并以 scrypt 哈希保存，用户首次登录必须修改。任意一行失败时整批回滚。
+Local CSV 包含明文初始密码，应通过受控渠道传递并在导入后安全删除。
+
 New identities receive a deterministic internal username and are not merged with
 an unbound Local user. Existing bindings keep their platform username. A blank
 `status` defaults new users to `active` and preserves the status of existing users.

@@ -24,6 +24,7 @@ app.context_processor(web_common.context)
 SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MAX_DEVICE_BATCH_ROWS = 100
 MAX_INSTANCE_BATCH_ROWS = 100
+MAX_PLATFORM_USER_IMPORT_ROWS = 100
 LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -379,10 +380,12 @@ def platform_users():
         )
         users, pagination = result["users"], result["pagination"]
         error = request.args.get("error", "")
+        imported = request.args.get("imported", "")
     except control_client.ControlError as exc:
         users, pagination, error = [], {
             "page": 1, "per_page": per_page, "total": 0, "total_pages": 1,
         }, str(exc)
+        imported = ""
     pagination = {
         **pagination,
         "start": (pagination["page"] - 1) * pagination["per_page"] + 1
@@ -403,6 +406,7 @@ def platform_users():
         pagination=pagination,
         actor_public_id=current["public_id"],
         error=error,
+        imported=imported,
     )
 
 
@@ -418,6 +422,50 @@ def update_platform_user_status(user_public_id):
     except control_client.ControlError as exc:
         return redirect(url_for("platform_users", error=str(exc)))
     return redirect(url_for("platform_users"))
+
+
+@app.post("/admin/platform-users/import")
+def import_platform_users():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    provider = request.form.get("provider", "").strip()
+    upload = request.files.get("input_csv")
+    if provider not in {"campus-uis", "local"} or upload is None:
+        return redirect(url_for("platform_users", error="请选择用户类型和 CSV 文件。"))
+    try:
+        reader = csv.DictReader(io.StringIO(upload.read().decode("utf-8-sig")))
+        fields = set(reader.fieldnames or ())
+        required = {"user_id", "name"} if provider == "campus-uis" else {
+            "username", "name", "password",
+        }
+        allowed = required | ({"email", "status"} if provider == "campus-uis" else {"email"})
+        if not required <= fields:
+            raise ValueError(f"CSV missing required columns: {', '.join(sorted(required - fields))}")
+        unsupported = fields - allowed
+        if unsupported:
+            raise ValueError(
+                f"CSV contains unsupported columns: {', '.join(sorted(str(value) for value in unsupported))}"
+            )
+        rows = []
+        for number, row in enumerate(reader, 2):
+            if None in row:
+                raise ValueError(f"row {number}: too many columns")
+            rows.append({
+                key: (value or "") if key == "password" else (value or "").strip()
+                for key, value in row.items()
+            })
+        if not 1 <= len(rows) <= MAX_PLATFORM_USER_IMPORT_ROWS:
+            raise ValueError("CSV must contain 1 to 100 rows")
+        result = control_client.import_platform_users(
+            current["public_id"], provider, rows
+        )
+    except (UnicodeDecodeError, csv.Error, ValueError) as exc:
+        return redirect(url_for("platform_users", error=str(exc)))
+    except control_client.ControlError as exc:
+        return redirect(url_for("platform_users", error=str(exc)))
+    summary = f"created={result['created']} updated={result['updated']}"
+    return redirect(url_for("platform_users", imported=summary))
 
 
 @app.post("/admin/create-instance/batch")

@@ -10,7 +10,7 @@ from functools import wraps
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import metadata_store
 from hermes_auth_bridge import BridgeStore, SigningKeys
@@ -45,6 +45,7 @@ SKILL_ID_RE = re.compile(r"^[A-Za-z0-9_.@/-]{1,128}$")
 MODEL_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 LEGACY_USER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+PLATFORM_USER_IMPORT_MAX_ROWS = 100
 DEFAULT_VERSION_KEYS = {
     "openclaw": "default_version.openclaw",
     "hermes": "default_version.hermes",
@@ -897,6 +898,101 @@ def admin_platform_users():
             "total_pages": total_pages,
         },
     })
+
+
+def import_error_message(provider, exc):
+    message = str(exc)
+    if provider == "local" and not message.startswith("local username already exists:"):
+        return "local credential import failed"
+    return message
+
+
+def validate_platform_user_import(provider, rows):
+    if provider not in {"campus-uis", "local"} or not isinstance(rows, list):
+        raise ValueError("invalid platform user import")
+    if not 1 <= len(rows) <= PLATFORM_USER_IMPORT_MAX_ROWS:
+        raise ValueError("platform user import must contain 1 to 100 rows")
+    required = {"user_id", "name"} if provider == "campus-uis" else {
+        "username", "name", "password",
+    }
+    allowed = required | ({"email", "status"} if provider == "campus-uis" else {"email"})
+    identities = set()
+    normalized_rows = []
+    for number, raw in enumerate(rows, 2):
+        if not isinstance(raw, dict) or not required <= set(raw) or set(raw) - allowed:
+            raise ValueError(f"row {number}: invalid columns")
+        row = {
+            key: value if key == "password" or not isinstance(value, str) else value.strip()
+            for key, value in raw.items()
+        }
+        if any(not isinstance(row[key], str) or not row[key] for key in required):
+            raise ValueError(f"row {number}: required value is missing")
+        identity = row["user_id"] if provider == "campus-uis" else metadata_store.normalize_username(row["username"])
+        if len(identity) > 128 or len(row["name"]) > 128:
+            raise ValueError(f"row {number}: identity or name is too long")
+        if identity in identities:
+            raise ValueError(f"row {number}: duplicate identity")
+        identities.add(identity)
+        email = row.get("email", "")
+        if not isinstance(email, str) or email and not metadata_store.valid_email(email):
+            raise ValueError(f"row {number}: invalid email")
+        if provider == "campus-uis":
+            status = row.get("status", "")
+            if not isinstance(status, str) or status not in {"", "active", "disabled", "locked"}:
+                raise ValueError(f"row {number}: invalid status")
+        elif not 12 <= len(row["password"]) <= 1024:
+            raise ValueError(f"row {number}: password must contain 12 to 1024 characters")
+        normalized_rows.append(row)
+    return normalized_rows
+
+
+@app.post("/internal/v1/admin/platform-users/import")
+@require_services("manager-admin-web")
+def import_platform_users():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or set(payload) != {"provider", "rows"}:
+        return jsonify({"error": "invalid platform user import"}), 400
+    provider = payload.get("provider")
+    try:
+        rows = validate_platform_user_import(provider, payload.get("rows"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        with metadata_store.connect(DB_FILE) as conn:
+            actor = metadata_store.get_user_by_public_id(actor_public_id(), conn=conn)
+            if actor is None or actor["status"] != "active" or actor["role"] != "admin":
+                return jsonify({"error": "active administrator not found"}), 403
+            created = updated = 0
+            if provider == "campus-uis":
+                created, updated, _ = metadata_store.import_uis_users(rows, conn=conn)
+            else:
+                for row in rows:
+                    if metadata_store.get_user_by_username(row["username"], conn=conn):
+                        raise ValueError(f"local username already exists: {row['username']!r}")
+                    user = metadata_store.create_user(
+                        row["username"], display_name=row["name"],
+                        email=row.get("email") or None, provisioning_source="local-import",
+                        conn=conn,
+                    )
+                    subject = metadata_store.normalize_username(user["username"])
+                    metadata_store.upsert_identity(
+                        user["id"], "local", subject, user["username"], conn=conn
+                    )
+                    metadata_store.set_local_credential(
+                        user["id"], generate_password_hash(row["password"], method="scrypt"),
+                        conn=conn,
+                    )
+                    created += 1
+            metadata_store.record_operation(
+                action="platform_user.import", status="success",
+                actor_user_id=actor["id"], source_service=g.source_service,
+                message=f"provider={provider} rows={len(rows)} created={created} updated={updated}",
+                conn=conn,
+            )
+    except (sqlite3.Error, ValueError) as exc:
+        return jsonify({"error": import_error_message(provider, exc)}), 409
+    return jsonify({"created": created, "updated": updated})
 
 
 @app.patch("/internal/v1/admin/users/<user_public_id>/status")

@@ -56,6 +56,9 @@ def load_control_app():
     werkzeug_security_stub.check_password_hash = (
         lambda stored, provided: stored == f"hash:{provided}"
     )
+    werkzeug_security_stub.generate_password_hash = (
+        lambda password, method=None: f"{method}:{password}"
+    )
 
     sys.path.insert(0, str(MANAGER_WEB_DIR))
     sys.path.insert(0, str(CONTROL_DIR))
@@ -770,6 +773,174 @@ class ManagerControlApiTests(unittest.TestCase):
 
         self.assertEqual(status, 400)
         self.assertEqual(response.get_json(), {"error": "invalid pagination"})
+
+    def test_admin_imports_uis_users_idempotently_and_records_audit(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        payload = {
+            "provider": "campus-uis",
+            "rows": [{"user_id": "20260001", "name": "张三", "email": "", "status": ""}],
+        }
+        headers = {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": admin["public_id"],
+        }
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            created, created_status = response_parts(self.control.import_platform_users())
+        payload["rows"][0]["name"] = "张三（更新）"
+        with patch.object(self.control.request, "headers", headers), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            updated, updated_status = response_parts(self.control.import_platform_users())
+
+        self.assertEqual((created_status, updated_status), (200, 200))
+        self.assertEqual(created.get_json(), {"created": 1, "updated": 0})
+        self.assertEqual(updated.get_json(), {"created": 0, "updated": 1})
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            user = conn.execute(
+                "SELECT u.* FROM users u JOIN user_identities i ON i.user_id = u.id "
+                "WHERE i.provider = 'campus-uis' AND i.subject = '20260001'"
+            ).fetchone()
+            operation = conn.execute(
+                "SELECT action, actor_user_id, message FROM operation_records ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(user["display_name"], "张三（更新）")
+        self.assertEqual(operation["action"], "platform_user.import")
+        self.assertEqual(operation["actor_user_id"], admin["id"])
+        self.assertNotIn("20260001", operation["message"])
+
+    def test_admin_imports_local_users_with_scrypt_credentials(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        password = "initial-pass-123"
+        payload = {
+            "provider": "local",
+            "rows": [{"username": "bob", "name": "Bob", "email": "", "password": password}],
+        }
+        with patch.object(self.control.request, "headers", {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": admin["public_id"],
+        }), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.import_platform_users())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json(), {"created": 1, "updated": 0})
+        with self.control.metadata_store.connect(self.db_file) as conn:
+            user = conn.execute("SELECT * FROM users WHERE normalized_username = 'bob'").fetchone()
+            identity = conn.execute(
+                "SELECT subject FROM user_identities WHERE user_id = ? AND provider = 'local'",
+                (user["id"],),
+            ).fetchone()
+            credential = conn.execute(
+                "SELECT password_hash, must_change_password FROM local_credentials WHERE user_id = ?",
+                (user["id"],),
+            ).fetchone()
+        self.assertEqual(identity["subject"], "bob")
+        self.assertEqual(credential["password_hash"], f"scrypt:{password}")
+        self.assertEqual(credential["must_change_password"], 1)
+        self.assertNotIn(password, repr(response.get_json()))
+
+    def test_admin_local_import_rolls_back_all_rows_on_duplicate_username(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        payload = {
+            "provider": "local",
+            "rows": [
+                {"username": "new-user", "name": "New", "email": "", "password": "initial-pass-123"},
+                {"username": "alice", "name": "Existing", "email": "", "password": "initial-pass-456"},
+            ],
+        }
+        with patch.object(self.control.request, "headers", {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": admin["public_id"],
+        }), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.import_platform_users())
+
+        self.assertEqual(status, 409)
+        self.assertEqual(response.get_json(), {"error": "local username already exists: 'alice'"})
+        self.assertIsNone(self.control.metadata_store.get_user_by_username("new-user", db_file=self.db_file))
+
+    def test_platform_user_import_validation_rejects_invalid_rows(self):
+        valid_uis = {"user_id": "1", "name": "Alice", "email": "", "status": ""}
+        valid_local = {
+            "username": "alice", "name": "Alice", "email": "",
+            "password": "initial-pass-123",
+        }
+        cases = [
+            ("unknown", [valid_uis], "invalid platform user import"),
+            ("campus-uis", None, "invalid platform user import"),
+            ("campus-uis", [], "must contain 1 to 100 rows"),
+            ("campus-uis", [valid_uis] * 101, "must contain 1 to 100 rows"),
+            ("campus-uis", ["not-a-row"], "invalid columns"),
+            ("campus-uis", [{"user_id": "1", "name": "Alice", "extra": "x"}], "invalid columns"),
+            ("campus-uis", [{"user_id": "", "name": "Alice"}], "required value is missing"),
+            ("campus-uis", [{"user_id": 1, "name": "Alice"}], "required value is missing"),
+            ("campus-uis", [{"user_id": "1" * 129, "name": "Alice"}], "identity or name is too long"),
+            ("campus-uis", [{"user_id": "1", "name": "A" * 129}], "identity or name is too long"),
+            ("campus-uis", [valid_uis, valid_uis], "duplicate identity"),
+            ("campus-uis", [{**valid_uis, "email": "invalid"}], "invalid email"),
+            ("campus-uis", [{**valid_uis, "status": "deleted"}], "invalid status"),
+            ("local", [{**valid_local, "password": "short"}], "password must contain 12 to 1024"),
+            ("local", [{**valid_local, "password": "x" * 1025}], "password must contain 12 to 1024"),
+            ("local", [valid_local, {**valid_local, "username": "ALICE"}], "duplicate identity"),
+        ]
+        for provider, rows, expected in cases:
+            with self.subTest(provider=provider, expected=expected):
+                with self.assertRaisesRegex(ValueError, expected):
+                    self.control.validate_platform_user_import(provider, rows)
+
+    def test_platform_user_import_requires_active_administrator(self):
+        payload = {
+            "provider": "campus-uis",
+            "rows": [{"user_id": "1", "name": "Alice", "email": "", "status": ""}],
+        }
+        with patch.object(self.control.request, "headers", {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": self.user["public_id"],
+        }), patch.object(self.control.request, "get_json", return_value=payload):
+            response, status = response_parts(self.control.import_platform_users())
+
+        self.assertEqual(status, 403)
+        self.assertEqual(response.get_json(), {"error": "active administrator not found"})
+
+    def test_platform_user_import_rejects_malformed_payload(self):
+        for payload in ([], {"provider": "campus-uis"}, {
+            "provider": "campus-uis", "rows": [], "unexpected": True,
+        }):
+            with self.subTest(payload=payload), patch.object(
+                self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+            ), patch.object(self.control.request, "get_json", return_value=payload):
+                response, status = response_parts(self.control.import_platform_users())
+
+            self.assertEqual(status, 400)
+            self.assertEqual(response.get_json(), {"error": "invalid platform user import"})
+
+    def test_local_import_redacts_password_from_failure_response(self):
+        admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
+        self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)
+        payload = {
+            "provider": "local",
+            "rows": [{
+                "username": "bob", "name": "Bob", "email": "",
+                "password": "initial-pass-123",
+            }],
+        }
+        with patch.object(self.control.request, "headers", {
+            "Authorization": "Bearer admin-token",
+            "X-Actor-User-Public-Id": admin["public_id"],
+        }), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ), patch.object(
+            self.control.metadata_store, "create_user",
+            side_effect=ValueError("initial-pass-123 rejected"),
+        ):
+            response, status = response_parts(self.control.import_platform_users())
+
+        self.assertEqual(status, 409)
+        self.assertEqual(response.get_json(), {"error": "local credential import failed"})
+        self.assertNotIn("initial-pass-123", repr(response.get_json()))
 
     def test_admin_disables_platform_user_revokes_sessions_and_records_audit(self):
         admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)

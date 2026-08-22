@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import sys
 import types
 import unittest
@@ -50,6 +51,7 @@ def load_admin_app():
         "pagination": {"page": 1, "per_page": 20, "total": 0, "total_pages": 1},
     }
     control_client.update_admin_user_status = lambda *args: {}
+    control_client.import_platform_users = lambda *args: {}
     control_client.create_admin_instance = lambda payload: payload
     control_client.create_instance_batch = lambda payload: payload
     control_client.get_instance_batch = lambda request_id: {}
@@ -530,6 +532,99 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(response, "platform-users-url")
         update_status.assert_called_once_with("admin-1", "user-1", "disabled")
 
+    def test_platform_user_import_parses_local_csv_and_includes_admin_actor(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {"provider": "local"}
+        self.admin.request.files = {
+            "input_csv": types.SimpleNamespace(
+                read=lambda: "username,name,email,password\nalice,张三,, long-password \n".encode()
+            )
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "import_platform_users",
+            return_value={"created": 1, "updated": 0},
+        ) as import_users, patch.object(
+            self.admin, "url_for", side_effect=lambda endpoint, **kwargs: (endpoint, kwargs)
+        ):
+            response = self.admin.import_platform_users()
+
+        self.assertEqual(response[0], "platform_users")
+        self.assertEqual(response[1]["imported"], "created=1 updated=0")
+        import_users.assert_called_once_with(
+            "admin-1", "local",
+            [{"username": "alice", "name": "张三", "email": "", "password": " long-password "}],
+        )
+
+    def test_platform_user_import_rejects_wrong_csv_columns_before_control(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {"provider": "campus-uis"}
+        self.admin.request.files = {
+            "input_csv": types.SimpleNamespace(read=lambda: b"username,name\nalice,Alice\n")
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "import_platform_users"
+        ) as import_users, patch.object(
+            self.admin, "url_for", side_effect=lambda endpoint, **kwargs: (endpoint, kwargs)
+        ):
+            response = self.admin.import_platform_users()
+
+        self.assertIn("CSV missing required columns", response[1]["error"])
+        import_users.assert_not_called()
+
+    def test_platform_user_import_rejects_rows_with_extra_values(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {"provider": "campus-uis"}
+        self.admin.request.files = {
+            "input_csv": types.SimpleNamespace(
+                read=lambda: b"user_id,name,email,status\n1,Alice,,active,extra\n"
+            )
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "import_platform_users"
+        ) as import_users, patch.object(
+            self.admin, "url_for", side_effect=lambda endpoint, **kwargs: (endpoint, kwargs)
+        ):
+            response = self.admin.import_platform_users()
+
+        self.assertEqual(response[1]["error"], "row 2: too many columns")
+        import_users.assert_not_called()
+
+    def test_platform_user_import_rejects_empty_or_oversized_csv(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        for body, expected in [
+            (b"user_id,name,email,status\n", "CSV must contain 1 to 100 rows"),
+            (
+                b"user_id,name,email,status\n" + b"1,Alice,,active\n" * 101,
+                "CSV must contain 1 to 100 rows",
+            ),
+        ]:
+            self.admin.request.form = {"provider": "campus-uis"}
+            self.admin.request.files = {
+                "input_csv": types.SimpleNamespace(read=lambda body=body: body)
+            }
+            with self.subTest(expected=expected), patch.object(
+                self.admin.web_common, "actor", return_value=actor
+            ), patch.object(
+                self.admin.control_client, "import_platform_users"
+            ) as import_users, patch.object(
+                self.admin, "url_for", side_effect=lambda endpoint, **kwargs: (endpoint, kwargs)
+            ):
+                response = self.admin.import_platform_users()
+            self.assertEqual(response[1]["error"], expected)
+            import_users.assert_not_called()
+
+    def test_platform_user_import_requires_admin(self):
+        self.admin.request.form = {"provider": "campus-uis"}
+        self.admin.request.files = {}
+        with patch.object(
+            self.admin.web_common, "actor",
+            return_value={"public_id": "user-1", "role": "user"},
+        ):
+            response, status = self.admin.import_platform_users()
+
+        self.assertEqual(status, 403)
+        self.assertEqual(response[1]["message"], "Forbidden")
+
     def test_platform_users_navigation_and_template_hide_identity_details(self):
         base = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(
             encoding="utf-8"
@@ -540,6 +635,10 @@ class AdminWebTests(unittest.TestCase):
 
         self.assertIn('href="/admin/platform-users"', base)
         self.assertIn("UIS user_id", template)
+        self.assertIn('action="/admin/platform-users/import"', template)
+        self.assertIn('enctype="multipart/form-data"', template)
+        self.assertIn("user_id,name,email,status", template)
+        self.assertIn("username,name,email,password", template)
         self.assertIn("pagination.next_page", template)
         for sensitive_name in ("user.subject", "profile_json", "password_hash", "access_token"):
             self.assertNotIn(sensitive_name, template.lower())

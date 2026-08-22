@@ -42,6 +42,11 @@ for completing the multi-product control plane.
 - 现有实例按产品能力使用入口：OpenClaw 可以暴露其配置的 Control UI 路径；在验证
   路径兼容性前，Hermes 和 EvoScientist 继续使用实例独立 HTTPS 端口。Hermes 使用 UIS
   bridge，认证方式仍按产品区分。
+- OpenClaw instance authentication supports both migration states: `token` and
+  `trusted-proxy`. Hermes uses its product session bridge, while EvoScientist
+  relies on the instance authorization proxy without product Basic Auth.
+- OpenClaw 实例认证同时兼容 `token` 和 `trusted-proxy` 两种迁移状态。Hermes 使用
+  产品 Session bridge，EvoScientist 使用实例授权代理，产品侧不依赖 Basic Auth。
 
 ## Completed Foundations | 已完成基础工作
 
@@ -110,6 +115,42 @@ for completing the multi-product control plane.
 - Do not require OpenClaw-only file, device, or Skill features.
 - 不要求实现 OpenClaw 专属的文件、设备或 Skill 功能。
 
+## Planned Work | 后续工作
+
+### Authentication Provider enhancement | 认证 Provider 增强
+
+- Keep Local, OAuth2, and OIDC configurable; do not hard-code one campus
+  identity service as the platform default.
+- Add provider lifecycle, health checks, identity bind/unbind flows, and an
+  explicit fallback or emergency login policy before enabling multiple providers.
+- 保持 Local、OAuth2 和 OIDC 可配置，不将某个学校身份服务写死为平台默认认证源。
+- 在启用多 Provider 前补充生命周期、健康检查、身份绑定/解绑和应急登录策略。
+
+### Instance resource monitoring | 实例资源监控
+
+- Collect read-only per-user/per-instance data directory size, session-file
+  count, collection time, and collection failures from server-resolved paths.
+- Add administrator thresholds and warnings first; do not delete data automatically.
+- 由服务端解析实例目录，只读采集用户/实例磁盘大小、会话文件数量、采集时间和失败原因。
+- 首期只增加管理员阈值和预警，不自动删除数据。
+
+### OpenClaw Basic Auth migration | OpenClaw Basic Auth 迁移
+
+- Inventory existing instances by `token` versus `trusted-proxy` mode.
+- Migrate and verify eligible instances before disabling Nginx Basic Auth;
+  preserve rollback and legacy compatibility throughout the transition.
+- 盘点现有实例的 `token`/`trusted-proxy` 模式，完成迁移和验证后再逐步关闭 Nginx
+  Basic Auth，并在过渡期保留回滚和旧实例兼容。
+
+### Static multi-node runtime | 静态多节点运行
+
+- Evolve toward one Control Plane with three fixed Runtime Nodes. Add node
+  identity, instance placement, heartbeat, capacity/GPU labels, and node-scoped execution.
+- Keep instance data and Docker resources on one assigned node initially. Do not
+  promise automatic cross-node migration or high availability in the first version.
+- 演进为一个 Control Plane 加三个固定 Runtime Node，增加节点身份、实例归属、心跳、
+  容量/GPU 标签和按节点执行。首期实例固定在所属节点，不承诺自动迁移或高可用。
+
 ## Later: Runtime and Ingress Separation | 后续：运行时与入口解耦
 
 - Separate runtime lifecycle behavior from endpoint publication after at least
@@ -119,11 +160,11 @@ for completing the multi-product control plane.
   HTTPS path/subdomain ingress only for adapters that explicitly support it.
 - 对需要端口的产品保留 `LegacyPortIngress`；仅为明确支持路径或子域名入口的
   Adapter 增加统一 HTTPS 入口。
-- Serve Manager and instance subdomains through fixed ports `80/443`; instance
-  creation and deletion should update routing with a graceful Nginx reload,
-  without changing Docker published ports or recreating the shared gateway.
-- Manager 与实例子域名统一使用固定 `80/443`；实例创建和删除仅更新路由并无损 reload
-  Nginx，不再修改 Docker published ports 或重建共享网关。
+- Do not force every product onto `443 + subdomain/path` until Hermes and
+  EvoScientist explicitly prove compatibility. Keep per-instance HTTPS ports as
+  the supported fallback.
+- 在 Hermes 和 EvoScientist 明确验证兼容性前，不强制所有产品统一到
+  `443 + 子域名/路径`；继续支持实例独立 HTTPS 端口。
 - Plan wildcard DNS/TLS, access authorization, migration, and rollback before
   moving existing `LegacyPortIngress` instances to subdomains.
 - 迁移既有 `LegacyPortIngress` 实例前，先完成通配符 DNS/TLS、访问授权、迁移与回滚方案。

@@ -44,6 +44,14 @@ python3 tests/test_manager_web_lifecycle.py
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
+<!-- Keep every fenced code block closed. Do not leave a standalone opening fence. -->
+
+```text
+# Manual verification / 手工验证：
+# 1. Run the relevant readiness or health check.
+# 2. Verify the changed behavior in the target environment.
+```
+
 ---
 
 # Risk / 风险

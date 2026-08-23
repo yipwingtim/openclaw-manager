@@ -47,9 +47,12 @@ python3 scripts/inventory_openclaw_auth.py --format csv \
 ```
 
 The inventory reports `ready` for complete trusted-proxy instances,
-`needs-migration` for internally consistent token instances, and `inconsistent`
-for unreadable, unsupported, or conflicting configurations. Token instances are
-not treated as errors; any inconsistent instance makes the command exit nonzero.
+`needs-migration` for internally consistent token instances or trusted-proxy
+instances that still retain Nginx Basic Auth, and `inconsistent` for unreadable,
+unsupported, or conflicting configurations. Token and Basic-Auth transition
+instances are not treated as errors; any inconsistent instance makes the command
+exit nonzero. Stopped instances resolve Nginx configuration from the active,
+`_disabled`, and legacy `.disabled` locations.
 Review the `requires_openclaw_token`, `nginx_basic_auth`, and `issues` columns
 before changing an instance.
 

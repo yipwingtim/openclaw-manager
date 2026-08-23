@@ -42,9 +42,17 @@ def nginx_path(instance, nginx_dir):
     if configured:
         path = Path(configured).resolve()
         path.relative_to(nginx_dir.resolve())
-        return path
+        if path.is_file():
+            return path
     user_id = instance.get("legacy_user_id")
-    return nginx_dir / f"{user_id}.conf" if user_id else nginx_dir / f"openclaw-{instance['public_id']}.conf"
+    if not user_id:
+        return nginx_dir / f"openclaw-{instance['public_id']}.conf"
+    candidates = (
+        nginx_dir / f"{user_id}.conf",
+        nginx_dir / "_disabled" / f"{user_id}.conf",
+        Path(f"{nginx_dir}.disabled") / f"{user_id}.conf",
+    )
+    return next((path for path in candidates if path.is_file()), candidates[0])
 
 
 def inspect_instance(instance, public_dir=PUBLIC_DIR, nginx_dir=NGINX_USERS_CONF_DIR):
@@ -86,7 +94,12 @@ def inspect_instance(instance, public_dir=PUBLIC_DIR, nginx_dir=NGINX_USERS_CONF
         if nginx["basic_auth_enabled"] is not False:
             issues.append("basic_auth_not_disabled")
 
-    status = "inconsistent" if issues else "ready" if mode == "trusted-proxy" else "needs-migration"
+    blocking_issues = [issue for issue in issues if issue != "basic_auth_not_disabled"]
+    status = (
+        "inconsistent" if blocking_issues
+        else "ready" if mode == "trusted-proxy" and not issues
+        else "needs-migration"
+    )
     return result(instance, mode, status, mode == "token", nginx["basic_auth_enabled"], issues)
 
 

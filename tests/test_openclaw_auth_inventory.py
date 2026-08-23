@@ -38,17 +38,18 @@ class OpenClawAuthInventoryTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def add_instance(self, public_id, auth, *, compose="", nginx=""):
+    def add_instance(self, public_id, auth, *, compose="", nginx="", status="active", nginx_path=None):
         data = self.public / "users" / public_id
         (data / "config").mkdir(parents=True)
         (data / "config/openclaw.json").write_text(json.dumps({"gateway": auth}), encoding="utf-8")
         (data / "docker-compose.yml").write_text(compose, encoding="utf-8")
-        conf = self.nginx / f"{public_id}.conf"
+        conf = nginx_path or self.nginx / f"{public_id}.conf"
+        conf.parent.mkdir(parents=True, exist_ok=True)
         conf.write_text(nginx, encoding="utf-8")
         with sqlite3.connect(self.db) as connection:
             connection.execute(
                 "INSERT INTO instances VALUES (?,?,?,?,?,?,?,1)",
-                (public_id, public_id, public_id, "active", str(data), str(conf), "openclaw"),
+                (public_id, public_id, public_id, status, str(data), str(conf), "openclaw"),
             )
 
     def test_classifies_token_and_ready_trusted_proxy(self):
@@ -82,6 +83,44 @@ class OpenClawAuthInventoryTests(unittest.TestCase):
         self.assertIn("inconsistent", output.getvalue())
         self.assertIn("gateway_token_conflict", output.getvalue())
         self.assertIn("control_password_missing", output.getvalue())
+
+    def test_stopped_instance_resolves_disabled_nginx_configuration(self):
+        self.add_instance(
+            "stopped", {"auth": {"mode": "token", "token": "secret"}},
+            status="stopped", nginx='server { listen 30104; location / { auth_basic "OpenClaw Login"; } }',
+            nginx_path=self.nginx / "_disabled/stopped.conf",
+        )
+        with sqlite3.connect(self.db) as connection:
+            connection.execute("UPDATE instances SET nginx_conf_path=?", (str(self.nginx / "stopped.conf"),))
+        output = io.StringIO()
+        self.assertEqual(INVENTORY.main([
+            "--db", str(self.db), "--public-dir", str(self.public),
+            "--nginx-dir", str(self.nginx),
+        ], output), 0)
+        self.assertNotIn("nginx_missing", output.getvalue())
+
+    def test_trusted_proxy_with_basic_auth_is_pending_not_inconsistent(self):
+        self.add_instance(
+            "proxy-basic",
+            {"auth": {"mode": "trusted-proxy", "password": "secret", "trustedProxy": {"userHeader": "x-forwarded-user"}}, "trustedProxies": ["172.30.0.2"]},
+            nginx='''server { listen 30105;
+    location / { auth_basic "OpenClaw Login"; auth_request /_instance_auth;
+      set $openclaw_upstream "openclaw_proxy-basic:18789";
+      auth_request_set $authenticated_user $upstream_http_x_openclaw_authenticated_user;
+      proxy_set_header X-Forwarded-User $authenticated_user;
+      proxy_set_header X-OpenClaw-Authenticated-By "openclaw-manager";
+    }
+    upstream instance_auth_proxy { server openclaw-instance-auth-proxy:8084 resolve; }
+}''',
+        )
+        output = io.StringIO()
+        self.assertEqual(INVENTORY.main([
+            "--db", str(self.db), "--public-dir", str(self.public),
+            "--nginx-dir", str(self.nginx),
+        ], output), 0)
+        self.assertIn("needs-migration", output.getvalue())
+        self.assertIn("basic_auth_not_disabled", output.getvalue())
+        self.assertIn("inconsistent=0", output.getvalue())
 
     def test_rejects_data_path_outside_managed_public_directory(self):
         outside = self.root / "outside"

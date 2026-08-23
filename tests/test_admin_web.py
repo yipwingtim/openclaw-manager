@@ -76,6 +76,7 @@ def load_admin_app():
     web_common.require_csrf = lambda: None
     web_common.context = lambda: {}
     web_common.actor = lambda: None
+    web_common.auth_provider_health = lambda **kwargs: {"status": "ok"}
 
     previous = {name: sys.modules.get(name) for name in ("flask", "control_client", "executor_client", "web_common")}
     sys.modules.update(
@@ -462,6 +463,25 @@ class AdminWebTests(unittest.TestCase):
         )
         self.assertIn("<span>模型设置</span>", template)
         self.assertNotIn("<span>模型供应商</span>", template)
+
+    def test_auth_provider_page_is_admin_only_and_supports_explicit_probe(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        health = {"provider": "campus-uis", "status": "ok"}
+        self.admin.request.args = {"probe": "true"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.web_common, "auth_provider_health", return_value=health
+        ) as provider_health:
+            template, context = self.admin.auth_provider_page()
+
+        self.assertEqual(template, "admin_auth_provider.html")
+        self.assertEqual(context["health"], health)
+        provider_health.assert_called_once_with(probe=True)
+
+    def test_auth_provider_page_rejects_non_admin(self):
+        with patch.object(self.admin.web_common, "actor", return_value=None):
+            response = self.admin.auth_provider_page()
+
+        self.assertEqual(response[1], 403)
 
     def test_authenticated_sidebar_always_shows_logout_button(self):
         template = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(

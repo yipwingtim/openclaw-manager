@@ -40,6 +40,14 @@ class ManagerWebImageTests(unittest.TestCase):
                 self.assertIn(f"products/{filename}", template)
         self.assertIn("instance-product-logo-fallback", template)
 
+    def test_auth_provider_status_template_is_packaged(self):
+        manager_web = ROOT_DIR / "services" / "manager-web"
+        dockerfile = (manager_web / "Dockerfile").read_text(encoding="utf-8")
+        template = manager_web / "templates" / "admin_auth_provider.html"
+
+        self.assertIn("COPY templates ./templates", dockerfile)
+        self.assertTrue(template.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

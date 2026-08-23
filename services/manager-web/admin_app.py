@@ -337,6 +337,17 @@ def default_versions_page():
     return render_template("admin_default_versions.html", versions=versions, error=error)
 
 
+@app.get("/admin/auth-provider")
+def auth_provider_page():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    health = web_common.auth_provider_health(
+        probe=request.args.get("probe") == "true"
+    )
+    return render_template("admin_auth_provider.html", health=health)
+
+
 @app.post("/admin/default-versions")
 def update_default_versions():
     current = web_common.actor()

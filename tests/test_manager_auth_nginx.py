@@ -46,6 +46,14 @@ class ManagerAuthNginxTests(unittest.TestCase):
             script.index('"${compose[@]}" build'),
         )
 
+    def test_deploy_runs_manager_auth_readiness_before_build(self):
+        script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index("check_manager_auth_readiness.py"),
+            script.index('"${compose[@]}" build'),
+        )
+
     def test_deploy_exports_config_for_hermes_readiness(self):
         script = DEPLOY_SERVICES_SCRIPT.read_text(encoding="utf-8")
 
@@ -85,6 +93,7 @@ class ManagerAuthNginxTests(unittest.TestCase):
                     "from pathlib import Path\n"
                     "Path(os.environ['HERMES_READINESS_TEST']).write_text('exported')\n"
                 ),
+                "check_manager_auth_readiness.py": "#!/usr/bin/env python3\n",
                 "lib_tenant_network.sh": "connect_shared_services_to_tenant_networks() { :; }\n",
                 "update_manager_auth.sh": "#!/bin/sh\nexit 0\n",
                 "migrate_nginx_upstreams.sh": "#!/bin/sh\nexit 0\n",

@@ -272,6 +272,29 @@ Basic Auth 文件，并由 `MANAGER_EMERGENCY_USERS` 再次限制为已有且启
 应通过网络策略限制该路径，并监控 manager-web 警告日志。
 应急入口还要求配置非空的 `OPENCLAW_INTERNAL_TOKEN`，否则应用拒绝建立 Session。
 
+外部 Provider 必须至少配置一种恢复路径：启用 `MANAGER_LOCAL_AUTH_ENABLED=true`，或设置
+非空的 `MANAGER_EMERGENCY_USERS`。部署脚本会先执行配置级 readiness 检查；不会因外部
+SSO 的临时网络故障自动切换 Provider。
+
+部署前检查当前配置：
+
+```bash
+set -a
+source config/openclaw-manager.env
+set +a
+python3 scripts/check_manager_auth_readiness.py
+```
+
+显式探测外部 HTTPS 端点：
+
+```bash
+python3 scripts/check_manager_auth_readiness.py --probe
+```
+
+管理员也可以访问 `/admin/auth-provider` 查看脱敏后的配置状态，并手动触发相同的外部
+端点探测。HTTP 4xx 表示端点可达；HTTP 5xx、TLS/DNS 或连接失败视为不可用。该页面和
+脚本均不会显示 Client Secret，也不会修改 Provider。
+
 ## Prerequisite: identity model / 前置条件：身份模型
 
 Local Auth requires the user/identity/instance model. Complete that migration

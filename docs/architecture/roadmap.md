@@ -121,10 +121,12 @@ for completing the multi-product control plane.
 
 - Keep Local, OAuth2, and OIDC configurable; do not hard-code one campus
   identity service as the platform default.
-- Add provider lifecycle, health checks, identity bind/unbind flows, and an
-  explicit fallback or emergency login policy before enabling multiple providers.
+- Configuration and endpoint health checks plus an explicit Local fallback or
+  emergency-login policy are implemented. Provider lifecycle and identity
+  bind/unbind administration remain planned before enabling multiple providers.
 - 保持 Local、OAuth2 和 OIDC 可配置，不将某个学校身份服务写死为平台默认认证源。
-- 在启用多 Provider 前补充生命周期、健康检查、身份绑定/解绑和应急登录策略。
+- 配置/端点健康检查以及明确的 Local fallback 或应急登录策略已经完成；在启用多
+  Provider 前，仍需补充 Provider 生命周期和身份绑定/解绑管理。
 
 ### Instance resource monitoring | 实例资源监控
 

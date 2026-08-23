@@ -534,7 +534,7 @@ Hermes 已使用统一实例模型和执行器边界：
 
 按以下顺序推进：
 
-1. 增强可配置认证 Provider、身份绑定和 Provider 健康检查。
+1. 在已完成 Provider 健康检查和应急策略校验的基础上，增加 Provider 生命周期及身份绑定/解绑管理。
 2. 增加实例磁盘大小、会话文件数量和阈值预警的只读资源监控。
 3. 盘点并迁移 OpenClaw `token` 实例，逐步退出符合条件实例的 Basic Auth。
 4. 建立单 Control Plane 加三个固定 Runtime Node 的静态节点模型。

@@ -73,6 +73,10 @@ def external_auth_enabled():
     return AUTH_PROVIDER not in {"nginx-basic", "local"}
 
 
+def auth_provider_health(*, probe=False):
+    return auth_providers.provider_health(probe=probe)
+
+
 def local_auth_enabled():
     return AUTH_PROVIDER == "local" or (
         external_auth_enabled() and LOCAL_AUTH_ENABLED

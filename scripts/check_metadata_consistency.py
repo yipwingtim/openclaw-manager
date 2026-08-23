@@ -306,6 +306,8 @@ def detect_nginx_conf(path):
             result["basic_auth_enabled"] = False
         elif 'auth_basic "OpenClaw Login";' in root_block:
             result["basic_auth_enabled"] = True
+        else:
+            result["basic_auth_enabled"] = False
     if admin_block is not None:
         match = re.search(r"auth_basic_user_file\s+([^;]+);", admin_block)
         if match:

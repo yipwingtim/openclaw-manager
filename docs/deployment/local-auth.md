@@ -44,15 +44,17 @@ Every manager login resolves to an existing `users.id` through
 ```text
 nginx-basic + Basic Auth username ─┐
 local       + normalized username ├──> users.id
-future UIS  + stable subject       ┘
+OAuth2/OIDC + stable subject       ┘
 ```
 
-External authentication must not create a platform user on first login. Future
-OIDC or UIS integrations must pre-provision the platform user and matching
-identity record. Use the external provider's stable subject, not a display
-name, email address, or other mutable field.
+External authentication must not create a platform user on first login. OAuth2,
+OIDC, and UIS deployments must pre-provision the platform user and matching
+identity record. Use the external provider's stable subject, not a display name,
+email address, or other mutable field.
 
-外部认证首次登录不得自动创建平台用户。未来接入 OIDC 或 UIS 时，必须预先创建平台用户并绑定对应身份；身份标识应使用外部系统提供的稳定 subject，不能默认使用姓名、邮箱等可变字段。
+外部认证首次登录不得自动创建平台用户。OAuth2、OIDC 和 UIS 部署必须预先创建平台用户
+并绑定对应身份；身份标识应使用外部系统提供的稳定 subject，不能默认使用姓名、邮箱等
+可变字段。
 
 ## External OAuth2/OIDC provider / 外部 OAuth2/OIDC Provider
 

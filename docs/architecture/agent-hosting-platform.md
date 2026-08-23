@@ -131,7 +131,9 @@ OpenClaw，例如：
 - `status`
 - `created_at`
 
-当前实现通过 `user_identities(provider, subject)` 将 `nginx-basic`、`local` 以及未来的 OIDC/UIS 身份映射到同一个 `users.id`。外部认证首次登录不自动创建平台用户。
+当前实现通过 `user_identities(provider, subject)` 将 `nginx-basic`、`local` 和已配置的
+OAuth2/OIDC（包括可选 UIS）身份映射到同一个 `users.id`。外部认证首次登录不自动创建
+平台用户。
 
 平台角色至少区分为：
 

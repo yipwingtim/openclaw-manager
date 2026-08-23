@@ -93,4 +93,4 @@ docker compose ps manager-executor
 docker compose logs --tail=100 manager-executor
 ```
 
-The service requires metadata schema v4. It does not run migrations.
+The service requires metadata schema v8. It does not run migrations.

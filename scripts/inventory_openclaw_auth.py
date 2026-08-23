@@ -25,7 +25,7 @@ def instances(db_file):
                    i.data_path, i.nginx_conf_path, u.username AS owner_username
             FROM instances i
             JOIN users u ON u.id = i.owner_user_id
-            WHERE i.product = 'openclaw' AND i.status != 'deleted'
+            WHERE i.product = 'openclaw' AND i.status IN ('active', 'stopped')
             ORDER BY u.normalized_username, i.instance_name
             """
         )]

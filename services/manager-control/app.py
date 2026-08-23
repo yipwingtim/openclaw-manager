@@ -70,14 +70,15 @@ ACTIVITY_METRICS = {
     "openclaw": {
         "sessions", "user_interactions", "model_responses", "tool_calls",
         "task_runs", "subagent_runs", "scheduled_runs", "scheduled_tokens",
-        "last_activity_at_ms",
+        "last_activity_at_ms", "disk_bytes", "session_files",
     },
     "hermes": {
         "sessions", "messages", "tool_calls", "model_calls", "task_runs",
-        "scheduled_runs", "last_activity_at_s",
+        "scheduled_runs", "last_activity_at_s", "disk_bytes", "session_files",
     },
     "evoscientist": {
         "sessions", "checkpoints", "writes", "write_tasks", "last_activity_at_ms",
+        "disk_bytes", "session_files",
     },
 }
 JOB_ACTION_PARAMS = {
@@ -759,6 +760,30 @@ def user_instances(user_public_id):
 @require_services("manager-admin-web")
 def admin_instances():
     instances = metadata_store.list_instances(db_file=DB_FILE)
+    snapshots = {
+        item["instance_public_id"]: item
+        for item in metadata_store.list_latest_activity_snapshots(db_file=DB_FILE)
+    }
+
+    def resource_usage(instance):
+        snapshot = snapshots.get(instance["public_id"]) or {}
+        metrics = snapshot.get("metrics") or {}
+        status = (
+            "failed" if snapshot.get("status") == "failed"
+            else "success" if {"disk_bytes", "session_files"} <= set(metrics)
+            else "uncollected"
+        )
+        return {
+            "status": status,
+            "disk_bytes": metrics.get("disk_bytes"),
+            "session_file_count": metrics.get("session_files"),
+            "collected_at": snapshot.get("collected_at"),
+            "error": snapshot.get("error_summary"),
+            "warnings": [name for name, enabled in (
+                ("disk_bytes", status == "success" and RESOURCE_DISK_WARN_BYTES and metrics["disk_bytes"] >= RESOURCE_DISK_WARN_BYTES),
+                ("session_file_count", status == "success" and RESOURCE_SESSION_WARN_COUNT and metrics["session_files"] >= RESOURCE_SESSION_WARN_COUNT),
+            ) if enabled],
+        }
     return jsonify(
         {
             "instances": [
@@ -772,12 +797,7 @@ def admin_instances():
                     "access_url": instance.get("access_url"),
                     "version": instance.get("openclaw_version"),
                     "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
-                    "resource_usage": (usage := metadata_store.collect_instance_resource_usage(instance)) | {
-                        "warnings": [name for name, enabled in (
-                            ("disk_bytes", RESOURCE_DISK_WARN_BYTES and usage["disk_bytes"] >= RESOURCE_DISK_WARN_BYTES),
-                            ("session_file_count", RESOURCE_SESSION_WARN_COUNT and usage["session_file_count"] >= RESOURCE_SESSION_WARN_COUNT),
-                        ) if enabled],
-                    },
+                    "resource_usage": resource_usage(instance),
                     "capabilities": sorted(
                         capability
                         for capability in (

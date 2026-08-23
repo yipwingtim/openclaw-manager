@@ -1,6 +1,7 @@
 import glob
 import hashlib
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,27 @@ def snapshot_result(metrics, source_version, source_schema, source_mtime_ns):
         "source_cursor": cursor,
         "metrics": metrics,
     }
+
+
+def resource_metrics(root):
+    root = Path(root)
+    if not root.is_dir():
+        raise FileNotFoundError(root)
+    metrics = {"disk_bytes": 0, "session_files": 0}
+
+    def fail(error):
+        raise error
+
+    for directory, _, filenames in os.walk(root, followlinks=False, onerror=fail):
+        for filename in filenames:
+            path = Path(directory) / filename
+            if path.is_symlink():
+                continue
+            metrics["disk_bytes"] += path.stat().st_size
+            parts = path.relative_to(root).parts
+            if "sessions" in {part.lower() for part in parts[:-1]} or "session" in filename.lower():
+                metrics["session_files"] += 1
+    return metrics
 
 
 def timestamp_ms(value):
@@ -114,6 +136,7 @@ class OpenClawActivityAdapter:
         metrics["last_activity_at_ms"] = max(
             [value for value in activity_values if isinstance(value, (int, float))] or [0]
         )
+        metrics.update(resource_metrics(Path(instance["data_path"])))
         version = instance.get("version") or "unknown"
         return snapshot_result(metrics, version, "openclaw-global-1", max(database.stat().st_mtime_ns, jsonl_mtime))
 
@@ -168,6 +191,7 @@ class HermesActivityAdapter:
             timestamp_ms(task_activity) / 1000,
             timestamp_ms(cron_activity) / 1000,
         )
+        metrics.update(resource_metrics(Path(instance["data_path"])))
         return snapshot_result(
             metrics, instance["version"], f"hermes-state-{observed_schema}",
             max(path.stat().st_mtime_ns for path in (state, kanban, cron)),
@@ -200,6 +224,7 @@ class EvoScientistActivityAdapter:
             "writes": writes["writes"], "write_tasks": writes["write_tasks"],
             "last_activity_at_ms": database.stat().st_mtime_ns // 1_000_000,
         }
+        metrics.update(resource_metrics(Path(instance["data_path"])))
         return snapshot_result(
             metrics, instance.get("version") or "unknown",
             "evoscientist-checkpoints-writes-v1", database.stat().st_mtime_ns,

@@ -140,7 +140,8 @@ class ManagerExecutorApiTests(unittest.TestCase):
         instance = {"public_id": "instance-1", "product": "hermes"}
         collected = {
             "status": "success", "source_version": "v1", "source_schema": "schema-1",
-            "source_cursor": "a" * 64, "metrics": {"sessions": 1},
+            "source_cursor": "a" * 64,
+            "metrics": {"sessions": 1, "disk_bytes": 12, "session_files": 3},
         }
         with patch.dict(self.api.TOKENS, {"admin": "admin-token", "user": "user-token"}), patch.object(
             self.api.CONTROL, "get_runtime_instance", return_value=instance

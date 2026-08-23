@@ -106,7 +106,8 @@
               </td>
               <td>
                 {% set usage = instance.resource_usage or {} %}
-                {% if usage.error %}<span class="badge-status badge-stopped">采集失败</span><div class="muted-small">{{ usage.error }}</div>
+                {% if usage.status == "uncollected" %}<span class="badge-status badge-neutral">未采集</span><div class="muted-small">请在“使用成效”页面刷新</div>
+                {% elif usage.error %}<span class="badge-status badge-stopped">采集失败</span><div class="muted-small">{{ usage.error }}</div>
                 {% else %}<div>{{ usage.disk_bytes|filesizeformat }} / {{ usage.session_file_count }} 个会话文件</div>
                   {% if usage.warnings %}<span class="badge-status badge-stopped">超过阈值</span>{% else %}<span class="muted-small">{{ usage.collected_at }}</span>{% endif %}
                 {% endif %}

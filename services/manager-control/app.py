@@ -52,6 +52,8 @@ DEFAULT_VERSION_KEYS = {
     "evoscientist": "default_version.evoscientist",
 }
 DEFAULT_EVOSCIENTIST_VERSION = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
+RESOURCE_DISK_WARN_BYTES = max(0, int(os.environ.get("MANAGER_RESOURCE_DISK_WARN_BYTES", "0")))
+RESOURCE_SESSION_WARN_COUNT = max(0, int(os.environ.get("MANAGER_RESOURCE_SESSION_WARN_COUNT", "0")))
 PROVISIONING_SECRET_DIR = Path(
     os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public")
 ) / ".manager-secrets"
@@ -770,6 +772,12 @@ def admin_instances():
                     "access_url": instance.get("access_url"),
                     "version": instance.get("openclaw_version"),
                     "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
+                    "resource_usage": (usage := metadata_store.collect_instance_resource_usage(instance)) | {
+                        "warnings": [name for name, enabled in (
+                            ("disk_bytes", RESOURCE_DISK_WARN_BYTES and usage["disk_bytes"] >= RESOURCE_DISK_WARN_BYTES),
+                            ("session_file_count", RESOURCE_SESSION_WARN_COUNT and usage["session_file_count"] >= RESOURCE_SESSION_WARN_COUNT),
+                        ) if enabled],
+                    },
                     "capabilities": sorted(
                         capability
                         for capability in (

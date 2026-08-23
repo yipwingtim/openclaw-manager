@@ -82,7 +82,7 @@
         <table class="table table-hover mb-0 align-middle">
           <thead><tr>
             <th style="width: 52px;"><input class="form-check-input" type="checkbox" id="select-current-page" aria-label="全选当前页" {% if not instances|selectattr("status", "ne", "deleted")|list %}disabled{% endif %}></th>
-            <th>实例</th><th>类型</th><th>状态</th><th>版本</th><th>访问地址</th><th>访问认证</th><th>操作</th>
+            <th>实例</th><th>类型</th><th>状态</th><th>版本</th><th>资源使用</th><th>访问地址</th><th>访问认证</th><th>操作</th>
           </tr></thead>
           <tbody>
           {% for instance in instances %}
@@ -103,6 +103,13 @@
                 {% if instance.version %}
                   <span class="badge-status badge-neutral" title="{{ instance.version }}">{% if instance.product == "evoscientist" and instance.version.startswith("sha256:") %}{{ instance.version[:21] }}…{% else %}{{ instance.version }}{% endif %}</span>
                 {% else %}<span class="muted-small">未知</span>{% endif %}
+              </td>
+              <td>
+                {% set usage = instance.resource_usage or {} %}
+                {% if usage.error %}<span class="badge-status badge-stopped">采集失败</span><div class="muted-small">{{ usage.error }}</div>
+                {% else %}<div>{{ usage.disk_bytes|filesizeformat }} / {{ usage.session_file_count }} 个会话文件</div>
+                  {% if usage.warnings %}<span class="badge-status badge-stopped">超过阈值</span>{% else %}<span class="muted-small">{{ usage.collected_at }}</span>{% endif %}
+                {% endif %}
               </td>
               <td>{% if instance.access_url %}<a href="{{ instance.access_url }}" target="_blank" rel="noreferrer" title="{{ instance.access_url }}">打开应用</a>{% else %}<span class="muted-small">未知</span>{% endif %}</td>
               <td>

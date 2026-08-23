@@ -2,24 +2,31 @@
 
 ## 1. 文档范围
 
-本文档描述当前 SQLite metadata schema v4。权威定义以
+本文档描述当前 SQLite metadata schema v8。权威定义以
 [`db/schema.sql`](../../db/schema.sql) 为准，生产迁移步骤见
 [`user-identity-instance-migration.md`](user-identity-instance-migration.md)。
 
-Schema v4 的核心关系为：
+Schema v8 的核心关系为：
 
 ```text
-users
-├── user_identities
-├── local_credentials
-├── user_sessions
+metadata
+├── users
+│   ├── user_identities
+│   ├── local_credentials
+│   └── user_sessions
+│       └── external_session_tokens
+├── auth_settings
 ├── instances
 │   ├── instance_members
 │   ├── instance_credentials
 │   ├── instance_endpoints
 │   ├── ports
-│   └── operation_records
-└── execution_jobs
+│   ├── operation_records
+│   ├── execution_jobs
+│   ├── activity_snapshots
+│   ├── hermes_auth_clients
+│   └── hermes_auth_grants
+└── schema_migrations
 ```
 
 完整审计日志仍保存在：
@@ -54,7 +61,7 @@ users
 当前版本：
 
 ```text
-4 / control_plane_model
+8 / hermes_auth_bridge
 ```
 
 ## 4. `users`
@@ -112,15 +119,16 @@ users
 UNIQUE(provider, subject)
 ```
 
-当前 Provider：
+当前已支持的 Provider：
 
 | Provider | Subject |
 | --- | --- |
 | `legacy` | 历史 `user_id`，用于兼容迁移 |
 | `nginx-basic` | Nginx Basic Auth 用户名 |
 | `local` | 归一化后的平台用户名 |
+| 配置的 OAuth2/OIDC Provider（例如 `campus-uis`） | 外部系统提供的稳定唯一 subject |
 
-未来 OIDC/UIS Provider 也必须先创建此映射，首次登录不自动创建平台用户。
+外部 Provider 必须先创建此映射，首次登录不自动创建平台用户。
 
 ## 6. `local_credentials`
 
@@ -141,7 +149,7 @@ UNIQUE(provider, subject)
 
 ## 7. `user_sessions`
 
-保存 Local Provider 的服务端 Session。
+保存 Local、OAuth2/OIDC 和应急登录使用的服务端 Session。
 
 | Field | Type | Constraint | Description |
 | --- | --- | --- | --- |
@@ -156,7 +164,17 @@ UNIQUE(provider, subject)
 
 Provider 发生变化时，现有 Session 会被清空。
 
-## 8. `auth_settings`
+## 8. `external_session_tokens`
+
+将外部 OAuth2/OIDC Token 的 SHA-256 哈希映射到平台 Session；数据库不保存外部
+Token 明文。删除平台 Session 时，关联映射会级联删除。
+
+| Field | Type | Constraint | Description |
+| --- | --- | --- | --- |
+| `external_token_hash` | text | composite PK | 外部 Token 哈希 |
+| `session_token_hash` | text | composite PK, unique, FK → `user_sessions.token_hash` | 平台 Session 哈希 |
+
+## 9. `auth_settings`
 
 记录认证模块的运行状态。
 
@@ -169,12 +187,12 @@ Provider 发生变化时，现有 Session 会被清空。
 当前使用：
 
 ```text
-active_provider = nginx-basic | local
+active_provider = nginx-basic | local | <configured-external-provider>
 ```
 
 实际部署配置仍以 `MANAGER_AUTH_PROVIDER` 为入口；应用启动或处理认证请求时同步此值，并在发生变化时清除旧 Session。
 
-## 9. `instances`
+## 10. `instances`
 
 实例主体。一个用户可以拥有多个实例。
 
@@ -184,7 +202,7 @@ active_provider = nginx-basic | local
 | `public_id` | text | unique, required | 对外实例 UUID |
 | `legacy_user_id` | text | unique, optional | 旧脚本和路由兼容键 |
 | `owner_user_id` | integer | FK → `users.id` | 实例所有者 |
-| `product` | text | required | 产品类型，例如 `openclaw`、`evoscientist` |
+| `product` | text | required | 产品类型，例如 `openclaw`、`hermes`、`evoscientist` |
 | `instance_name` | text | required | 用户可见实例名称 |
 | `runtime_identifier` | text | unique, required | 运行环境中的唯一标识 |
 | `port` | integer | optional | 旧版独立 HTTPS 端口 |
@@ -206,6 +224,7 @@ active_provider = nginx-basic | local
 
 | Value | Meaning |
 | --- | --- |
+| `provisioning` | 平台正在创建或迁移实例 |
 | `active` | 平台标记为启用 |
 | `stopped` | 平台标记为停止 |
 | `deleted` | 已进入回收状态 |
@@ -230,7 +249,7 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 这些约束允许一个用户拥有多个实例，同时防止运行时、目录和活动端口冲突。
 
-## 10. `instance_members`
+## 11. `instance_members`
 
 保存实例所有者之外的共享授权。
 
@@ -248,7 +267,7 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 `instances.owner_user_id`；触发器禁止将 owner 重复写入成员表，也禁止在
 所有权转移前保留新 owner 的成员记录。
 
-## 11. `instance_credentials`
+## 12. `instance_credentials`
 
 保存实例自身的认证信息摘要，与平台登录凭据分离。
 
@@ -264,7 +283,7 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 `local_credentials` 用于平台 Local 登录；`instance_credentials` 用于具体实例，两者不能混用。
 
-## 12. `instance_endpoints`
+## 13. `instance_endpoints`
 
 保存实例访问端点，使实例运行与外部入口解耦。
 
@@ -285,7 +304,7 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 独立端口目前仍用于兼容现有实例；未来子域名或统一 HTTPS 入口可增加新的 `endpoint_type`，不需要更换实例主键。
 
-## 13. `ports`
+## 14. `ports`
 
 记录独立端口的分配状态。
 
@@ -299,7 +318,7 @@ UNIQUE(port) WHERE status IN ('active', 'stopped', 'failed')
 
 `ports.txt` 仍是迁移期兼容文件。数据库记录、Nginx 实际监听和运行配置应通过一致性检查共同验证。
 
-## 14. `operation_records`
+## 15. `operation_records`
 
 保存平台操作摘要。
 
@@ -326,7 +345,7 @@ success | failed | skipped | running
 
 新增业务逻辑应优先写入 `actor_user_id` 和 `instance_id`；`actor` 与 `user_id` 仅用于历史兼容。
 
-## 15. `execution_jobs`
+## 16. `execution_jobs`
 
 保存需要 Executor 执行的持久化幂等任务。
 
@@ -358,7 +377,29 @@ queued | running | succeeded | failed | partial_failure | interrupted | cancelle
 
 重复 `request_id` 只能返回语义完全相同的原任务；不得用于另一动作或实例。
 
-## 16. 删除与恢复规则
+## 17. `activity_snapshots`
+
+保存各产品 Activity Adapter 的只读采集结果。`metrics_json` 只包含已批准的汇总指标，
+采集失败写入脱敏后的 `error_summary`。
+
+| Field | Type | Constraint | Description |
+| --- | --- | --- | --- |
+| `id` | integer | primary key | 快照主键 |
+| `instance_id` | integer | FK → `instances.id` | 目标实例 |
+| `status` | text | `success` / `failed` | 采集结果 |
+| `source_version` / `source_schema` | text | optional | 产品数据源版本与 Schema |
+| `source_cursor` | text | optional | 成功快照的幂等游标 |
+| `metrics_json` | text | required | 只读汇总指标 JSON |
+| `error_summary` | text | optional | 脱敏失败摘要 |
+| `collected_at` | text | required | 采集时间 |
+
+## 18. Hermes UIS Auth Bridge
+
+`hermes_auth_clients` 保存每个 Hermes 实例的 Bridge Client 和单向哈希后的 Client
+Secret；`hermes_auth_grants` 保存短期、一次性的 PKCE 授权码状态。两张表都关联服务端
+解析的实例，Grant 同时关联平台用户和 Manager Session。
+
+## 19. 删除与恢复规则
 
 - 删除实例不会删除其 `users`、`instances` 或历史操作记录。
 - 可恢复性由 `instances.restore_state` 决定，不根据页面或 Docker 状态临时猜测。
@@ -366,7 +407,7 @@ queued | running | succeeded | failed | partial_failure | interrupted | cancelle
 - 已删除实例的端点应标记为 `inactive`，端口可以进入 `released`。
 - 删除平台用户前必须先处理其仍有关联的实例。
 
-## 17. 一致性验证
+## 20. 一致性验证
 
 数据库变更或生产迁移后至少执行：
 
@@ -382,4 +423,4 @@ SELECT MAX(version) FROM schema_migrations;
 PRAGMA foreign_key_check;
 ```
 
-预期 Schema 版本为 `4`，`PRAGMA foreign_key_check` 返回空结果。
+预期 Schema 版本为 `8`，`PRAGMA foreign_key_check` 返回空结果。

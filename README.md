@@ -19,7 +19,7 @@ contracts.
 
 - **Per-user isolation:** independent containers, workspaces, configuration, and runtime state.
 - **Separated identity model:** platform users, login identities, and managed instances use independent IDs and relationships.
-- **Selectable manager authentication:** use either Nginx Basic Auth or Local login; multiple identities may map to the same platform user, but only one provider is active at a time.
+- **Configurable manager authentication:** use Nginx Basic Auth, Local login, or a configured OAuth2/OIDC provider; mixed external and Local login is supported, and multiple identities may map to the same platform user.
 - **Lifecycle management:** create, start, stop, restart, upgrade, recycle, and restore instances.
 - **Web administration:** manage users, status, authentication, skills, and common operations.
 - **Stable reverse proxying:** product-aware HTTPS ingress through Nginx; OpenClaw path URLs and legacy per-instance ports coexist.

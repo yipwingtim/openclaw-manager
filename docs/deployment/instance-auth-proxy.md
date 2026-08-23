@@ -53,6 +53,9 @@ unsupported, or conflicting configurations. Token and Basic-Auth transition
 instances are not treated as errors; any inconsistent instance makes the command
 exit nonzero. Stopped instances resolve Nginx configuration from the active,
 `_disabled`, and legacy `.disabled` locations.
+The Nginx Basic Auth result applies to the root instance UI only. A retired
+`/admin/` compatibility location may retain Basic Auth directives after its
+redirect without making the UIS-protected root UI require Basic Auth.
 Review the `requires_openclaw_token`, `nginx_basic_auth`, and `issues` columns
 before changing an instance.
 

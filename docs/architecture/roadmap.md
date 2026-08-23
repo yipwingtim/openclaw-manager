@@ -128,7 +128,7 @@ for completing the multi-product control plane.
 - 配置/端点健康检查以及明确的 Local fallback 或应急登录策略已经完成；在启用多
   Provider 前，仍需补充 Provider 生命周期和身份绑定/解绑管理。
 
-### Instance resource monitoring | 实例资源监控
+### Completed: Instance resource monitoring | 已完成：实例资源监控
 
 - Collect read-only per-user/per-instance data directory size, session-file
   count, collection time, and collection failures from server-resolved paths.
@@ -146,10 +146,14 @@ for completing the multi-product control plane.
 ### OpenClaw Basic Auth migration | OpenClaw Basic Auth 迁移
 
 - Inventory existing instances by `token` versus `trusted-proxy` mode.
+- A read-only CLI inventory now reports product authentication mode, OpenClaw
+  Token requirement, Nginx Basic Auth state, migration readiness, and conflicts.
 - Migrate and verify eligible instances before disabling Nginx Basic Auth;
   preserve rollback and legacy compatibility throughout the transition.
 - 盘点现有实例的 `token`/`trusted-proxy` 模式，完成迁移和验证后再逐步关闭 Nginx
   Basic Auth，并在过渡期保留回滚和旧实例兼容。
+- 只读 CLI 已可展示产品认证模式、OpenClaw Token 要求、Nginx Basic Auth 状态、
+  迁移就绪度和配置冲突；实际迁移仍需逐实例审核后实施。
 
 ### Static multi-node runtime | 静态多节点运行
 

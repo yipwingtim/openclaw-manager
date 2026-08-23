@@ -31,6 +31,28 @@ remain valid until a separate migration is performed. The same trusted-proxy
 configuration can later sit behind a shared domain-and-path route; this change
 does not implement that routing.
 
+Inventory all non-deleted OpenClaw instances before planning that migration.
+This command is read-only and does not change files, metadata, containers, or
+Nginx:
+
+```bash
+python3 scripts/inventory_openclaw_auth.py
+```
+
+Export the same inventory for review:
+
+```bash
+python3 scripts/inventory_openclaw_auth.py --format csv \
+  > /tmp/openclaw-auth-inventory.csv
+```
+
+The inventory reports `ready` for complete trusted-proxy instances,
+`needs-migration` for internally consistent token instances, and `inconsistent`
+for unreadable, unsupported, or conflicting configurations. Token instances are
+not treated as errors; any inconsistent instance makes the command exit nonzero.
+Review the `requires_openclaw_token`, `nginx_basic_auth`, and `issues` columns
+before changing an instance.
+
 OpenClaw's local device-management CLI also requires a Gateway control
 credential. In `trusted-proxy` mode Manager writes the official local
 `gateway.auth.password` field; it never writes `OPENCLAW_GATEWAY_TOKEN`, because

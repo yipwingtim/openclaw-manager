@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}使用成效{% endblock %}
+{% block page_shell_class %}page-shell-wide{% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
@@ -44,7 +45,8 @@
   </form>
 
   <div class="surface">
-    <div class="table-responsive">
+    <div class="table-scroll-top" data-table-scroll-top aria-hidden="true"><div></div></div>
+    <div class="table-responsive" data-table-scroll-body>
       <table class="table table-hover mb-0 align-middle">
         <thead><tr><th>Owner</th><th>UIS user_id</th><th>实例</th><th>产品</th><th>累计指标</th><th>数据源</th><th>采集状态</th><th>采集时间</th><th>操作</th></tr></thead>
         <tbody>

@@ -263,6 +263,9 @@
       .page-shell {
         max-width: 1240px;
       }
+      .page-shell-wide {
+        max-width: none;
+      }
       .page-kicker {
         color: var(--oc-blue);
         font-size: 0.78rem;
@@ -424,6 +427,18 @@
         position: sticky;
         top: 0;
         z-index: 1;
+      }
+      .table-scroll-top {
+        overflow-x: auto;
+        overflow-y: hidden;
+        height: 1rem;
+        border-bottom: 1px solid var(--oc-line);
+      }
+      .table-scroll-top[hidden] {
+        display: none;
+      }
+      .table-scroll-top > div {
+        height: 1px;
       }
       .form-control,
       .form-select {
@@ -641,7 +656,7 @@
         </div>
       </aside>
       <div class="content-shell">
-        <main class="container page-shell py-4 py-lg-5">
+        <main class="container page-shell {% block page_shell_class %}{% endblock %} py-4 py-lg-5">
           {% block content %}{% endblock %}
         </main>
       </div>
@@ -680,6 +695,22 @@
           localStorage.setItem('ocSidebarCollapsed', isCollapsed);
         });
       })();
+      document.querySelectorAll('[data-table-scroll-top]').forEach(function(top) {
+        var body = top.nextElementSibling;
+        var spacer = top.firstElementChild;
+        if (!body || !body.matches('[data-table-scroll-body]') || !spacer) return;
+
+        function resize() {
+          spacer.style.width = body.scrollWidth + 'px';
+          top.hidden = body.scrollWidth <= body.clientWidth;
+          top.scrollLeft = body.scrollLeft;
+        }
+        top.addEventListener('scroll', function() { body.scrollLeft = top.scrollLeft; });
+        body.addEventListener('scroll', function() { top.scrollLeft = body.scrollLeft; });
+        if ('ResizeObserver' in window) new ResizeObserver(resize).observe(body);
+        window.addEventListener('resize', resize);
+        resize();
+      });
     </script>
     {% block scripts %}{% endblock %}
   </body>

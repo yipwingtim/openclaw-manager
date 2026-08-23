@@ -135,6 +135,8 @@ for completing the multi-product control plane.
 - Add administrator thresholds and warnings first; do not delete data automatically.
 - 由服务端解析实例目录，只读采集用户/实例磁盘大小、会话文件数量、采集时间和失败原因。
 - 首期只增加管理员阈值和预警，不自动删除数据。
+- 首版在管理员实例列表展示采集结果；`MANAGER_RESOURCE_DISK_WARN_BYTES` 和
+  `MANAGER_RESOURCE_SESSION_WARN_COUNT` 分别配置阈值，设为 `0` 可关闭对应预警。
 
 ### OpenClaw Basic Auth migration | OpenClaw Basic Auth 迁移
 

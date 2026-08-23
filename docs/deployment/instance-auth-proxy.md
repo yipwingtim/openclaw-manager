@@ -31,7 +31,7 @@ remain valid until a separate migration is performed. The same trusted-proxy
 configuration can later sit behind a shared domain-and-path route; this change
 does not implement that routing.
 
-Inventory all non-deleted OpenClaw instances before planning that migration.
+Inventory all active and stopped OpenClaw instances before planning that migration.
 This command is read-only and does not change files, metadata, containers, or
 Nginx:
 

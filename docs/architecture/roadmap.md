@@ -149,6 +149,8 @@ for completing the multi-product control plane.
 - A read-only CLI inventory now reports product authentication mode, OpenClaw
   Token requirement, Nginx Basic Auth state, migration readiness, and conflicts,
   including stopped-instance ingress locations.
+- Failed and deleted records are excluded from migration inventory; they remain
+  subject to the separate failed-instance cleanup and retention workflow.
 - Migrate and verify eligible instances before disabling Nginx Basic Auth;
   preserve rollback and legacy compatibility throughout the transition.
 - 盘点现有实例的 `token`/`trusted-proxy` 模式，完成迁移和验证后再逐步关闭 Nginx

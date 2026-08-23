@@ -141,6 +141,24 @@ class OpenClawAuthInventoryTests(unittest.TestCase):
         ], output), 1)
         self.assertIn("config_unreadable", output.getvalue())
 
+    def test_excludes_failed_instances_from_migration_inventory(self):
+        self.add_instance(
+            "active", {"auth": {"mode": "token", "token": "secret"}},
+            nginx='server { listen 30106; location / { auth_basic "OpenClaw Login"; } }',
+        )
+        self.add_instance(
+            "failed", {"auth": {"mode": "token", "token": "secret"}},
+            status="failed",
+            nginx='server { listen 30107; location / { auth_basic "OpenClaw Login"; } }',
+        )
+        output = io.StringIO()
+        self.assertEqual(INVENTORY.main([
+            "--db", str(self.db), "--public-dir", str(self.public),
+            "--nginx-dir", str(self.nginx),
+        ], output), 0)
+        self.assertIn("total=1", output.getvalue())
+        self.assertNotIn("failed  ", output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

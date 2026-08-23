@@ -137,6 +137,11 @@ for completing the multi-product control plane.
 - 首期只增加管理员阈值和预警，不自动删除数据。
 - 首版在管理员实例列表展示采集结果；`MANAGER_RESOURCE_DISK_WARN_BYTES` 和
   `MANAGER_RESOURCE_SESSION_WARN_COUNT` 分别配置阈值，设为 `0` 可关闭对应预警。
+- Resource metrics are collected through the existing Executor activity-snapshot
+  workflow; instance-list requests only read the latest stored snapshot and never
+  traverse instance directories synchronously.
+- 资源指标复用 Executor 的使用成效快照采集链路；实例列表只读取最近快照，不在请求中
+  同步遍历实例目录。
 
 ### OpenClaw Basic Auth migration | OpenClaw Basic Auth 迁移
 

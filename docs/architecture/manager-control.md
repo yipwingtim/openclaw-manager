@@ -73,6 +73,10 @@ allows only one running job and requeues it after
 not leave the queue permanently blocked. Set this timeout above the longest
 single Adapter operation.
 
+Resource usage is collected by `manager-executor-api` as part of the explicit
+activity-snapshot workflow. `GET /internal/v1/admin/instances` reads the latest
+stored snapshot only, so a slow instance filesystem cannot block Control.
+
 ## Deployment
 
 Set three independent tokens in `config/openclaw-manager.env`, then build and

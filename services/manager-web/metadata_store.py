@@ -1400,32 +1400,6 @@ def list_instances(status=None, db_file=None, conn=None, *, limit=None, offset=0
         return [instance_dict(row) for row in rows]
 
 
-def collect_instance_resource_usage(instance):
-    """Collect read-only usage from the server-resolved instance directory."""
-    root = Path(instance.get("data_path") or "")
-    result = {"disk_bytes": 0, "session_file_count": 0, "collected_at": utc_now(), "error": None}
-    if not root.is_dir():
-        result["error"] = "data path is not readable"
-        return result
-    try:
-        for directory, _, filenames in os.walk(root, followlinks=False):
-            for filename in filenames:
-                path = Path(directory) / filename
-                if path.is_symlink():
-                    continue
-                try:
-                    result["disk_bytes"] += path.stat().st_size
-                except OSError:
-                    result["error"] = "one or more files could not be read"
-                    continue
-                parts = path.relative_to(root).parts
-                if "sessions" in {part.lower() for part in parts[:-1]} or "session" in filename.lower():
-                    result["session_file_count"] += 1
-    except OSError:
-        result["error"] = "data path is not readable"
-    return result
-
-
 def set_instance_basic_auth(instance_public_id, enabled, *, db_file=None, conn=None):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)

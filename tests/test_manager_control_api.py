@@ -594,6 +594,49 @@ class ManagerControlApiTests(unittest.TestCase):
             instance["public_id"],
         )
 
+    def test_admin_instance_list_never_scans_instance_data_paths(self):
+        self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"],
+            product="openclaw",
+            instance_name="Primary",
+            runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        with patch.object(
+            self.control.request,
+            "headers",
+            {"Authorization": "Bearer admin-token"},
+        ), patch.object(
+            self.control.metadata_store,
+            "collect_instance_resource_usage",
+            side_effect=TimeoutError("slow filesystem"),
+            create=True,
+        ):
+            response, status = response_parts(self.control.admin_instances())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["instances"][0]["resource_usage"]["status"], "uncollected")
+
+    def test_admin_instance_list_reads_resource_usage_from_latest_snapshot(self):
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="openclaw",
+            instance_name="Primary", runtime_identifier="openclaw_alice",
+            db_file=self.db_file,
+        )
+        self.control.metadata_store.record_activity_snapshot(
+            instance["public_id"], status="success", source_version="v1",
+            source_schema="schema", source_cursor="a" * 64,
+            metrics={"disk_bytes": 12, "session_files": 3}, db_file=self.db_file,
+        )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ):
+            response, status = response_parts(self.control.admin_instances())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json()["instances"][0]["resource_usage"]["disk_bytes"], 12)
+        self.assertEqual(response.get_json()["instances"][0]["resource_usage"]["session_file_count"], 3)
+
     def test_admin_lists_platform_users_without_sensitive_fields(self):
         self.control.metadata_store.upsert_identity(
             self.user["id"], "local", "alice", db_file=self.db_file

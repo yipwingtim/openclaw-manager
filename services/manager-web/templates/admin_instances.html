@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}实例管理 - 容器实例管理与运维平台{% endblock %}
+{% block page_shell_class %}page-shell-wide{% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-4">
     <div>
@@ -78,7 +79,8 @@
 
   <div class="surface" data-instance-table>
     {% if instances %}
-      <div class="table-responsive">
+      <div class="table-scroll-top" data-table-scroll-top aria-hidden="true"><div></div></div>
+      <div class="table-responsive" data-table-scroll-body>
         <table class="table table-hover mb-0 align-middle">
           <thead><tr>
             <th style="width: 52px;"><input class="form-check-input" type="checkbox" id="select-current-page" aria-label="全选当前页" {% if not instances|selectattr("status", "ne", "deleted")|list %}disabled{% endif %}></th>

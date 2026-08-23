@@ -420,6 +420,9 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn("product={{ product_filter }}", template)
         self.assertIn("显示 {{ pagination.start }}-{{ pagination.end }}", template)
         self.assertIn("<th>访问认证</th><th>操作</th>", template)
+        self.assertIn("{% block page_shell_class %}page-shell-wide{% endblock %}", template)
+        self.assertIn("data-table-scroll-top", template)
+        self.assertIn("data-table-scroll-body", template)
 
     def test_admin_instances_shortens_evoscientist_digest_in_version_column(self):
         template = (
@@ -439,6 +442,20 @@ class AdminWebTests(unittest.TestCase):
         self.assertIn('snapshot.source_version.startswith("sha256:")', template)
         self.assertIn('title="{{ snapshot.source_version }}"', template)
         self.assertIn('{{ snapshot.source_version[:21] }}…', template)
+        self.assertIn("{% block page_shell_class %}page-shell-wide{% endblock %}", template)
+        self.assertIn("data-table-scroll-top", template)
+        self.assertIn("data-table-scroll-body", template)
+
+    def test_base_template_synchronizes_wide_table_scrollbars(self):
+        template = (
+            ROOT_DIR / "services" / "manager-web" / "templates" / "base.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(".page-shell-wide", template)
+        self.assertIn("document.querySelectorAll('[data-table-scroll-top]')", template)
+        self.assertIn("body.scrollLeft = top.scrollLeft", template)
+        self.assertIn("top.scrollLeft = body.scrollLeft", template)
+        self.assertIn("top.hidden = body.scrollWidth <= body.clientWidth", template)
 
     def test_admin_instances_fetches_runtime_statuses_in_bounded_batches(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

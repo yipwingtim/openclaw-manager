@@ -85,7 +85,9 @@ Docker container state
 
 ## 4. 数据库选型
 
-第一版建议使用 SQLite。
+当前单机部署和本地开发继续使用 SQLite。新三节点生产拓扑的 Control Plane 使用
+部署在节点 A 独立持久化卷上的 PostgreSQL；两种数据库通过同一控制面数据接口和迁移
+工具保持兼容。
 
 推荐路径：
 
@@ -93,23 +95,39 @@ Docker container state
 /data/docker/openclaw-public/manager.db
 ```
 
-选择 SQLite 的原因：
+SQLite 仍适合作为测试和本地开发数据库，原因：
 
 - 当前部署是单机管理平面，不需要分布式数据库。
 - 不需要新增数据库容器，部署和恢复简单。
 - Python 标准库内置 `sqlite3`，不增加依赖。
 - 适合先把元数据模型建立起来，再决定是否迁移 PostgreSQL。
 
-暂不建议第一版直接使用 PostgreSQL，除非后续出现以下需求：
+三节点生产拓扑已经满足切换到 PostgreSQL 的条件：
 
-- 多台 manager-web 同时写入
 - 多节点运行时管理
-- 复杂权限模型和查询
-- 与统一身份认证、组织架构或其他系统深度集成
+- Control Plane 与多个 Runtime Node 并发交互
+- 需要独立备份和后续数据库高可用
 
-## 5. 第一版表结构
+PostgreSQL 首期接受节点 A 单点故障，但必须将定时备份复制到节点 B、C 或独立存储。
+具体节点注册、实例 `node_id` 和跨节点执行设计见[静态多节点运行设计](static-multi-node-runtime.md)。
 
-### 5.1 instances
+## 5. 当前基线模型
+
+数据库模型已经落地在 `db/schema.sql`，并由 `services/manager-web/metadata_store.py`
+和迁移脚本维护。当前基线包括：
+
+- `users`、`user_identities`、`local_credentials`、`user_sessions` 和认证设置；
+- `instances`、`instance_members`、`instance_credentials`、`instance_endpoints`；
+- `ports`、`operation_records`、`execution_jobs` 和 `activity_snapshots`；
+- Hermes Session bridge 相关表及 `schema_migrations` 版本记录。
+
+控制面通过实例 UUID 解析 `runtime_identifier`，浏览器不能直接提交容器名、宿主机路径
+或 Shell 命令。`instances.port` 当前仍是单机兼容字段；静态多节点生产需要增加
+`runtime_nodes`、`instances.node_id`，并将端口唯一性改为 `(node_id, port)`。
+
+以下字段说明保留作为逻辑数据字典；旧的单机字段不是新生产 schema 的完整定义。
+
+### 5.1 instances（逻辑字段）
 
 保存实例主数据。
 
@@ -117,7 +135,8 @@ Docker container state
 id                  integer primary key
 user_id             text unique not null
 product             text not null default 'openclaw'
-port                integer unique
+node_id             runtime node reference
+port                integer
 status              text not null
 openclaw_version    text
 basic_auth_enabled  integer not null default 1
@@ -156,7 +175,8 @@ created_at              text not null
 updated_at              text not null
 ```
 
-第一版可以保存 OpenClaw token，方便 Web 创建结果和 accounts.csv 导出。
+现有实现按实例保存凭据引用；OpenClaw token 是否持久化仍受产品迁移策略约束，Basic Auth
+密码不作为普通明文元数据保存。
 
 Basic Auth 密码不建议长期明文保存。可选策略：
 
@@ -265,35 +285,33 @@ Web 页面应继续从 Docker API 查询：
 
 数据库中的实例状态只表达平台生命周期，例如 `active`、`deleted`。
 
-## 7. 迁移步骤
+## 7. 当前实现与 PostgreSQL 迁移计划
 
-### Phase 1: 文档和 schema
+### 已完成：SQLite 控制面基线
 
-- 新增本文档。
-- 新增 SQLite schema 文件。
-- 新增简单的数据库初始化脚本。
+- `db/schema.sql`、初始化脚本和版本迁移脚本已存在；
+- Web 和 Control Plane 已使用结构化实例、成员、凭据、端点、操作及执行任务模型；
+- 旧 `users.csv`、`ports.txt`、Nginx 配置和 Docker 状态仍保留为兼容/运行时来源，不再是
+  新控制面功能的唯一业务来源；
+- 历史实例元数据已通过兼容迁移进入 SQLite，运行目录仍按原节点保留。
 
-### Phase 2: 双写
+### 计划：迁移到三节点生产 PostgreSQL
 
-- `create_user.sh` 成功后写 `users.csv`，同时写 SQLite。
-- `delete_user.sh` 成功后更新 `users.csv`，同时更新 SQLite。
-- Web 创建实例后可从 SQLite 读取结构化账号信息。
+1. 在不改变 Control Plane 数据接口的前提下，为 SQLite 和 PostgreSQL 提供同一逻辑模型；
+2. 为 PostgreSQL 增加等价 schema/migration，包含 `runtime_nodes`、`instances.node_id`、
+   任务租约、`(node_id, port)` 和 `(ingress_id, host, normalized_path)` 约束；
+3. 只读导入并校验所有平台用户、外部身份、认证配置、实例元数据、Activity、操作记录、
+   审计索引和历史执行结果；
+4. 少于 10 个仍需使用的实例再迁移完整数据目录和产品配置，并重新分配到 A/B/C；
+5. 历史实例仅保留元数据，标记 `archived`/`historical`，`node_id = NULL`，禁止生产调度；
+6. 双份备份并执行抽样恢复验证后，才切换新生产 Control Plane；旧服务器保留 SQLite、
+   实例目录和旧运行记录作为只读查询与回滚副本。
 
-### Phase 3: Web 优先读数据库
+### 已废弃的早期计划
 
-- `/admin/users` 优先读 SQLite。
-- SQLite 缺失时 fallback 到现有文件和 Docker 状态。
-- 增加 `/admin/audit` 或 `/admin/operations` 页面查看最近操作。
-
-### Phase 4: 端口分配迁移
-
-- 持续校验 SQLite、Nginx compose 和宿主机监听状态的一致性。
-- `ports.txt` 仅作为无可复用释放端口时的兼容指针。
-
-### Phase 5: CSV 退化为导出
-
-- `users.csv` 不再作为 Web 主数据源。
-- 批量创建后的 `accounts.csv` 仍保留，作为培训分发文件。
+本文档旧版本中“下一步新增 `db/schema.sql`、`scripts/init_metadata_db.sh`、
+`metadata_store.py`，再从零开始双写”的表述已完成或不再准确。保留该段历史仅用于说明
+演进过程，不应据此重复创建文件或改造现有调用方。
 
 ## 8. 风险和注意事项
 
@@ -326,12 +344,5 @@ OpenClaw token 可以作为实例访问信息保存，但 Basic Auth 明文密�
 
 ## 9. 推荐下一步
 
-建议下一步先实现：
-
-1. `db/schema.sql`
-2. `scripts/init_metadata_db.sh`
-3. `services/manager-web/metadata_store.py`
-4. Web 创建实例成功后写入 SQLite
-5. `/admin/users` 继续保留现有读取逻辑，先不切换主数据源
-
-这样可以先验证数据库双写，不影响当前生产使用方式。
+建议下一步先完成 PostgreSQL 兼容 schema 与只读导入校验，再安排小规模实例数据迁移。
+在此之前继续使用现有 SQLite 测试路径，不提前切换生产数据库。

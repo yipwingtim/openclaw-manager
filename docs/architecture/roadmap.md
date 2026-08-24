@@ -160,12 +160,27 @@ for completing the multi-product control plane.
 
 ### Static multi-node runtime | 静态多节点运行
 
-- Evolve toward one Control Plane with three fixed Runtime Nodes. Add node
-  identity, instance placement, heartbeat, capacity/GPU labels, and node-scoped execution.
-- Keep instance data and Docker resources on one assigned node initially. Do not
-  promise automatic cross-node migration or high availability in the first version.
+- Evolve toward one Control Plane with three fixed Runtime Nodes. Runtime Nodes
+  actively pull leased, idempotent tasks; add node identity, instance placement,
+  heartbeat, capacity/GPU labels, and node-scoped execution.
+- Require an administrator-selected node for first-version instance creation. Keep
+  instance data and Docker resources on one assigned node; do not promise automatic
+  placement, cross-node migration, capacity scheduling, or high availability.
 - 演进为一个 Control Plane 加三个固定 Runtime Node，增加节点身份、实例归属、心跳、
   容量/GPU 标签和按节点执行。首期实例固定在所属节点，不承诺自动迁移或高可用。
+- The approved deployment design places the Control Plane and PostgreSQL on node A;
+  the current production server remains a test environment during the first rollout.
+- 已确认的部署设计为在节点 A 部署 Control Plane 和 PostgreSQL；首轮上线期间，当前
+  生产服务器保留为测试环境。
+- 分层迁移控制面元数据、Activity、操作/审计记录和历史执行结果；少于 10 个仍需使用
+  的实例迁移完整运行数据，历史实例标记为 `archived`/`historical` 且 `node_id = NULL`。
+- 运行时端口约束为 `(node_id, port)`，入口约束为
+  `(ingress_id, host, normalized_path)`；同一实例可在迁移期间保留多个端点。
+- A 故障时 B/C 上已有容器不自动停止，但新的登录、实例授权、Session bridge 和管理
+  访问不保证可用；未领取任务可等待/重排，已开始且结果未知的破坏性任务须人工确认重试。
+- See [Static Multi-Node Runtime Design](static-multi-node-runtime.md) for the
+  node interface, data boundary, failure model, rollout, and acceptance criteria.
+- 节点接口、数据边界、故障模型、上线顺序和验收标准见[静态多节点运行设计](static-multi-node-runtime.md)。
 
 ## Later: Runtime and Ingress Separation | 后续：运行时与入口解耦
 

@@ -215,7 +215,25 @@
     {% else %}<div class="p-4 muted-small">当前筛选条件下没有实例。</div>{% endif %}
   </div>
 
-  <dialog id="model-provider-dialog" class="modal-dialog">
+  <style>
+    .model-provider-dialog {
+      width: min(32rem, calc(100% - 2rem));
+      max-width: 32rem;
+      max-height: calc(100vh - 2rem);
+      margin: auto;
+      padding: 0;
+      border: 1px solid var(--oc-line-strong);
+      border-radius: 0.5rem;
+      box-shadow: var(--oc-shadow);
+    }
+    .model-provider-dialog::backdrop {
+      background: rgba(13, 23, 33, 0.52);
+    }
+    .model-provider-dialog form {
+      padding: 1.25rem;
+    }
+  </style>
+  <dialog id="model-provider-dialog" class="model-provider-dialog">
     <form method="post" id="model-provider-form">
       <h2 class="h5 mb-2">设置模型</h2>
       <p class="muted-small mb-3" id="model-provider-instance"></p>

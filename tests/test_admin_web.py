@@ -965,6 +965,31 @@ class AdminWebTests(unittest.TestCase):
         self.assertNotIn("legacy_user_id", payload)
         self.assertEqual(response, "instances")
 
+    def test_admin_model_provider_queues_proxy_managed_action(self):
+        actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
+        self.admin.request.form = {
+            "model_provider_id": "gpustack",
+            "model_id": "qwen3.6-27b-fp8",
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "create_execution_job"
+        ) as create_job:
+            response = self.admin.set_model_provider("instance-1")
+
+        payload = create_job.call_args.args[0]
+        self.assertEqual(payload["instance_public_id"], "instance-1")
+        self.assertEqual(payload["action"], "instance.set_model_provider")
+        self.assertEqual(
+            payload["params"],
+            {
+                "model_provider_id": "gpustack",
+                "model_id": "qwen3.6-27b-fp8",
+                "model_base_url": "",
+                "model_alias": "qwen3.6-27b-fp8",
+            },
+        )
+        self.assertEqual(response, "instances")
+
     def test_admin_basic_auth_redirects_control_error(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         self.admin.request.form = {"enabled": "true"}

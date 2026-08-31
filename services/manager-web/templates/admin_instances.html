@@ -160,7 +160,7 @@
                       </form>
                     {% endif %}
                   </div>
-                  {% if "update_version" in instance.capabilities or "skill_install" in instance.capabilities or "device_pairing" in instance.capabilities %}
+                  {% if "update_version" in instance.capabilities or "skill_install" in instance.capabilities or "device_pairing" in instance.capabilities or "batch_set_model_provider" in instance.capabilities %}
                     <details data-instance-actions>
                       <summary class="muted-small">更多操作</summary>
                       <div class="action-panel d-grid gap-3 mt-2">
@@ -186,6 +186,11 @@
                             <button class="btn btn-sm btn-oc" name="action" value="approve_latest" onclick="return confirm('确认审批最新设备请求？');">审批最新</button>
                           </form>
                         {% endif %}
+                        {% if "batch_set_model_provider" in instance.capabilities %}
+                          <button class="btn btn-sm btn-oc-outline" type="button" data-model-provider-open
+                            data-instance-public-id="{{ instance.public_id }}"
+                            data-instance-name="{{ instance.instance_name }}">设置模型</button>
+                        {% endif %}
                       </div>
                     </details>
                   {% endif %}
@@ -210,12 +215,47 @@
     {% else %}<div class="p-4 muted-small">当前筛选条件下没有实例。</div>{% endif %}
   </div>
 
+  <dialog id="model-provider-dialog" class="modal-dialog">
+    <form method="post" id="model-provider-form">
+      <h2 class="h5 mb-2">设置模型</h2>
+      <p class="muted-small mb-3" id="model-provider-instance"></p>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="mb-3">
+        <label class="form-label" for="model-provider-id">模型供应商 ID</label>
+        <input class="form-control" id="model-provider-id" name="model_provider_id" value="gpustack" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}">
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="model-id">模型 ID</label>
+        <input class="form-control" id="model-id" name="model_id" required pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}">
+      </div>
+      <div class="alert soft-warning mb-3">模型地址和 API Key 由 model-proxy 统一管理。</div>
+      <div class="d-flex justify-content-end gap-2">
+        <button class="btn btn-oc-outline" type="button" data-model-provider-close>取消</button>
+        <button class="btn btn-oc" type="submit">提交设置</button>
+      </div>
+    </form>
+  </dialog>
+
   <script>
     (() => {
       const selectAll = document.getElementById("select-current-page");
       const checkboxes = Array.from(document.querySelectorAll(".batch-instance-checkbox:not(:disabled)"));
       if (!selectAll || !checkboxes.length) return;
       selectAll.addEventListener("change", () => checkboxes.forEach((item) => { item.checked = selectAll.checked; }));
+    })();
+    (() => {
+      const dialog = document.getElementById("model-provider-dialog");
+      const form = document.getElementById("model-provider-form");
+      const hint = document.getElementById("model-provider-instance");
+      if (!dialog || !form) return;
+      document.querySelectorAll("[data-model-provider-open]").forEach((button) => {
+        button.addEventListener("click", () => {
+          form.action = "/admin/instances/" + encodeURIComponent(button.dataset.instancePublicId) + "/model-provider";
+          hint.textContent = "实例：" + button.dataset.instanceName;
+          dialog.showModal();
+        });
+      });
+      document.querySelector("[data-model-provider-close]")?.addEventListener("click", () => dialog.close());
     })();
   </script>
 {% endblock %}

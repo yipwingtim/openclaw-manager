@@ -1791,6 +1791,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 "server {\n"
                 f"    listen {port} ssl;\n"
                 "    server_name _;\n"
+                "    client_max_body_size 20M;\n"
                 f"    ssl_certificate {cert};\n"
                 f"    ssl_certificate_key {key};\n\n"
                 + auth_locations

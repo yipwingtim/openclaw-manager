@@ -374,6 +374,7 @@ class HermesAdapterTests(unittest.TestCase):
             nginx = adapter.ingress_conf(self.INSTANCE).read_text(encoding="utf-8")
             self.assertIn("server hermes-alice:9119 resolve;", nginx)
             self.assertIn("listen 39119 ssl;", nginx)
+            self.assertIn("client_max_body_size 20M;", nginx)
             compose_text = compose.read_text(encoding="utf-8")
             self.assertIn('      - "39119:39119"', compose_text)
             self.assertIn("      - hermes-net", compose_text)

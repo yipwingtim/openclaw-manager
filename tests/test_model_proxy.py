@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 APP_FILE = ROOT_DIR / "services" / "model-proxy" / "app.py"
+sys.path.insert(0, str(ROOT_DIR / "services"))
 
 
 def load_app():
@@ -34,6 +35,47 @@ def load_app():
 
 
 class ModelProxyTests(unittest.TestCase):
+    def test_observed_content_closes_observation_after_stream(self):
+        app = load_app()
+
+        class Upstream:
+            def iter_content(self, chunk_size):
+                self.chunk_size = chunk_size
+                yield b"a"
+                yield b"b"
+
+        class Observation:
+            def __init__(self):
+                self.exit_args = None
+
+            def __exit__(self, *args):
+                self.exit_args = args
+
+        observation = Observation()
+        self.assertEqual(list(app.observed_content(Upstream(), observation)), [b"a", b"b"])
+        self.assertEqual(observation.exit_args, (None, None, None))
+
+    def test_observed_content_records_stream_error(self):
+        app = load_app()
+
+        class Upstream:
+            def iter_content(self, chunk_size):
+                yield b"a"
+                raise RuntimeError("stream failed")
+
+        class Observation:
+            def __init__(self):
+                self.exit_args = None
+
+            def __exit__(self, *args):
+                self.exit_args = args
+
+        observation = Observation()
+        with self.assertRaisesRegex(RuntimeError, "stream failed"):
+            list(app.observed_content(Upstream(), observation))
+        self.assertIs(observation.exit_args[0], RuntimeError)
+        self.assertIsInstance(observation.exit_args[1], RuntimeError)
+
     def test_response_headers_drop_body_encoding_and_transport_headers(self):
         app = load_app()
 

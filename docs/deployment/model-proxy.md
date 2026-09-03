@@ -14,6 +14,25 @@
 - `MODEL_PROXY_UPSTREAM_BASE_URL`
 - `MODEL_PROXY_UPSTREAM_API_KEY`
 
+## 可选 OpenTelemetry 观测
+
+`model-proxy` 可选地通过 OpenTelemetry 将模型请求元数据发送到 OTLP
+Collector（例如 Langfuse）。默认关闭；未配置 endpoint 或导出失败都不会阻断
+模型请求。生产凭据只放在 `config/openclaw-manager.env` 或 Secret 中，不提交到 Git。
+
+```env
+OTEL_ENABLED=false
+OTEL_SERVICE_NAME=openclaw-manager
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otel.example/v1/traces
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64-value>
+```
+
+当前观测按实例 token 记录 `legacy_user_id`、模型、请求大小、消息数量、工具结果
+数量、响应状态和耗时；默认不记录 prompt、output、Authorization 或 Cookie。流式响应的
+上游 token usage 暂不解析，待验证不会改变流式转发语义后再增加。
+
 ## 请求链路
 
 ```text

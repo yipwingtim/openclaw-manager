@@ -151,7 +151,9 @@ services:
       - manager-net
 
   model-proxy:
-    build: ./model-proxy
+    build:
+      context: ..
+      dockerfile: services/model-proxy/Dockerfile
     container_name: openclaw-model-proxy
     restart: unless-stopped
     env_file:

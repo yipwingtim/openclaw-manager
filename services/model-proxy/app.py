@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 
 import requests
 from flask import Flask, Response, jsonify, request
+from observability import ModelProxyObservabilityAdapter, ModelRequestObserver, initialize
 
 
 UPSTREAM_BASE_URL = os.environ.get("MODEL_PROXY_UPSTREAM_BASE_URL", "").rstrip("/")
@@ -34,6 +35,7 @@ MODEL_GATED_PATHS = {
 }
 
 app = Flask(__name__)
+OBSERVER = ModelProxyObservabilityAdapter(ModelRequestObserver(initialize("openclaw-manager.model-proxy")))
 
 
 if not UPSTREAM_BASE_URL:
@@ -152,6 +154,20 @@ def response_headers(upstream_response):
     return headers
 
 
+def observed_content(upstream_response, observation):
+    """Stream upstream content and finish the observation at stream end."""
+    error = (None, None, None)
+    try:
+        yield from upstream_response.iter_content(chunk_size=8192)
+    except BaseException as exc:
+        error = (type(exc), exc, exc.__traceback__)
+        raise
+    else:
+        error = (None, None, None)
+    finally:
+        observation.__exit__(*error)
+
+
 @app.get("/health")
 def health():
     return jsonify(
@@ -181,24 +197,54 @@ def proxy(path=""):
     if request.query_string:
         upstream_url = f"{upstream_url}?{request.query_string.decode('utf-8', errors='ignore')}"
 
+    request_body = request.get_data()
+    payload = request.get_json(silent=True) if request.is_json else None
+    messages = payload.get("messages", []) if isinstance(payload, dict) else []
+    tool_results = [
+        message for message in messages
+        if isinstance(message, dict) and message.get("role") == "tool"
+    ]
+    tool_result_bytes = sum(
+        len(str(message.get("content", "")).encode("utf-8"))
+        for message in tool_results
+    )
+    observation = OBSERVER.observe(
+        agent_id=user_id,
+        model=request_model(),
+        path=path.strip("/"),
+        request_bytes=len(request_body),
+        message_count=len(messages),
+        tool_result_count=len(tool_results),
+        tool_result_bytes=tool_result_bytes,
+        session_id=request.headers.get("X-OpenClaw-Session-Id", ""),
+        run_id=request.headers.get("X-OpenClaw-Run-Id", ""),
+        product="model-proxy",
+    )
+    span = observation.__enter__()
     try:
         upstream_response = requests.request(
             method=request.method,
             url=upstream_url,
             headers=upstream_headers(user_id),
-            data=request.get_data(),
+            data=request_body,
             stream=True,
             timeout=REQUEST_TIMEOUT,
         )
+        if span is not None:
+            span.set_attribute("http.response.status_code", upstream_response.status_code)
     except requests.RequestException as exc:
+        observation.__exit__(type(exc), exc, exc.__traceback__)
         app.logger.warning("upstream request failed for user=%s path=/v1/%s: %s", user_id, path, exc)
         return jsonify({"error": "upstream request failed"}), 502
 
     if request.method == "GET" and path.strip("/") == "models":
-        return filter_models_response(user_id, upstream_response)
+        try:
+            return filter_models_response(user_id, upstream_response)
+        finally:
+            observation.__exit__(None, None, None)
 
     return Response(
-        upstream_response.iter_content(chunk_size=8192),
+        observed_content(upstream_response, observation),
         status=upstream_response.status_code,
         headers=response_headers(upstream_response),
     )

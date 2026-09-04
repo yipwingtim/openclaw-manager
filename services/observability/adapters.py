@@ -2,6 +2,7 @@ class ProductObservabilityAdapter:
     """Product-neutral facade; products can override extraction without changing export."""
 
     product = "generic"
+    capabilities = {"model_call": True, "run_correlation": False, "trace_context": False}
 
     def __init__(self, observer):
         self.observer = observer

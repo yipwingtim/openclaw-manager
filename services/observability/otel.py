@@ -1,10 +1,26 @@
 import logging
+import json
 import os
 import time
-from contextlib import nullcontext
+from datetime import datetime, timezone
 
 
 LOG = logging.getLogger(__name__)
+
+
+class _NoopObservation:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *args):
+        return False
+
+    def set_attribute(self, *args):
+        pass
+
+    set_output = set_attribute
+    set_usage = set_attribute
+    mark_completion_started = set_attribute
 
 
 def _enabled():
@@ -73,9 +89,10 @@ class ModelRequestObserver:
 
     def observe(self, *, agent_id, model, path, request_bytes, message_count=0,
                 tool_result_count=0, tool_result_bytes=0, session_id="", run_id="",
-                product=""):
+                product="", input_value=None, model_parameters=None, context=None,
+                instance_id="", environment=""):
         if self.tracer is None:
-            return nullcontext()
+            return _NoopObservation()
         attributes = {
             "openclaw.agent.id": agent_id,
             "openclaw.agent.name": agent_id,
@@ -87,21 +104,37 @@ class ModelRequestObserver:
             "openclaw.request.message_count": message_count,
             "openclaw.request.tool_result_count": tool_result_count,
             "openclaw.request.tool_result_bytes": tool_result_bytes,
+            "langfuse.observation.type": "generation",
+            "langfuse.observation.model.name": model,
+            "langfuse.observation.model.parameters": "{}",
         }
+        if input_value is not None:
+            attributes["langfuse.observation.input"] = _json_value(input_value)
+        if model_parameters is not None:
+            attributes["langfuse.observation.model.parameters"] = _json_value(model_parameters)
         if session_id:
             attributes["openclaw.session.id"] = session_id
+            attributes["langfuse.session.id"] = session_id
         if run_id:
             attributes["openclaw.run.id"] = run_id
+            attributes["langfuse.trace.metadata.run_id"] = run_id
+        if instance_id:
+            attributes["langfuse.trace.metadata.instance_id"] = instance_id
+        if product:
+            attributes["langfuse.trace.metadata.product"] = product
+        if environment:
+            attributes["langfuse.environment"] = environment
         try:
-            span = self.tracer.start_as_current_span("llm.call", attributes=attributes)
+            span = self.tracer.start_as_current_span("llm.call", context=context, attributes=attributes)
         except Exception:
             LOG.debug("OTel span creation failed", exc_info=True)
-            return nullcontext()
+            return _NoopObservation()
         started = time.monotonic()
 
         class _SafeSpan:
             def __enter__(self):
-                return span.__enter__()
+                span.__enter__()
+                return self
 
             def __exit__(self, exc_type, exc, tb):
                 try:
@@ -114,4 +147,48 @@ class ModelRequestObserver:
                     LOG.debug("OTel span finalization failed", exc_info=True)
                 return span.__exit__(exc_type, exc, tb)
 
+            def set_attribute(self, key, value):
+                try:
+                    span.set_attribute(key, value)
+                except Exception:
+                    LOG.debug("OTel span attribute failed", exc_info=True)
+
+            def set_output(self, value):
+                try:
+                    if isinstance(value, (dict, list)):
+                        parsed = value
+                    elif isinstance(value, bytes):
+                        value = value.decode("utf-8", errors="replace")
+                        try:
+                            parsed = json.loads(value)
+                        except (TypeError, ValueError):
+                            parsed = {"raw": str(value)}
+                    else:
+                        try:
+                            parsed = json.loads(value)
+                        except (TypeError, ValueError):
+                            parsed = {"raw": str(value)}
+                    span.set_attribute("langfuse.observation.output", _json_value(parsed))
+                except Exception:
+                    LOG.debug("OTel output attribute failed", exc_info=True)
+
+            def set_usage(self, usage):
+                try:
+                    span.set_attribute("langfuse.observation.usage_details", _json_value(usage))
+                except Exception:
+                    LOG.debug("OTel usage attribute failed", exc_info=True)
+
+            def mark_completion_started(self):
+                self.set_attribute(
+                    "langfuse.observation.completion_start_time",
+                    datetime.now(timezone.utc).isoformat(),
+                )
+
         return _SafeSpan()
+
+
+def _json_value(value):
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return json.dumps({"unserializable": str(value)}, ensure_ascii=False)

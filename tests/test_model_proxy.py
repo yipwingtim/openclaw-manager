@@ -51,6 +51,9 @@ class ModelProxyTests(unittest.TestCase):
             def __exit__(self, *args):
                 self.exit_args = args
 
+            def set_output(self, value):
+                pass
+
         observation = Observation()
         self.assertEqual(list(app.observed_content(Upstream(), observation)), [b"a", b"b"])
         self.assertEqual(observation.exit_args, (None, None, None))
@@ -69,6 +72,9 @@ class ModelProxyTests(unittest.TestCase):
 
             def __exit__(self, *args):
                 self.exit_args = args
+
+            def set_output(self, value):
+                pass
 
         observation = Observation()
         with self.assertRaisesRegex(RuntimeError, "stream failed"):
@@ -108,6 +114,16 @@ class ModelProxyTests(unittest.TestCase):
             app.response_headers(Upstream()),
             [("Content-Type", "text/event-stream")],
         )
+
+    def test_sse_response_is_summarized_for_observability(self):
+        app = load_app()
+        body = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\ndata: [DONE]\n'
+        output, usage = app.summarize_response(body, "text/event-stream")
+        self.assertEqual(output["content"], "hi")
+        self.assertEqual(output["finish_reason"], "stop")
+        self.assertEqual(usage["total_tokens"], 3)
+        self.assertEqual(app.normalize_usage(usage)["input"], 2)
+        self.assertEqual(app.normalize_usage(usage)["output"], 1)
 
 
 if __name__ == "__main__":

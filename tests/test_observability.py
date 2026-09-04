@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -64,6 +65,37 @@ class ObservabilityTests(unittest.TestCase):
             agent_id="alice", model="qwen", path="chat/completions", request_bytes=12
         ) as span:
             self.assertIsNone(span)
+
+    def test_standard_generation_attributes_are_json_strings(self):
+        class Span:
+            def __init__(self):
+                self.attributes = {}
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def set_attribute(self, key, value):
+                self.attributes[key] = value
+
+        class Tracer:
+            def __init__(self):
+                self.span = Span()
+            def start_as_current_span(self, *args, **kwargs):
+                self.span.attributes.update(kwargs["attributes"])
+                return self.span
+
+        tracer = Tracer()
+        with ModelRequestObserver(tracer).observe(
+            agent_id="alice", model="qwen", path="chat/completions", request_bytes=1,
+            input_value={"messages": [{"role": "user", "content": "hi"}]},
+            model_parameters={"temperature": 0.2}, session_id="s", run_id="r",
+            product="hermes", instance_id="i", environment="production",
+        ) as span:
+            span.set_output({"content": "hello"})
+            span.set_usage({"input": 1, "output": 2, "total": 3})
+        self.assertEqual(json.loads(tracer.span.attributes["langfuse.observation.input"])["messages"][0]["content"], "hi")
+        self.assertEqual(json.loads(tracer.span.attributes["langfuse.observation.output"])["content"], "hello")
+        self.assertEqual(json.loads(tracer.span.attributes["langfuse.observation.usage_details"])["total"], 3)
 
 
 if __name__ == "__main__":

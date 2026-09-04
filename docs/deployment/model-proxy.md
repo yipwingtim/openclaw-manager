@@ -29,9 +29,12 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otel.example/v1/traces
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64-value>
 ```
 
-当前观测按实例 token 记录 `legacy_user_id`、模型、请求大小、消息数量、工具结果
-数量、响应状态和耗时；默认不记录 prompt、output、Authorization 或 Cookie。流式响应的
-上游 token usage 暂不解析，待验证不会改变流式转发语义后再增加。
+当前观测按实例 token 记录 `legacy_user_id`、产品类型、模型、请求 messages/tools、请求
+大小、消息数量、工具结果、响应状态、耗时和上游 usage，并将请求和响应映射到 Langfuse
+Generation 的标准 Input/Output 字段。默认不记录 Authorization、Cookie 或 API Key。
+第一阶段只保证“每次模型调用一条可读记录”；不修改 Hermes/OpenClaw 镜像，也不猜测一次
+用户交互的根 Trace。若实例已发送 `X-OpenClaw-Session-Id`、`X-OpenClaw-Run-Id` 或
+`X-OpenClaw-Product`，这些值会写入可筛选属性。
 
 ## 请求链路
 

@@ -157,15 +157,95 @@ def response_headers(upstream_response):
 def observed_content(upstream_response, observation):
     """Stream upstream content and finish the observation at stream end."""
     error = (None, None, None)
+    output_chunks = []
+    usage = None
     try:
-        yield from upstream_response.iter_content(chunk_size=8192)
+        for chunk in upstream_response.iter_content(chunk_size=8192):
+            if chunk:
+                output_chunks.append(chunk)
+            yield chunk
     except BaseException as exc:
         error = (type(exc), exc, exc.__traceback__)
         raise
     else:
         error = (None, None, None)
     finally:
+        if output_chunks:
+            body = b"".join(output_chunks)
+            headers = getattr(upstream_response, "headers", {})
+            parsed, usage = summarize_response(body, headers.get("Content-Type", ""))
+            observation.set_output(parsed)
+        if usage:
+            observation.set_usage(normalize_usage(usage))
         observation.__exit__(*error)
+
+
+def summarize_response(body, content_type):
+    """Return JSON-safe output and usage without exposing raw SSE as metadata."""
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+        return parsed, parsed.get("usage") if isinstance(parsed, dict) else None
+    except (UnicodeDecodeError, ValueError):
+        pass
+    if "text/event-stream" not in content_type.lower():
+        return {"raw": body.decode("utf-8", errors="replace")}, None
+    content = []
+    tool_calls = {}
+    finish_reason = None
+    usage = None
+    for line in body.decode("utf-8", errors="replace").splitlines():
+        if not line.startswith("data:"):
+            continue
+        value = line[5:].strip()
+        if value == "[DONE]":
+            continue
+        try:
+            chunk = json.loads(value)
+        except ValueError:
+            continue
+        usage = chunk.get("usage") or usage
+        for choice in chunk.get("choices", []):
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                content.append(delta["content"])
+            for call in delta.get("tool_calls", []):
+                index = call.get("index", 0)
+                current = tool_calls.setdefault(index, {"index": index})
+                for key in ("id", "type"):
+                    if call.get(key):
+                        current[key] = call[key]
+                function = call.get("function") or {}
+                target = current.setdefault("function", {})
+                for key in ("name", "arguments"):
+                    if function.get(key):
+                        target[key] = target.get(key, "") + function[key] if key == "arguments" else function[key]
+            finish_reason = choice.get("finish_reason") or finish_reason
+    result = {"content": "".join(content), "finish_reason": finish_reason}
+    if tool_calls:
+        result["tool_calls"] = [tool_calls[index] for index in sorted(tool_calls)]
+    return result, usage
+
+
+def normalize_usage(usage):
+    if not isinstance(usage, dict):
+        return usage
+    result = dict(usage)
+    result.setdefault("input", result.get("prompt_tokens", result.get("input_tokens")))
+    result.setdefault("output", result.get("completion_tokens", result.get("output_tokens")))
+    result.setdefault("total", result.get("total_tokens"))
+    return {key: value for key, value in result.items() if value is not None}
+
+
+def request_context():
+    try:
+        from opentelemetry.propagate import extract
+        return extract(dict(request.headers))
+    except Exception:
+        return None
+
+
+def request_product():
+    return request.headers.get("X-OpenClaw-Product", "model-proxy").strip() or "model-proxy"
 
 
 @app.get("/health")
@@ -208,6 +288,16 @@ def proxy(path=""):
         len(str(message.get("content", "")).encode("utf-8"))
         for message in tool_results
     )
+    input_value = {
+        "messages": messages,
+        "tools": payload.get("tools", []) if isinstance(payload, dict) else [],
+        "model": request_model(),
+    }
+    model_parameters = {
+        key: payload[key]
+        for key in ("temperature", "top_p", "max_tokens", "stream")
+        if isinstance(payload, dict) and key in payload
+    }
     observation = OBSERVER.observe(
         agent_id=user_id,
         model=request_model(),
@@ -218,7 +308,13 @@ def proxy(path=""):
         tool_result_bytes=tool_result_bytes,
         session_id=request.headers.get("X-OpenClaw-Session-Id", ""),
         run_id=request.headers.get("X-OpenClaw-Run-Id", ""),
-        product="model-proxy",
+        product=request_product(),
+        input_value=input_value,
+        model_parameters=model_parameters,
+        context=request_context(),
+        instance_id=user_id,
+        environment=os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split("deployment.environment=", 1)[-1].split(",", 1)[0]
+        if "deployment.environment=" in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "") else "",
     )
     span = observation.__enter__()
     try:

@@ -35,6 +35,48 @@ BATCH_VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a
 DISPLAY_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
+def csv_template(filename, headers, row):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerow(row)
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/admin/templates/platform-users-uis.csv")
+def platform_users_uis_template():
+    return csv_template("platform-users-uis-template.csv", ["user_id", "name", "email", "status"], ["example_uis_001", "示例用户", "example@example.com", "disabled"])
+
+
+@app.get("/admin/templates/platform-users-local.csv")
+def platform_users_local_template():
+    return csv_template("platform-users-local-template.csv", ["username", "name", "email", "password"], ["example_local_001", "示例用户", "example@example.com", "REPLACE_WITH_UNIQUE_PASSWORD"])
+
+
+@app.get("/admin/templates/create-instances.csv")
+def create_instances_template():
+    headers = ["owner_identity_type", "owner_identity", "legacy_user_id", "instance_name", "product", "version", "confirm_latest", "basic_auth_password", "basic_auth_enabled"]
+    return csv_template("create-instances-template.csv", headers, ["campus-uis", "example_uis_001", "Hermes_example_001", "示例Hermes实例", "hermes", "", "false", "", ""])
+
+
+@app.get("/admin/templates/model-provider.csv")
+def model_provider_template():
+    headers = ["user_id", "model_provider_id", "model_id", "model_base_url", "model_api_key", "model_alias"]
+    return csv_template("model-provider-template.csv", headers, ["Hermes_example_001", "gpustack", "example-model", "", "", "示例模型"])
+
+
+@app.get("/admin/templates/device-approvals.csv")
+def device_approvals_template():
+    return csv_template("device-approvals-template.csv", ["instance_public_id"], ["00000000-0000-4000-8000-000000000001"])
+
+
 def default_instance_version(product):
     if product == "openclaw":
         return os.environ.get("OPENCLAW_VERSION", "").strip()

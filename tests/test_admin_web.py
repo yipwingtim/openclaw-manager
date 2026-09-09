@@ -1,3 +1,4 @@
+import csv
 import importlib.util
 import io
 import sys
@@ -97,6 +98,55 @@ def load_admin_app():
 
 
 class AdminWebTests(unittest.TestCase):
+    def test_csv_download_templates_have_bom_headers_and_one_example(self):
+        templates = (
+            ("platform_users_uis_template", "platform-users-uis", "user_id,name,email,status"),
+            ("platform_users_local_template", "platform-users-local", "username,name,email,password"),
+            ("create_instances_template", "create-instances", "owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled"),
+            ("model_provider_template", "model-provider", "user_id,model_provider_id,model_id,model_base_url,model_api_key,model_alias"),
+            ("device_approvals_template", "device-approvals", "instance_public_id"),
+        )
+        for endpoint, filename, header in templates:
+            with self.subTest(endpoint=endpoint), patch.object(
+                self.admin.web_common, "actor", return_value={"role": "admin"}
+            ):
+                body, options = getattr(self.admin, endpoint)()
+                self.assertTrue(body.encode("utf-8").startswith(b"\xef\xbb\xbf"))
+                rows = list(csv.reader(io.StringIO(body.lstrip("\ufeff"))))
+                self.assertEqual(rows[0], header.split(","))
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(len(rows[0]), len(rows[1]))
+                self.assertIn(filename + "-template.csv", options["headers"]["Content-Disposition"])
+                self.assertIn("text/csv", options["mimetype"])
+                if filename == "platform-users-uis":
+                    self.assertEqual(rows[1][-1], "disabled")
+                if filename == "model-provider":
+                    self.assertEqual(rows[1][3:5], ["", ""])
+
+    def test_all_csv_templates_require_admin(self):
+        for endpoint in ("platform_users_uis_template", "platform_users_local_template",
+                         "create_instances_template", "model_provider_template", "device_approvals_template"):
+            for actor in (None, {"role": "user"}):
+                with self.subTest(endpoint=endpoint, actor=actor), patch.object(
+                    self.admin.web_common, "actor", return_value=actor
+                ):
+                    response, status = getattr(self.admin, endpoint)()
+                    self.assertEqual(status, 403)
+                    self.assertEqual(response[1]["message"], "Forbidden")
+
+    def test_active_import_pages_link_templates_and_warn_about_examples(self):
+        pages = {
+            "admin_platform_users.html": ("platform-users-uis", "platform-users-local"),
+            "admin_create_instance.html": ("create-instances",),
+            "admin_model_provider_batch.html": ("model-provider",),
+            "admin_device_approvals.html": ("device-approvals",),
+        }
+        for page, names in pages.items():
+            source = (ROOT_DIR / "services/manager-web/templates" / page).read_text()
+            for name in names:
+                self.assertIn(f'href="/admin/templates/{name}.csv"', source)
+            self.assertIn("请替换或删除后再导入", source)
+
     def test_create_template_marks_hermes_basic_auth_as_not_required(self):
         template = (
             ROOT_DIR / "services" / "manager-web" / "templates"

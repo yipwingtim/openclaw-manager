@@ -37,6 +37,8 @@
         model_api_key 仅为兼容旧 CSV 保留，平台不会读取、保存或发送该字段；实例使用独立的 Model Proxy token。
       </div>
       <input class="form-control mb-3" name="input_csv" type="file" accept=".csv,text/csv" required>
+      <a class="btn btn-oc-outline mb-3" href="/admin/templates/model-provider.csv">下载 CSV 模板</a>
+      <div class="form-text mb-3">模板含一行虚拟示例，请替换或删除后再导入。</div>
       <button class="btn btn-oc" type="submit">提交批量任务</button>
     </form>
   {% endif %}

@@ -106,6 +106,8 @@
       <div class="section-title mb-2">批量创建实例</div>
       <div class="muted-small mb-3">CSV 表头：owner_identity_type,owner_identity,legacy_user_id,instance_name,product,version,confirm_latest,basic_auth_password,basic_auth_enabled。Hermes 的两个 Basic Auth 字段留空；Owner 类型支持 local（平台用户名）和 campus-uis（UIS user_id/work_id）；身份必须已导入或绑定。product 支持 openclaw、hermes、evoscientist；version 留空时使用默认版本。最多 100 行。</div>
       <input class="form-control mb-3" name="input_csv" type="file" accept=".csv,text/csv" required>
+      <a class="btn btn-oc-outline mb-3" href="/admin/templates/create-instances.csv">下载 CSV 模板</a>
+      <div class="form-text mb-3">模板含一行虚拟示例，请替换或删除后再导入。</div>
       <button class="btn btn-oc-outline" type="submit">提交批量创建</button>
     </form>
   {% endif %}

@@ -19,6 +19,8 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label class="form-label" for="input_csv">输入 CSV</label>
       <input class="form-control mb-3" type="file" id="input_csv" name="input_csv" accept=".csv,text/csv" required>
+      <a class="btn btn-oc-outline mb-3" href="/admin/templates/device-approvals.csv">下载 CSV 模板</a>
+      <div class="form-text mb-3">模板含一行虚拟示例，请替换或删除后再导入。</div>
 
       <div class="d-flex gap-2 flex-wrap">
         <button class="btn btn-oc-outline" type="submit" name="action" value="preview">预览待审批请求</button>

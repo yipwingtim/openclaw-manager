@@ -112,6 +112,7 @@ services:
       - ../config/openclaw-manager.env
     environment:
       MANAGER_WEB_ROLE: admin
+      OPENCLAW_MANAGER_DIR: /opt/openclaw-manager
     volumes:
       - ${OPENCLAW_MANAGER_DIR:-/data/docker/openclaw-manager}/config:/opt/openclaw-manager/config
     command: ["python", "admin_app.py"]

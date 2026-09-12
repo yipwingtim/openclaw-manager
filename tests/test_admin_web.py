@@ -4,6 +4,7 @@ import io
 import sys
 import types
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest.mock import patch
 
@@ -133,6 +134,17 @@ class AdminWebTests(unittest.TestCase):
                     response, status = getattr(self.admin, endpoint)()
                     self.assertEqual(status, 403)
                     self.assertEqual(response[1]["message"], "Forbidden")
+
+    def test_platform_config_round_trips_whitelisted_value(self):
+        with TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "openclaw-manager.env"
+            config.write_text("PUBLIC_HOST=test\nHERMES_UPLOAD_MAX_BODY_SIZE=20M\n", encoding="utf-8")
+            with patch.object(self.admin, "manager_env_file", return_value=config):
+                values, error = self.admin.read_platform_config()
+                self.assertEqual((values["HERMES_UPLOAD_MAX_BODY_SIZE"], error), ("20M", ""))
+                self.admin.write_platform_config({"HERMES_UPLOAD_MAX_BODY_SIZE": "50M"})
+            self.assertIn("HERMES_UPLOAD_MAX_BODY_SIZE=50M\n", config.read_text(encoding="utf-8"))
+            self.assertIn("PUBLIC_HOST=test\n", config.read_text(encoding="utf-8"))
 
     def test_active_import_pages_link_templates_and_warn_about_examples(self):
         pages = {

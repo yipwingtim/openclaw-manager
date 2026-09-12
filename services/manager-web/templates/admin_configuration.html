@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}平台配置{% endblock %}
+{% block content %}
+  <div class="page-kicker">平台管理</div>
+  <h1 class="page-title">平台配置</h1>
+  <div class="page-subtitle mb-3">集中管理常用运行参数；保存后对后续生成的实例入口生效。</div>
+  {% if error %}<div class="alert soft-danger">{{ error }}</div>{% endif %}
+  {% if saved %}<div class="alert alert-success">配置已保存。重新生成 Hermes 入口时会执行 Nginx 配置检查并平滑 reload。</div>{% endif %}
+  <form class="surface p-3 p-lg-4" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+      <div><h2 class="h5 mb-1">Hermes 文件上传大小</h2><div class="text-secondary small">控制 Hermes 实例 Nginx 的 client_max_body_size。</div></div>
+      <span class="badge-status badge-neutral">需要 Reload Nginx</span>
+    </div>
+    <div class="row g-3 align-items-end">
+      <div class="col-md-3"><label class="form-label">原值</label><input class="form-control" value="{{ values.HERMES_UPLOAD_MAX_BODY_SIZE }}" readonly></div>
+      <div class="col-md-4"><label class="form-label" for="hermes_upload_max_body_size">新值</label><input class="form-control" id="hermes_upload_max_body_size" name="hermes_upload_max_body_size" value="{{ values.HERMES_UPLOAD_MAX_BODY_SIZE }}" pattern="[1-9][0-9]*[KkMmGg]?" required></div>
+      <div class="col-md-5"><div class="small text-secondary">影响范围：全部 Hermes 实例 · 仅重新生成入口的实例立即更新</div></div>
+    </div>
+    <button class="btn btn-oc mt-4" type="submit">保存并应用配置</button>
+  </form>
+{% endblock %}

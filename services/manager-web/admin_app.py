@@ -6,6 +6,7 @@ import secrets
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, redirect, render_template, request, url_for
@@ -33,6 +34,47 @@ DEFAULT_INSTANCE_PAGE_SIZE = 20
 VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,255}|sha256:[0-9a-fA-F]{64})$")
 BATCH_VERSION_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-fA-F]{64})$")
 DISPLAY_TIMEZONE = ZoneInfo("Asia/Shanghai")
+HERMES_UPLOAD_MAX_BODY_SIZE_RE = re.compile(r"^[1-9][0-9]*(?:[kKmMgG])?$")
+
+
+def manager_env_file():
+    return Path(os.environ.get("OPENCLAW_MANAGER_DIR", "/opt/openclaw-manager")) / "config" / "openclaw-manager.env"
+
+
+def read_platform_config():
+    config_file = manager_env_file()
+    values = {"HERMES_UPLOAD_MAX_BODY_SIZE": "50M"}
+    if not config_file.is_file():
+        return values, f"Config file not found: {config_file}"
+    for line in config_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() in values:
+            values[key.strip()] = value.strip().strip("\"'")
+    return values, ""
+
+
+def write_platform_config(values):
+    config_file = manager_env_file()
+    original = config_file.read_text(encoding="utf-8") if config_file.is_file() else ""
+    lines = original.splitlines(keepends=True)
+    output, replaced = [], set()
+    for line in lines:
+        key, separator, _ = line.partition("=")
+        name = key.strip()
+        if separator and name in values:
+            output.append(f"{name}={values[name]}\n")
+            replaced.add(name)
+        else:
+            output.append(line)
+    for name, value in values.items():
+        if name not in replaced:
+            if output and not output[-1].endswith("\n"):
+                output.append("\n")
+            output.append(f"{name}={value}\n")
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = config_file.with_suffix(config_file.suffix + ".tmp")
+    temporary.write_text("".join(output), encoding="utf-8")
+    temporary.replace(config_file)
 
 
 def csv_template(filename, headers, row):
@@ -388,6 +430,31 @@ def auth_provider_page():
         probe=request.args.get("probe") == "true"
     )
     return render_template("admin_auth_provider.html", health=health)
+
+
+@app.get("/admin/configuration")
+def configuration_page():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    values, error = read_platform_config()
+    return render_template("admin_configuration.html", values=values, error=error, saved=request.args.get("saved") == "1")
+
+
+@app.post("/admin/configuration")
+def update_configuration():
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    value = request.form.get("hermes_upload_max_body_size", "").strip()
+    if not HERMES_UPLOAD_MAX_BODY_SIZE_RE.fullmatch(value):
+        return redirect(url_for("configuration_page", error="Hermes 上传大小必须是正整数加 K/M/G 单位，例如 50M"))
+    try:
+        write_platform_config({"HERMES_UPLOAD_MAX_BODY_SIZE": value})
+    except OSError as exc:
+        return redirect(url_for("configuration_page", error=f"配置保存失败：{exc}"))
+    os.environ["HERMES_UPLOAD_MAX_BODY_SIZE"] = value
+    return redirect(url_for("configuration_page", saved="1"))
 
 
 @app.post("/admin/default-versions")

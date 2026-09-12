@@ -16,6 +16,10 @@ support the legacy two-container topology.
   exactly one dedicated Docker network.
 - `openclaw-nginx` publishes one external TLS port per instance and joins that
   network persistently through its Compose configuration.
+- Hermes ingress upload size is controlled by `HERMES_UPLOAD_MAX_BODY_SIZE`
+  (default `50M`). The value
+  accepts a positive Nginx size such as `50M`. Changing it regenerates Hermes
+  ingress files and performs a validated graceful Nginx reload.
 - Nginx requires Manager UIS instance authorization before routing. New Hermes
   instances use the custom `campus-uis-bridge` `DashboardAuthProvider` as the
   second layer and establish an official Hermes Session without another password.

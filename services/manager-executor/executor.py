@@ -506,6 +506,15 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                     output=output,
                 )
             return True
+        if action == "refresh_ingress":
+            control.update(request_id, "running", current_step="refreshing Hermes ingress")
+            code, output = adapter.configure_ingress(instance)
+            output = output[-MAX_OUTPUT_LENGTH:]
+            if code == 0:
+                control.update(request_id, "succeeded", output=output)
+            else:
+                control.update(request_id, "failed", error_summary="Hermes ingress refresh failed", output=output)
+            return True
         if action == "update_version":
             params = job["params"]
             control.update(request_id, "running", current_step="updating version")

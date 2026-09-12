@@ -15,6 +15,7 @@ PRODUCT_CAPABILITIES = {
     "hermes": frozenset(
         {
             "access", "status", "logs", "start", "stop", "restart", "create",
+            "ingress_refresh",
             "delete", "restore", "purge_deleted", "update_version", "batch_set_model_provider",
         }
     ),
@@ -54,6 +55,7 @@ EXECUTION_ACTION_CAPABILITIES = {
     "instance.purge_deleted": "purge_deleted",
     "instance.cleanup_failed": "cleanup_failed",
     "instance.wechat_bind": "device_pairing",
+    "instance.refresh_ingress": "ingress_refresh",
 }
 
 

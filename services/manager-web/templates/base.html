@@ -590,6 +590,7 @@
         <div class="sidebar-section">功能菜单</div>
         <div class="sidebar-nav">
           {% if show_admin_instance_nav %}
+            <div class="sidebar-section">资源管理</div>
             <a href="/admin/instances">
               <svg class="oc-nav-icon"><use href="#oc-icon-database"/></svg>
               <span>实例列表</span>
@@ -621,6 +622,11 @@
             <a href="/admin/auth-provider">
               <svg class="oc-nav-icon"><use href="#oc-icon-shield-check"/></svg>
               <span>认证状态</span>
+            </a>
+            <div class="sidebar-section">平台管理</div>
+            <a href="/admin/configuration">
+              <svg class="oc-nav-icon"><use href="#oc-icon-database"/></svg>
+              <span>平台配置</span>
             </a>
           {% endif %}
           {% if show_global_admin_nav %}

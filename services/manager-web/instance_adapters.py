@@ -21,6 +21,16 @@ HERMES_RUNTIME_UID = 10000
 HERMES_RUNTIME_GID = 10000
 HERMES_BRIDGE_CA_RELATIVE_PATH = Path("manager-auth") / "bridge-ca.crt"
 HERMES_BRIDGE_CA_CONTAINER_FILE = "/opt/data/manager-auth/bridge-ca.crt"
+HERMES_UPLOAD_MAX_BODY_SIZE_RE = re.compile(r"^[1-9][0-9]*(?:[kKmMgG])?$")
+
+
+def hermes_upload_max_body_size():
+    value = os.environ.get("HERMES_UPLOAD_MAX_BODY_SIZE", "50M").strip()
+    if not HERMES_UPLOAD_MAX_BODY_SIZE_RE.fullmatch(value):
+        raise ValueError(
+            "HERMES_UPLOAD_MAX_BODY_SIZE must be a positive Nginx size such as 50M"
+        )
+    return value
 
 
 def validate_hermes_bridge_ca(source):
@@ -1791,7 +1801,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 "server {\n"
                 f"    listen {port} ssl;\n"
                 "    server_name _;\n"
-                "    client_max_body_size 20M;\n"
+                f"    client_max_body_size {hermes_upload_max_body_size()};\n"
                 f"    ssl_certificate {cert};\n"
                 f"    ssl_certificate_key {key};\n\n"
                 + auth_locations

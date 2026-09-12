@@ -332,7 +332,7 @@ class HermesAdapterTests(unittest.TestCase):
             inspected = type(
                 "Result", (), {"returncode": 0, "stdout": "hermes-net\n", "stderr": ""}
             )()
-            with patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
+            with patch.dict(os.environ, {"HERMES_UPLOAD_MAX_BODY_SIZE": "50M"}), patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
                 adapter, "run_command", return_value=(0, "applied")
             ), patch.object(
                 adapter,
@@ -361,7 +361,7 @@ class HermesAdapterTests(unittest.TestCase):
             inspected = type(
                 "Result", (), {"returncode": 0, "stdout": "hermes-net\n\n", "stderr": ""}
             )()
-            with patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
+            with patch.dict(os.environ, {"HERMES_UPLOAD_MAX_BODY_SIZE": "50M"}), patch("instance_adapters.subprocess.run", return_value=inspected), patch.object(
                 adapter, "run_command", return_value=(0, "applied")
             ) as run_command, patch.object(
                 adapter, "reload_nginx", return_value=(0, "reloaded")
@@ -374,7 +374,7 @@ class HermesAdapterTests(unittest.TestCase):
             nginx = adapter.ingress_conf(self.INSTANCE).read_text(encoding="utf-8")
             self.assertIn("server hermes-alice:9119 resolve;", nginx)
             self.assertIn("listen 39119 ssl;", nginx)
-            self.assertIn("client_max_body_size 20M;", nginx)
+            self.assertIn("client_max_body_size 50M;", nginx)
             compose_text = compose.read_text(encoding="utf-8")
             self.assertIn('      - "39119:39119"', compose_text)
             self.assertIn("      - hermes-net", compose_text)
@@ -390,6 +390,19 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertEqual(
                 reconnect[-2:], ["openclaw-nginx", "openclaw-model-proxy"]
             )
+
+    def test_hermes_upload_size_rejects_invalid_values(self):
+        from instance_adapters import hermes_upload_max_body_size
+
+        with patch.dict(os.environ, {"HERMES_UPLOAD_MAX_BODY_SIZE": "0M"}):
+            with self.assertRaisesRegex(ValueError, "HERMES_UPLOAD_MAX_BODY_SIZE"):
+                hermes_upload_max_body_size()
+
+    def test_hermes_upload_size_defaults_to_50m(self):
+        from instance_adapters import hermes_upload_max_body_size
+
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(hermes_upload_max_body_size(), "50M")
 
     def test_stop_disables_ingress_and_start_restores_it(self):
         with TemporaryDirectory() as temp_dir:

@@ -98,6 +98,7 @@ JOB_ACTION_PARAMS = {
     "instance.purge_deleted": set(),
     "instance.cleanup_failed": set(),
     "instance.wechat_bind": set(),
+    "instance.refresh_ingress": set(),
 }
 
 app = Flask(__name__)
@@ -2345,6 +2346,8 @@ def create_execution_job():
         return jsonify(
             {"job": execution_job_payload(job, actor_user_public_id, instance_public_id)}
         )
+    if action == "instance.refresh_ingress" and instance.get("product") != "hermes":
+        return jsonify({"error": "ingress refresh is only supported for Hermes instances"}), 400
     if action == "instance.delete" and instance["status"] == "deleted":
         return jsonify({"error": "instance is already deleted"}), 409
     if action == "instance.cleanup_failed" and (

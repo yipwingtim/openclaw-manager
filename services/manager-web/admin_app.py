@@ -454,7 +454,22 @@ def update_configuration():
     except OSError as exc:
         return redirect(url_for("configuration_page", error=f"配置保存失败：{exc}"))
     os.environ["HERMES_UPLOAD_MAX_BODY_SIZE"] = value
-    return redirect(url_for("configuration_page", saved="1"))
+    queued = 0
+    try:
+        for instance in control_client.list_admin_instances():
+            if instance.get("product") != "hermes" or instance.get("status") == "deleted":
+                continue
+            control_client.create_execution_job({
+                "request_id": str(uuid.uuid4()),
+                "actor_user_public_id": current["public_id"],
+                "instance_public_id": instance["public_id"],
+                "action": "instance.refresh_ingress",
+                "params": {},
+            })
+            queued += 1
+    except control_client.ControlError as exc:
+        return redirect(url_for("configuration_page", error=f"配置已保存，但应用到 Hermes 实例失败：{exc}"))
+    return redirect(url_for("configuration_page", saved="1", queued=str(queued)))
 
 
 @app.post("/admin/default-versions")

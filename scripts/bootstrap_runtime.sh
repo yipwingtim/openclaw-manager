@@ -132,7 +132,7 @@ from pathlib import Path
 db_file = Path(sys.argv[1])
 schema_file = Path(sys.argv[2])
 schema = schema_file.read_text(encoding="utf-8")
-with sqlite3.connect(db_file) as conn:
+with sqlite3.connect(str(db_file)) as conn:
     conn.executescript(schema)
 print(f"[INFO] Initialized metadata database: {db_file}")
 PY

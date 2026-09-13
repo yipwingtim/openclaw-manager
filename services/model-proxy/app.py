@@ -11,7 +11,8 @@ from observability import ModelProxyObservabilityAdapter, ModelRequestObserver, 
 
 UPSTREAM_BASE_URL = os.environ.get("MODEL_PROXY_UPSTREAM_BASE_URL", "").rstrip("/")
 UPSTREAM_API_KEY = os.environ.get("MODEL_PROXY_UPSTREAM_API_KEY", "")
-TOKEN_DIR = Path(os.environ.get("MODEL_PROXY_TOKEN_DIR", "/data/docker/openclaw-public/model-proxy-tokens"))
+PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
+TOKEN_DIR = Path(os.environ.get("MODEL_PROXY_TOKEN_DIR") or PUBLIC_DIR / "model-proxy-tokens")
 REQUEST_TIMEOUT = int(os.environ.get("MODEL_PROXY_REQUEST_TIMEOUT", "300"))
 HOP_BY_HOP_HEADERS = {
     "connection",

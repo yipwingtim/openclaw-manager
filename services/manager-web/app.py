@@ -31,6 +31,7 @@ from instance_adapters import (
 APP_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = Path(os.environ.get("OPENCLAW_MANAGER_DIR", "/opt/openclaw-manager"))
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
+USERS_CSV = Path(os.environ.get("USERS_CSV", str(PUBLIC_DIR / "users.csv")))
 NGINX_USERS_CONF_DIR = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker/nginx/conf"))
 NGINX_COMPOSE_DIR = Path(os.environ.get("NGINX_COMPOSE_DIR", "/data/docker/nginx/compose"))
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "")
@@ -327,7 +328,7 @@ def normalize_basic_auth_enabled(value):
 
 def read_active_users_csv():
     active_users = set()
-    users_csv = PUBLIC_DIR / "users.csv"
+    users_csv = USERS_CSV
     if not users_csv.is_file():
         return active_users
 

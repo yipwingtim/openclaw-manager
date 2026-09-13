@@ -17,12 +17,8 @@ from hermes_auth_bridge import BridgeStore, SigningKeys
 from product_capabilities import execution_action_capability, product_supports
 
 
-DB_FILE = Path(
-    os.environ.get(
-        "METADATA_DB_FILE",
-        "/data/docker/openclaw-public/manager.db",
-    )
-)
+PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
+DB_FILE = Path(os.environ.get("METADATA_DB_FILE") or PUBLIC_DIR / "manager.db")
 MIXED_AUTH_ENABLED = (
     os.environ.get("MANAGER_LOCAL_AUTH_ENABLED", "false").lower()
     in {"1", "true", "yes", "on"}
@@ -54,9 +50,7 @@ DEFAULT_VERSION_KEYS = {
 DEFAULT_EVOSCIENTIST_VERSION = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
 RESOURCE_DISK_WARN_BYTES = max(0, int(os.environ.get("MANAGER_RESOURCE_DISK_WARN_BYTES", "0")))
 RESOURCE_SESSION_WARN_COUNT = max(0, int(os.environ.get("MANAGER_RESOURCE_SESSION_WARN_COUNT", "0")))
-PROVISIONING_SECRET_DIR = Path(
-    os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public")
-) / ".manager-secrets"
+PROVISIONING_SECRET_DIR = PUBLIC_DIR / ".manager-secrets"
 JOB_STATUSES = {
     "queued",
     "running",

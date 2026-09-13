@@ -11,7 +11,16 @@ if [ -z "$USER_ID" ] || [ -z "$PUBLIC_HOST" ]; then
   exit 1
 fi
 
-BASE_DIR="/data/docker/openclaw-public"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+MANAGER_CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+
+if [ -f "$MANAGER_CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  source "$MANAGER_CONFIG_FILE"
+fi
+
+BASE_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 USER_DIR="$BASE_DIR/users/$USER_ID"
 CONFIG_FILE="$USER_DIR/config/openclaw.json"
 COMPOSE_FILE="$USER_DIR/docker-compose.yml"

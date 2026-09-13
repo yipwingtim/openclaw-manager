@@ -76,11 +76,22 @@ sudo usermod -aG docker "$USER"
 
 `scripts/bootstrap_runtime.sh` 只创建缺失的运行骨架，不覆盖已有运行文件。
 
-It creates or initializes:
+Runtime paths are read from `config/openclaw-manager.env`. `PORT_FILE`,
+`USERS_CSV`, `METADATA_DB_FILE`, `OPENCLAW_TENANT_NETWORK_LOCK_FILE`, and
+`MODEL_PROXY_TOKEN_DIR` are derived from `OPENCLAW_PUBLIC_DIR` when their
+optional overrides are omitted. When changing the runtime root, omit those
+overrides or set each path explicitly; do not mix old and new runtime roots.
 
-- `/data/docker/openclaw-public/users`
-- `/data/docker/openclaw-public/deleted`
-- `/data/docker/openclaw-public/logs`
+运行时路径从 `config/openclaw-manager.env` 读取。`PORT_FILE`、`USERS_CSV`、
+`METADATA_DB_FILE`、`OPENCLAW_TENANT_NETWORK_LOCK_FILE` 和
+`MODEL_PROXY_TOKEN_DIR` 在未设置可选覆盖项时由 `OPENCLAW_PUBLIC_DIR` 派生。
+修改运行根目录时，应省略这些覆盖项或逐项显式配置，不能混用新旧运行根目录。
+
+It creates or initializes below the configured runtime paths:
+
+- `$OPENCLAW_PUBLIC_DIR/users`
+- `$OPENCLAW_PUBLIC_DIR/deleted`
+- `$OPENCLAW_PUBLIC_DIR/logs`
 - `/data/docker/nginx/conf`
 - `/data/docker/nginx/certs`
 - `/data/docker/nginx/logs`
@@ -94,11 +105,11 @@ It creates or initializes:
 - `manager-web.conf`, if missing
 - `config/openclaw-manager.env`, if missing
 
-脚本会创建或初始化：
+脚本会在配置的运行路径下创建或初始化：
 
-- `/data/docker/openclaw-public/users`
-- `/data/docker/openclaw-public/deleted`
-- `/data/docker/openclaw-public/logs`
+- `$OPENCLAW_PUBLIC_DIR/users`
+- `$OPENCLAW_PUBLIC_DIR/deleted`
+- `$OPENCLAW_PUBLIC_DIR/logs`
 - `/data/docker/nginx/conf`
 - `/data/docker/nginx/certs`
 - `/data/docker/nginx/logs`

@@ -91,7 +91,7 @@ set_model_provider() {
   local primary_model="$model_id"
   local provider_json
   local proxy_base_url="${MODEL_PROXY_PUBLIC_BASE_URL:-${model_base_url:-http://openclaw-model-proxy:8081/v1}}"
-  local token_dir="${MODEL_PROXY_TOKEN_DIR:-/data/docker/openclaw-public/model-proxy-tokens}"
+  local token_dir="${MODEL_PROXY_TOKEN_DIR:-${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}/model-proxy-tokens}"
   local token_file="$token_dir/${user_id}.token"
   local models_file="$token_dir/${user_id}.models"
   local proxy_token

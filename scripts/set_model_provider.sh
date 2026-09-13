@@ -27,7 +27,7 @@ MODEL_ID="${3:-${MODEL_ID:?缺少 MODEL_ID}}"
 MODEL_BASE_URL="${4:-${MODEL_BASE_URL:-}}"
 MODEL_ALIAS="${5:-${MODEL_ALIAS:-$MODEL_ID}}"
 MODEL_PROXY_PUBLIC_BASE_URL="${MODEL_PROXY_PUBLIC_BASE_URL:-${MODEL_BASE_URL:-http://openclaw-model-proxy:8081/v1}}"
-MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-/data/docker/openclaw-public/model-proxy-tokens}"
+MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}/model-proxy-tokens}"
 
 MODEL_SHORT_ID="${MODEL_ID#${MODEL_PROVIDER_ID}/}"
 PRIMARY_MODEL="$MODEL_ID"

@@ -1,6 +1,16 @@
 #!/bin/bash
 
-BASE_DIR="/data/docker/openclaw-public"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANAGER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
+
+if [ -f "$CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+BASE_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
+NGINX_USERS_CONF_DIR="${NGINX_USERS_CONF_DIR:-/data/docker/nginx/conf}"
 USERS_DIR="$BASE_DIR/users"
 DELETED_DIR="$BASE_DIR/deleted"
 
@@ -20,7 +30,7 @@ for dir in "$USERS_DIR"/*; do
   USER_ID=$(basename "$dir")
 
   # 解析端口
-NGINX_CONF="/data/docker/nginx/conf/${USER_ID}.conf"
+NGINX_CONF="$NGINX_USERS_CONF_DIR/${USER_ID}.conf"
 
 if [ -f "$NGINX_CONF" ]; then
   PORT=$(grep -E '^[[:space:]]*listen[[:space:]]+[0-9]+' "$NGINX_CONF" \

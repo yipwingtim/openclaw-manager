@@ -64,6 +64,10 @@ def write_signing_key(path, *, encrypted=False, rsa_key=False):
 
 
 class HermesUisReadinessTests(unittest.TestCase):
+    def test_checker_uses_python36_compatible_prefix_handling(self):
+        source = CHECKER.read_text(encoding="utf-8")
+        self.assertNotIn(".removeprefix(", source)
+        self.assertIn('cert_value[len("/etc/nginx/certs/") :]', source)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

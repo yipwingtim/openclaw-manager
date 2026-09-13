@@ -115,7 +115,7 @@ def main():
     if cert_value and cert_value.startswith("/etc/nginx/certs/"):
         cert_path_value = str(
             Path(os.environ.get("NGINX_CERTS_DIR", "/data/docker/nginx/certs"))
-            / cert_value.removeprefix("/etc/nginx/certs/")
+            / cert_value[len("/etc/nginx/certs/") :]
         )
     cert_path = regular_file("NGINX_SSL_CERT", cert_path_value) if cert_path_value else None
     if cert_path_value and not cert_path:

@@ -8,12 +8,32 @@ CONFIG_FILE="$MANAGER_DIR/config/openclaw-manager.env"
 SCHEMA_FILE="$MANAGER_DIR/db/schema.sql"
 
 if [ -f "$CONFIG_FILE" ]; then
+  set -a
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
+  set +a
 fi
 
 OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 METADATA_DB_FILE="${METADATA_DB_FILE:-$OPENCLAW_PUBLIC_DIR/manager.db}"
+METADATA_DB_BACKEND="${METADATA_DB_BACKEND:-sqlite}"
+
+if [ "$METADATA_DB_BACKEND" = "postgres" ]; then
+  [ -n "${METADATA_DATABASE_URL:-}" ] || {
+    echo "[ERROR] METADATA_DATABASE_URL is required for postgres backend" >&2
+    exit 1
+  }
+  cd "$MANAGER_DIR/services"
+  docker compose run --rm --no-deps manager-control \
+    python -c 'import metadata_store; metadata_store.initialize()'
+  echo "[INFO] PostgreSQL metadata database initialized"
+  exit 0
+fi
+
+if [ "$METADATA_DB_BACKEND" != "sqlite" ]; then
+  echo "[ERROR] METADATA_DB_BACKEND must be sqlite or postgres" >&2
+  exit 1
+fi
 
 if [ ! -f "$SCHEMA_FILE" ]; then
   echo "[ERROR] Schema file not found: $SCHEMA_FILE" >&2

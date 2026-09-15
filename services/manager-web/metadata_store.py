@@ -13,24 +13,55 @@ PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-p
 DB_FILE = Path(os.environ.get("METADATA_DB_FILE", str(PUBLIC_DIR / "manager.db")))
 DB_BACKEND = os.environ.get("METADATA_DB_BACKEND", "sqlite").strip().lower()
 DATABASE_URL = os.environ.get("METADATA_DATABASE_URL", "").strip()
+POSTGRES_SCHEMA_FILE = Path(os.environ.get("METADATA_POSTGRES_SCHEMA_FILE", "/opt/openclaw-manager/db/schema.postgres.sql"))
 SCHEMA_FILE = Path(os.environ.get("METADATA_SCHEMA_FILE", "/opt/openclaw-manager/db/schema.sql"))
+
+try:
+    import psycopg
+    DATABASE_ERROR = (sqlite3.Error, psycopg.Error)
+    INTEGRITY_ERROR = (sqlite3.IntegrityError, psycopg.IntegrityError)
+except ImportError:
+    psycopg = None
+    DATABASE_ERROR = (sqlite3.Error,)
+    INTEGRITY_ERROR = (sqlite3.IntegrityError,)
 
 
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def begin_write(conn):
+    if DB_BACKEND == "sqlite":
+        conn.execute("BEGIN IMMEDIATE")
+    else:
+        conn.execute("SELECT pg_advisory_xact_lock(684626972)")
+
+
 @contextmanager
-def connect(db_file=None):
+def connect(db_file=None, *, readonly=False):
     if DB_BACKEND not in {"sqlite", "postgres"}:
         raise RuntimeError("METADATA_DB_BACKEND must be sqlite or postgres")
     if DB_BACKEND == "postgres":
-        raise RuntimeError(
-            "PostgreSQL backend is reserved for the upcoming schema/SQL migration"
-        )
+        if not DATABASE_URL:
+            raise RuntimeError("METADATA_DATABASE_URL is required for postgres backend")
+        if psycopg is None:
+            raise RuntimeError("psycopg is required for postgres backend")
+        conn = _PostgresConnection(psycopg.connect(DATABASE_URL))
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return
     path = Path(db_file or DB_FILE)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    if readonly:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -45,9 +76,10 @@ def connect(db_file=None):
 
 def initialize(db_file=None, schema_file=None):
     if DB_BACKEND == "postgres":
-        raise RuntimeError(
-            "PostgreSQL backend is not ready for schema initialization; use SQLite"
-        )
+        schema = Path(schema_file or POSTGRES_SCHEMA_FILE).read_text(encoding="utf-8")
+        with connect() as conn:
+            conn.executescript(schema)
+        return
     schema_path = Path(schema_file or SCHEMA_FILE)
     schema = schema_path.read_text(encoding="utf-8")
     with connect(db_file) as conn:
@@ -367,8 +399,9 @@ def activate_auth_provider(provider, db_file=None, conn=None):
     with context as active_conn:
         active_conn.execute(
             """
-            INSERT OR IGNORE INTO auth_settings (key, value, updated_at)
+            INSERT INTO auth_settings (key, value, updated_at)
             VALUES ('active_provider', ?, ?)
+            ON CONFLICT(key) DO NOTHING
             """,
             (provider, now),
         )
@@ -639,7 +672,7 @@ def create_instance(
                     now,
                 ),
             )
-        except sqlite3.IntegrityError as exc:
+        except INTEGRITY_ERROR as exc:
             if "runtime_identifier" in str(exc):
                 raise ValueError("runtime identifier already exists") from exc
             if "data_path" in str(exc):
@@ -1076,7 +1109,7 @@ def update_execution_job(
 
 def claim_next_execution_job(*, stale_seconds=900, db_file=None):
     with connect(db_file) as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        begin_write(conn)
         stale_before = (
             datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
         ).replace(microsecond=0).isoformat()
@@ -1093,7 +1126,7 @@ def claim_next_execution_job(*, stale_seconds=900, db_file=None):
         )
         conn.execute(
             """
-            INSERT OR IGNORE INTO operation_records (
+            INSERT INTO operation_records (
                 request_id, actor_user_id, source_service, action, instance_id,
                 status, message, created_at, finished_at
             )
@@ -1103,6 +1136,7 @@ def claim_next_execution_job(*, stale_seconds=900, db_file=None):
             WHERE status = 'failed'
               AND error_summary = 'execution interrupted; manual confirmation required'
               AND action IN ('instance.create', 'instance.delete', 'instance.restore')
+            ON CONFLICT DO NOTHING
             """,
             (now, now),
         )
@@ -1737,13 +1771,17 @@ def record_activity_snapshot(
         ).fetchone()
         if instance is None:
             raise ValueError("instance not found")
-        inserted = active_conn.execute(
-            """
-            INSERT OR IGNORE INTO activity_snapshots (
+        insert_sql = """
+            INSERT INTO activity_snapshots (
                 instance_id, status, source_version, source_schema,
                 source_cursor, metrics_json, error_summary, collected_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+            ON CONFLICT DO NOTHING
+            """
+        if DB_BACKEND == "postgres":
+            insert_sql += " RETURNING id"
+        inserted = active_conn.execute(
+            insert_sql,
             (
                 instance["id"], status, source_version, source_schema,
                 source_cursor, json.dumps(metrics or {}, sort_keys=True),
@@ -1759,7 +1797,9 @@ def record_activity_snapshot(
             selector_params = (instance["id"], source_cursor)
         else:
             selector = "snapshot.id = ?"
-            selector_params = (inserted.lastrowid,)
+            selector_params = (
+                inserted.fetchone()[0] if DB_BACKEND == "postgres" else inserted.lastrowid,
+            )
         row = active_conn.execute(
             """
             SELECT snapshot.*, instance.public_id AS instance_public_id,
@@ -1845,3 +1885,53 @@ class nullcontext:
 
     def __exit__(self, exc_type, exc, traceback):
         return False
+
+
+class _CompatRow(dict):
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return tuple(self.values())[key]
+        return super().__getitem__(key)
+
+
+class _PostgresCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def _row(self, row):
+        if row is None:
+            return None
+        return _CompatRow(zip((column.name for column in self._cursor.description), row))
+
+    def fetchone(self):
+        return self._row(self._cursor.fetchone())
+
+    def fetchall(self):
+        return [self._row(row) for row in self._cursor.fetchall()]
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+
+class _PostgresConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, sql, params=()):
+        if sql.strip() == "SELECT last_insert_rowid()":
+            sql = "SELECT LASTVAL()"
+        sql = sql.replace("?", "%s")
+        return _PostgresCursor(self._connection.execute(sql, params))
+
+    def executescript(self, script):
+        self._connection.execute(script, prepare=False)
+
+    def commit(self):
+        self._connection.commit()
+
+    def rollback(self):
+        self._connection.rollback()
+
+    def close(self):
+        self._connection.close()

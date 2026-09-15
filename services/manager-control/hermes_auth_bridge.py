@@ -5,7 +5,6 @@ import hmac
 import json
 import re
 import secrets
-import sqlite3
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -13,6 +12,13 @@ from dataclasses import dataclass
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pathlib import Path
+
+try:
+    import metadata_store
+except ModuleNotFoundError:  # Standalone source-tree tests.
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "manager-web"))
+    import metadata_store
 
 PKCE_VERIFIER_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
@@ -86,9 +92,7 @@ class BridgeStore:
         self.db_file = db_file
 
     def connect(self):
-        conn = sqlite3.connect(self.db_file, timeout=10, isolation_level=None)
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        return metadata_store.connect(self.db_file)
 
     def create_client(self, instance_id, client_id, secret, redirect_uri):
         if not client_id or not valid_redirect_uri(redirect_uri):
@@ -143,11 +147,11 @@ class BridgeStore:
                 "WHERE c.client_id = ? "
                 "AND c.revoked_at IS NULL AND i.product = 'hermes' "
                 "AND i.status = 'active' AND u.status = 'active' "
-                "AND s.provider = 'campus-uis' AND s.expires_at > datetime('now') "
+                "AND s.provider = 'campus-uis' AND s.expires_at > ? "
                 "AND (u.role = 'admin' OR i.owner_user_id = u.id OR EXISTS ("
                 "SELECT 1 FROM instance_members m "
                 "WHERE m.instance_id = i.id AND m.user_id = u.id))",
-                (session_id, client_id),
+                (session_id, client_id, metadata_store.utc_now()),
             ).fetchone()
             if (
                 not row or row[1] != redirect_uri
@@ -169,7 +173,8 @@ class BridgeStore:
                issue_token=None):
         now = int(time.time() if now is None else now)
         with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            metadata_store.begin_write(conn)
+            lock_clause = "" if metadata_store.DB_BACKEND == "sqlite" else " FOR UPDATE OF g"
             row = conn.execute(
                 "SELECT g.code_hash, i.public_id, u.public_id, g.redirect_uri, "
                 "g.code_challenge, g.expires_at, g.consumed_at, c.client_id, "
@@ -181,7 +186,7 @@ class BridgeStore:
                 "WHERE g.code_hash = ? AND c.client_id = ? "
                 "AND g.instance_id = c.instance_id AND i.product = 'hermes' "
                 "AND c.revoked_at IS NULL AND i.status = 'active' "
-                "AND u.status = 'active'",
+                "AND u.status = 'active'" + lock_clause,
                 (sha256(code), client_id),
             ).fetchone()
             secret_valid = verify_client_secret(

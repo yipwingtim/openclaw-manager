@@ -91,6 +91,17 @@ class ConfigurableRuntimePathTests(unittest.TestCase):
         )
         self.assertIn(f"{derived_path}:{derived_path}:ro", compose)
 
+    def test_bootstrap_and_readiness_select_metadata_backend(self):
+        for relative_path in (
+            "scripts/bootstrap_runtime.sh",
+            "scripts/check_bootstrap_readiness.sh",
+            "scripts/init_metadata_db.sh",
+        ):
+            source = (ROOT_DIR / relative_path).read_text(encoding="utf-8")
+            with self.subTest(path=relative_path):
+                self.assertIn('METADATA_DB_BACKEND="${METADATA_DB_BACKEND:-sqlite}"', source)
+                self.assertIn('METADATA_DATABASE_URL', source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,6 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 import urllib.parse
 from datetime import datetime, timezone
 from functools import wraps
@@ -407,12 +406,11 @@ def health():
     except (OSError, TypeError, ValueError):
         signing_ready = False
     try:
-        database_uri = f"{DB_FILE.resolve().as_uri()}?mode=ro"
-        with sqlite3.connect(database_uri, uri=True) as conn:
+        with metadata_store.connect(DB_FILE, readonly=True) as conn:
             version = conn.execute(
                 "SELECT MAX(version) FROM schema_migrations"
             ).fetchone()[0]
-    except sqlite3.Error:
+    except metadata_store.DATABASE_ERROR + (RuntimeError, OSError):
         return jsonify(
             {
                 "ok": False,
@@ -492,7 +490,7 @@ def authorize_hermes_bridge():
         )
     except ValueError:
         return jsonify({"error": "access_denied"}), 403
-    except sqlite3.Error:
+    except metadata_store.DATABASE_ERROR:
         return jsonify({"error": "temporarily_unavailable"}), 503
     return jsonify({"code": code})
 
@@ -519,7 +517,7 @@ def redeem_hermes_bridge():
         )
     except ValueError:
         return jsonify({"error": "invalid_grant"}), 400
-    except sqlite3.Error:
+    except metadata_store.DATABASE_ERROR:
         return jsonify({"error": "temporarily_unavailable"}), 503
     except OSError:
         return jsonify({"error": "temporarily_unavailable"}), 503
@@ -550,7 +548,7 @@ def create_hermes_bridge_client(instance_public_id):
             instance["id"], payload["client_id"], payload["client_secret"],
             payload["redirect_uri"],
         )
-    except (ValueError, sqlite3.IntegrityError):
+    except (ValueError,) + metadata_store.INTEGRITY_ERROR:
         return jsonify({"error": "could not create Hermes auth client"}), 409
     return "", 204
 
@@ -1013,7 +1011,7 @@ def import_platform_users():
                 message=f"provider={provider} rows={len(rows)} created={created} updated={updated}",
                 conn=conn,
             )
-    except (sqlite3.Error, ValueError) as exc:
+    except metadata_store.DATABASE_ERROR + (ValueError,) as exc:
         return jsonify({"error": import_error_message(provider, exc)}), 409
     return jsonify({"created": created, "updated": updated})
 
@@ -1313,7 +1311,7 @@ def create_instance_batch():
             PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
             PROVISIONING_SECRET_DIR.chmod(0o700)
         with metadata_store.connect(DB_FILE) as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            metadata_store.begin_write(conn)
             for row in prepared_rows:
                 owner_public_id = row.get("owner_user_public_id")
                 if owner_public_id is not None:
@@ -1373,7 +1371,7 @@ def create_instance_batch():
             children = metadata_store.list_execution_jobs(
                 parent_request_id=request_id, limit=100, conn=conn
             )
-    except (ValueError, sqlite3.IntegrityError) as exc:
+    except (ValueError,) + metadata_store.INTEGRITY_ERROR as exc:
         for secret_path in secret_paths:
             secret_path.unlink(missing_ok=True)
         return jsonify({"error": str(exc)}), 409
@@ -1652,7 +1650,7 @@ def create_device_batch():
     params = {"instance_public_ids": instance_public_ids}
     try:
         with metadata_store.connect(DB_FILE) as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            metadata_store.begin_write(conn)
             existing = metadata_store.get_execution_job(request_id, conn=conn)
             if existing is not None:
                 parent = metadata_store.create_execution_job(
@@ -1728,7 +1726,7 @@ def create_device_batch():
                 )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409
-    except sqlite3.IntegrityError:
+    except metadata_store.INTEGRITY_ERROR:
         return jsonify({"error": "could not create device batch"}), 409
     return jsonify(
         {
@@ -1811,7 +1809,7 @@ def create_action_batch():
     params = {"instance_public_ids": instance_public_ids, **child_params}
     try:
         with metadata_store.connect(DB_FILE) as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            metadata_store.begin_write(conn)
             existing = metadata_store.get_execution_job(request_id, conn=conn)
             if existing is None:
                 instances = []
@@ -1877,7 +1875,7 @@ def create_action_batch():
             )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409
-    except sqlite3.IntegrityError:
+    except metadata_store.INTEGRITY_ERROR:
         return jsonify({"error": "could not create action batch"}), 409
     return jsonify({
         "parent": execution_job_payload(parent),
@@ -1943,7 +1941,7 @@ def create_model_provider_batch():
     parent_params = {"instances": normalized_rows}
     try:
         with metadata_store.connect(DB_FILE) as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            metadata_store.begin_write(conn)
             existing = metadata_store.get_execution_job(request_id, conn=conn)
             if existing is None:
                 instances = []
@@ -2003,7 +2001,7 @@ def create_model_provider_batch():
             )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409
-    except sqlite3.IntegrityError:
+    except metadata_store.INTEGRITY_ERROR:
         return jsonify({"error": "could not create model provider batch"}), 409
     return jsonify({
         "parent": execution_job_payload(parent, actor_public_id),
@@ -2361,7 +2359,7 @@ def create_execution_job():
         return jsonify({"error": "instance is not restorable"}), 409
     try:
         with metadata_store.connect(DB_FILE) as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            metadata_store.begin_write(conn)
             exclusive_actions = {"instance.delete", "instance.restore", "instance.purge_deleted", "instance.cleanup_failed"}
             active_jobs = metadata_store.list_execution_jobs(
                 limit=1,
@@ -2412,7 +2410,7 @@ def create_execution_job():
     except ValueError as exc:
         status = 409 if "request_id already used" in str(exc) else 400
         return jsonify({"error": str(exc)}), status
-    except sqlite3.IntegrityError:
+    except metadata_store.INTEGRITY_ERROR:
         return jsonify({"error": "parent execution job not found"}), 400
     return jsonify(
         {

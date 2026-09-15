@@ -225,6 +225,7 @@ OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 PORT_FILE="${PORT_FILE:-$OPENCLAW_PUBLIC_DIR/ports.txt}"
 USERS_CSV="${USERS_CSV:-$OPENCLAW_PUBLIC_DIR/users.csv}"
 METADATA_DB_FILE="${METADATA_DB_FILE:-$OPENCLAW_PUBLIC_DIR/manager.db}"
+METADATA_DB_BACKEND="${METADATA_DB_BACKEND:-sqlite}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 DOCKER_DATA_ROOT="${DOCKER_DATA_ROOT:-/data/docker}"
 CONTAINERD_ROOT="${CONTAINERD_ROOT:-/data/docker/containerd}"
@@ -251,7 +252,17 @@ check_dir "$OPENCLAW_PUBLIC_DIR/logs"
 check_dir "$MODEL_PROXY_TOKEN_DIR"
 check_writable_file "$USERS_CSV"
 check_writable_file "$PORT_FILE"
-check_file "$METADATA_DB_FILE"
+if [ "$METADATA_DB_BACKEND" = "sqlite" ]; then
+  check_file "$METADATA_DB_FILE"
+elif [ "$METADATA_DB_BACKEND" = "postgres" ]; then
+  if [ -n "${METADATA_DATABASE_URL:-}" ]; then
+    ok "PostgreSQL metadata URL is configured"
+  else
+    missing "METADATA_DATABASE_URL is required for postgres backend"
+  fi
+else
+  missing "METADATA_DB_BACKEND must be sqlite or postgres"
+fi
 
 check_executable_file "$MANAGER_DIR/scripts/create_user.sh"
 check_executable_file "$MANAGER_DIR/scripts/batch_create_users.sh"

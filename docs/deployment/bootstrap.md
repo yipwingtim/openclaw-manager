@@ -87,6 +87,25 @@ overrides or set each path explicitly; do not mix old and new runtime roots.
 `MODEL_PROXY_TOKEN_DIR` 在未设置可选覆盖项时由 `OPENCLAW_PUBLIC_DIR` 派生。
 修改运行根目录时，应省略这些覆盖项或逐项显式配置，不能混用新旧运行根目录。
 
+Metadata uses SQLite by default. PostgreSQL requires
+`METADATA_DB_BACKEND=postgres` and `METADATA_DATABASE_URL`; bootstrap then
+skips the local SQLite database. Initialize PostgreSQL explicitly with the
+provided PostgreSQL schema before starting Manager services.
+
+元数据默认使用 SQLite。PostgreSQL 需要设置 `METADATA_DB_BACKEND=postgres`
+和 `METADATA_DATABASE_URL`；bootstrap 随后会跳过本地 SQLite 数据库。启动
+Manager 服务前，需要使用项目提供的 PostgreSQL schema 显式初始化数据库。
+
+After building the Manager image, initialize an empty PostgreSQL database
+explicitly with:
+
+```bash
+bash scripts/init_metadata_db.sh
+```
+
+构建 Manager 镜像后，对空 PostgreSQL 数据库显式执行以上初始化命令。
+连接数增长时，建议让 `METADATA_DATABASE_URL` 指向 PgBouncer 等事务模式连接池。
+
 It creates or initializes below the configured runtime paths:
 
 - `$OPENCLAW_PUBLIC_DIR/users`

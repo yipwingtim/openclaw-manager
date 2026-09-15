@@ -160,6 +160,7 @@ OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 PORT_FILE="${PORT_FILE:-$OPENCLAW_PUBLIC_DIR/ports.txt}"
 USERS_CSV="${USERS_CSV:-$OPENCLAW_PUBLIC_DIR/users.csv}"
 METADATA_DB_FILE="${METADATA_DB_FILE:-$OPENCLAW_PUBLIC_DIR/manager.db}"
+METADATA_DB_BACKEND="${METADATA_DB_BACKEND:-sqlite}"
 PORT_START="${PORT_START:-30021}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 
@@ -252,7 +253,14 @@ else
   create_network "instance-auth-net"
 fi
 
-init_sqlite
+if [ "$METADATA_DB_BACKEND" = "sqlite" ]; then
+  init_sqlite
+elif [ "$METADATA_DB_BACKEND" = "postgres" ]; then
+  [ -n "${METADATA_DATABASE_URL:-}" ] || fail "METADATA_DATABASE_URL is required for postgres backend"
+  log "PostgreSQL metadata backend selected; skip local SQLite initialization."
+else
+  fail "METADATA_DB_BACKEND must be sqlite or postgres"
+fi
 
 if [ ! -f "$NGINX_COMPOSE_FILE" ]; then
   [ -f "$NGINX_COMPOSE_TEMPLATE" ] || fail "Nginx compose template not found: $NGINX_COMPOSE_TEMPLATE"

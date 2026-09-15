@@ -87,6 +87,13 @@ overrides or set each path explicitly; do not mix old and new runtime roots.
 `MODEL_PROXY_TOKEN_DIR` 在未设置可选覆盖项时由 `OPENCLAW_PUBLIC_DIR` 派生。
 修改运行根目录时，应省略这些覆盖项或逐项显式配置，不能混用新旧运行根目录。
 
+Metadata currently uses SQLite by default. `METADATA_DB_BACKEND=postgres` and
+`METADATA_DATABASE_URL` are reserved for the PostgreSQL schema and migration
+work; do not enable them yet.
+
+当前元数据默认使用 SQLite。`METADATA_DB_BACKEND=postgres` 和
+`METADATA_DATABASE_URL` 仅为 PostgreSQL schema 与迁移预留，当前不要启用。
+
 It creates or initializes below the configured runtime paths:
 
 - `$OPENCLAW_PUBLIC_DIR/users`

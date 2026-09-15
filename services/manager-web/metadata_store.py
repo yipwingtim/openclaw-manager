@@ -11,6 +11,8 @@ from pathlib import Path
 
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
 DB_FILE = Path(os.environ.get("METADATA_DB_FILE", str(PUBLIC_DIR / "manager.db")))
+DB_BACKEND = os.environ.get("METADATA_DB_BACKEND", "sqlite").strip().lower()
+DATABASE_URL = os.environ.get("METADATA_DATABASE_URL", "").strip()
 SCHEMA_FILE = Path(os.environ.get("METADATA_SCHEMA_FILE", "/opt/openclaw-manager/db/schema.sql"))
 
 
@@ -20,6 +22,12 @@ def utc_now():
 
 @contextmanager
 def connect(db_file=None):
+    if DB_BACKEND not in {"sqlite", "postgres"}:
+        raise RuntimeError("METADATA_DB_BACKEND must be sqlite or postgres")
+    if DB_BACKEND == "postgres":
+        raise RuntimeError(
+            "PostgreSQL backend is reserved for the upcoming schema/SQL migration"
+        )
     path = Path(db_file or DB_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
@@ -36,6 +44,10 @@ def connect(db_file=None):
 
 
 def initialize(db_file=None, schema_file=None):
+    if DB_BACKEND == "postgres":
+        raise RuntimeError(
+            "PostgreSQL backend is not ready for schema initialization; use SQLite"
+        )
     schema_path = Path(schema_file or SCHEMA_FILE)
     schema = schema_path.read_text(encoding="utf-8")
     with connect(db_file) as conn:

@@ -177,7 +177,8 @@ class BridgeStore:
             metadata_store.begin_write(conn)
             lock_clause = "" if metadata_store.DB_BACKEND == "sqlite" else " FOR UPDATE OF g"
             row = conn.execute(
-                "SELECT g.code_hash, i.public_id, u.public_id, g.redirect_uri, "
+                "SELECT g.code_hash, i.public_id AS instance_public_id, "
+                "u.public_id AS user_public_id, g.redirect_uri, "
                 "g.code_challenge, g.expires_at, g.consumed_at, c.client_id, "
                 "c.client_secret_hash "
                 "FROM hermes_auth_grants g "

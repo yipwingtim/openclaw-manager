@@ -56,6 +56,11 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("c.id AS client_db_id", source)
         self.assertIn("u.id AS user_db_id", source)
 
+    def test_redeem_query_aliases_duplicate_public_id_columns(self):
+        source = (ROOT / "services" / "manager-control" / "hermes_auth_bridge.py").read_text()
+        self.assertIn("i.public_id AS instance_public_id", source)
+        self.assertIn("u.public_id AS user_public_id", source)
+
     def test_wrong_pkce_does_not_consume_grant(self):
         code = self.grant()
         with self.assertRaisesRegex(ValueError, "invalid_grant"):

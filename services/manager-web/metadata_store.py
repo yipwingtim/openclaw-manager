@@ -1888,9 +1888,13 @@ class nullcontext:
 
 
 class _CompatRow(dict):
+    def __init__(self, columns, values):
+        self._values = tuple(values)
+        super().__init__(zip(columns, self._values))
+
     def __getitem__(self, key):
         if isinstance(key, int):
-            return tuple(self.values())[key]
+            return self._values[key]
         return super().__getitem__(key)
 
 
@@ -1901,7 +1905,9 @@ class _PostgresCursor:
     def _row(self, row):
         if row is None:
             return None
-        return _CompatRow(zip((column.name for column in self._cursor.description), row))
+        return _CompatRow(
+            (column.name for column in self._cursor.description), row
+        )
 
     def fetchone(self):
         return self._row(self._cursor.fetchone())

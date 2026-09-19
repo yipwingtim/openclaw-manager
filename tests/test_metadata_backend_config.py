@@ -106,6 +106,10 @@ class MetadataBackendConfigTests(unittest.TestCase):
         self.assertIn("prevent_instance_owner_member_insert", schema)
         self.assertEqual(schema.count("$$"), 4)
 
+    def test_queries_do_not_qualify_postgres_current_user_keyword(self):
+        source = MODULE.read_text(encoding="utf-8")
+        self.assertNotIn("current_user.", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -140,7 +140,8 @@ class BridgeStore:
         code = secrets.token_urlsafe(32)
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT c.id, c.redirect_uri, c.instance_id, u.id FROM hermes_auth_clients c "
+                "SELECT c.id AS client_db_id, c.redirect_uri, c.instance_id, "
+                "u.id AS user_db_id FROM hermes_auth_clients c "
                 "JOIN instances i ON i.id = c.instance_id "
                 "JOIN user_sessions s ON s.token_hash = ? "
                 "JOIN users u ON u.id = s.user_id "

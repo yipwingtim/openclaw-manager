@@ -38,12 +38,26 @@ class Target:
             return Result(self.counts[sql.rsplit(" ", 1)[-1]])
         return Result(None)
 
+    def cursor(self):
+        return Cursor(self)
+
+
+class Cursor:
+    def __init__(self, target):
+        self.target = target
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
     def executemany(self, sql, rows):
         table = sql.split()[2]
-        if self.fail_on and self.fail_on in sql:
+        if self.target.fail_on and self.target.fail_on in sql:
             raise RuntimeError("injected failure")
-        self.counts[table] += len(rows)
-        self.inserted.extend((table, row) for row in rows)
+        self.target.counts[table] += len(rows)
+        self.target.inserted.extend((table, row) for row in rows)
 
 
 class MigrationTests(unittest.TestCase):

@@ -72,10 +72,11 @@ def import_data(source, target, expected):
         columns, rows = source_rows(source, table)
         if rows:
             placeholders = ",".join(["%s"] * len(columns))
-            target.executemany(
-                f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
-                rows,
-            )
+            with target.cursor() as cursor:
+                cursor.executemany(
+                    f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
+                    rows,
+                )
     actual = {
         table: target.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         for table in TABLES

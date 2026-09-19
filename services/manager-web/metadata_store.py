@@ -797,15 +797,15 @@ def list_instances_for_user(user_public_id, *, db_file=None, conn=None):
             """
             SELECT i.*,
                    CASE
-                       WHEN i.owner_user_id = current_user.id THEN 'owner'
+                       WHEN i.owner_user_id = requesting_user.id THEN 'owner'
                        ELSE m.role
                    END AS access_role
             FROM instances i
-            JOIN users current_user ON current_user.public_id = ?
+            JOIN users requesting_user ON requesting_user.public_id = ?
             LEFT JOIN instance_members m
                 ON m.instance_id = i.id
-               AND m.user_id = current_user.id
-            WHERE (i.owner_user_id = current_user.id OR m.user_id IS NOT NULL)
+               AND m.user_id = requesting_user.id
+            WHERE (i.owner_user_id = requesting_user.id OR m.user_id IS NOT NULL)
               AND i.status IN ('active', 'stopped')
             ORDER BY i.id
             """,
@@ -821,19 +821,19 @@ def get_instance_for_user(instance_public_id, user_public_id, *, db_file=None, c
         row = active_conn.execute(
             """
             SELECT i.*,
-                   current_user.id AS current_user_id,
+                   requesting_user.id AS current_user_id,
                    CASE
-                       WHEN i.owner_user_id = current_user.id THEN 'owner'
+                       WHEN i.owner_user_id = requesting_user.id THEN 'owner'
                        ELSE m.role
                    END AS access_role
             FROM instances i
-            JOIN users current_user ON current_user.public_id = ?
+            JOIN users requesting_user ON requesting_user.public_id = ?
             LEFT JOIN instance_members m
                 ON m.instance_id = i.id
-               AND m.user_id = current_user.id
+               AND m.user_id = requesting_user.id
             WHERE i.public_id = ?
-              AND current_user.status = 'active'
-              AND (i.owner_user_id = current_user.id OR m.user_id IS NOT NULL)
+              AND requesting_user.status = 'active'
+              AND (i.owner_user_id = requesting_user.id OR m.user_id IS NOT NULL)
             """,
             (user_public_id, instance_public_id),
         ).fetchone()

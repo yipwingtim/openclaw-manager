@@ -82,6 +82,10 @@ class MetadataBackendConfigTests(unittest.TestCase):
         conn.execute("SELECT last_insert_rowid()")
         self.assertEqual(raw.calls[-1][0], "SELECT LASTVAL()")
 
+    def test_postgres_row_keeps_duplicate_columns_for_positional_access(self):
+        row = load()._CompatRow(("id", "id"), (7, 9))
+        self.assertEqual((row[0], row[1], row["id"]), (7, 9, 9))
+
     def test_postgres_write_uses_transaction_lock(self):
         module = load()
 

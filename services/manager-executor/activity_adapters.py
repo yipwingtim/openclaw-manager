@@ -200,7 +200,7 @@ class HermesActivityAdapter:
 
 class EvoScientistActivityAdapter:
     def collect(self, instance):
-        if instance.get("version") != "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47":
+        if instance.get("version") != "sha256:51b34e3ead2dd0549aea53032e65e975e23a9ab028f50d054ebdcf7efa6fe896":
             raise ValueError("unsupported EvoScientist version")
         database = Path(instance["data_path"]) / "evoscientist-data" / "sessions.db"
         with readonly_database(database) as connection:

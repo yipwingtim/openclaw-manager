@@ -240,7 +240,7 @@ def evoscientist_creation_result(instance):
         if configured_version
         else os.environ.get(
         "EVOSCIENTIST_IMAGE",
-        "ghcr.io/evoscientist/evoscientist@sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47",
+        "ghcr.io/evoscientist/evoscientist@sha256:51b34e3ead2dd0549aea53032e65e975e23a9ab028f50d054ebdcf7efa6fe896",
         ).strip()
     )
     return {

@@ -114,7 +114,7 @@ class ActivityAdapterTests(unittest.TestCase):
         os.utime(database, ns=(1_000_000_000, 2_000_000_000))
         result = get_activity_adapter("evoscientist").collect({
             "data_path": str(self.root),
-            "version": "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47",
+            "version": "sha256:51b34e3ead2dd0549aea53032e65e975e23a9ab028f50d054ebdcf7efa6fe896",
         })
         self.assertEqual(result["metrics"], {
             "checkpoints": 1, "last_activity_at_ms": 2000,

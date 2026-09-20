@@ -174,8 +174,37 @@ class EvoScientistAdapterTests(unittest.TestCase):
             self.assertIn("--network", docker_runs[0])
             self.assertIn("--network", docker_runs[1])
             self.assertIn("container:evoscientist_alice", docker_runs[1])
+            self.assertIn("EVOSCIENTIST_WEBUI_HOST=0.0.0.0", docker_runs[0])
             self.assertEqual(instance["_created_port"], 40062)
             self.assertTrue((root / "public" / "users" / "alice" / "tcp_proxy.py").is_file())
+
+    def test_wait_for_services_checks_webui_and_api_proxy(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            with patch.object(
+                adapter,
+                "run_command",
+                side_effect=[(0, "true"), (0, "true"), (0, "")],
+            ) as run:
+                result = adapter._wait_for_services(self.INSTANCE)
+
+            self.assertEqual(result, (0, "EvoScientist services are ready"))
+            readiness_command = run.call_args_list[-1].args[0]
+            self.assertEqual(readiness_command[:3], ["docker", "exec", "evoscientist_alice"])
+            self.assertIn("http://127.0.0.1:4716/", readiness_command[-1])
+            self.assertIn("http://127.0.0.1:6175/info", readiness_command[-1])
+
+    def test_wait_for_services_rejects_unreachable_api_proxy(self):
+        with TemporaryDirectory() as temp_dir:
+            adapter = self.make_adapter(Path(temp_dir))
+            with patch.object(
+                adapter,
+                "run_command",
+                side_effect=[(0, "true"), (0, "true"), (1, "connection refused")],
+            ):
+                result = adapter._wait_for_services(self.INSTANCE)
+
+            self.assertEqual(result, (1, "connection refused"))
 
     def test_update_version_requires_local_digest(self):
         digest = "sha256:" + "b" * 64

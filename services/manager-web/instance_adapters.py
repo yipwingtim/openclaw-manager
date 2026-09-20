@@ -807,7 +807,7 @@ class EvoScientistDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities("evoscientist")
     AUTH_PRODUCT = "evoscientist"
     IMAGE_REPOSITORY = "ghcr.io/evoscientist/evoscientist"
-    DEFAULT_DIGEST = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
+    DEFAULT_DIGEST = "sha256:51b34e3ead2dd0549aea53032e65e975e23a9ab028f50d054ebdcf7efa6fe896"
     _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     _SAFE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
     INGRESS_IMAGE = "nginx:alpine"

@@ -46,7 +46,7 @@ DEFAULT_VERSION_KEYS = {
     "hermes": "default_version.hermes",
     "evoscientist": "default_version.evoscientist",
 }
-DEFAULT_EVOSCIENTIST_VERSION = "sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47"
+DEFAULT_EVOSCIENTIST_VERSION = "sha256:51b34e3ead2dd0549aea53032e65e975e23a9ab028f50d054ebdcf7efa6fe896"
 RESOURCE_DISK_WARN_BYTES = max(0, int(os.environ.get("MANAGER_RESOURCE_DISK_WARN_BYTES", "0")))
 RESOURCE_SESSION_WARN_COUNT = max(0, int(os.environ.get("MANAGER_RESOURCE_SESSION_WARN_COUNT", "0")))
 PROVISIONING_SECRET_DIR = PUBLIC_DIR / ".manager-secrets"

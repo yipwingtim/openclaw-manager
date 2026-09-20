@@ -6,8 +6,8 @@
 | --- | --- |
 | 文档版本 | 1.0.0 |
 | 盘点日期 | 2026-08-05 |
-| 产品镜像 | `ghcr.io/evoscientist/evoscientist@sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47` |
-| 镜像 ID | `sha256:ca1fd303d7ca2d1bfad97d9872b4ee910eea67c46047be1bf59463941fff3c47` |
+| 产品镜像 | `ghcr.io/evoscientist/evoscientist@sha256:51b34e3ead2dd0549aea53032e65e975e23a9ab028f50d054ebdcf7efa6fe896` |
+| 镜像 ID | `sha256:51b34e3ead2dd0549aea53032e65e975e23a9ab028f50d054ebdcf7efa6fe896` |
 | 数据库 Schema | 无显式版本 |
 | Schema 指纹 | `checkpoints` 与 `writes` 白名单字段 |
 
@@ -71,4 +71,3 @@ checkpoint 数量可能被单个长线程显著放大，不能直接解释为对
 - `checkpoints` 或 `writes` 表及字段指纹变化；
 - 产品新增可用的结构化时间、运行状态或低敏统计 API；
 - 需要解析 BLOB 才能获得指标时，必须另行进行隐私和兼容性评审。
-

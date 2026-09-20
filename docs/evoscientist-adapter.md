@@ -61,3 +61,10 @@ EVOSCIENTIST_IMAGE=ghcr.io/evoscientist/evoscientist@sha256:<digest>
 Before an update, pull the image on the host. The Web UI accepts the
 `sha256:<digest>` value and refuses mutable tags. Failed updates recreate both
 containers with the previous local image.
+
+EvoScientist 0.3.x binds its WebUI to loopback by default. The adapter sets
+`EVOSCIENTIST_WEBUI_HOST=0.0.0.0` so the per-instance ingress can reach port
+4716 on the isolated tenant network. The LangGraph backend remains bound to
+loopback on port 6174 and is exposed to the ingress only through the proxy on
+port 6175. Restart the main container through the Manager lifecycle action so
+the network-namespace proxy is restarted immediately afterwards.

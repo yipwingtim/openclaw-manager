@@ -954,6 +954,7 @@ while True:
                 "-v", f"{data_dir}:/home/evosci/.evoscientist",
                 "-e", "EVOSCIENTIST_WORKSPACE_DIR=/workspace",
                 "-e", "EVOSCIENTIST_DATA_DIR=/home/evosci/.evoscientist",
+                "-e", "EVOSCIENTIST_WEBUI_HOST=0.0.0.0",
                 image, "--ui", "webui",
             ],
             timeout=timeout,
@@ -994,7 +995,35 @@ while True:
             )
             if code != 0 or output.strip() != "true":
                 return 1, output or f"{name} is not running"
-        return 0, "EvoScientist services are running"
+        runtime_target = self.get_runtime_target(instance)
+        readiness_script = """\
+import time
+import urllib.request
+
+urls = ("http://127.0.0.1:4716/", "http://127.0.0.1:6175/info")
+deadline = time.monotonic() + 60
+error = None
+while time.monotonic() < deadline:
+    try:
+        for url in urls:
+            urllib.request.urlopen(url, timeout=2).close()
+        break
+    except Exception as exc:
+        error = exc
+        time.sleep(1)
+else:
+    raise SystemExit(f"EvoScientist services are not ready: {error}")
+"""
+        code, output = self.run_command(
+            [
+                "docker", "exec", runtime_target, "python", "-c",
+                readiness_script,
+            ],
+            timeout=70,
+        )
+        if code != 0:
+            return code, output or "EvoScientist services are not ready"
+        return 0, "EvoScientist services are ready"
 
     def configure_ingress(self, instance):
         port = instance.get("_created_port", instance.get("port"))

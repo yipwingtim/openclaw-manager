@@ -1456,7 +1456,9 @@ def get_model_usage(instance_public_id, start=None, end=None, *, db_file=None, c
         ).fetchone()
         if instance is None:
             raise ValueError("instance not found")
-        clauses, params = ["instance_id = ?"], [instance_public_id]
+        clauses, params = ["(instance_id = ? OR instance_id = ?)"], [
+            instance_public_id, instance["legacy_user_id"]
+        ]
         if start: clauses += ["created_at >= ?"]; params += [start]
         if end: clauses += ["created_at < ?"]; params += [end]
         where = " AND ".join(clauses)

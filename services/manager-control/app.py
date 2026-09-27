@@ -7,6 +7,7 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from flask import Flask, g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -18,6 +19,7 @@ from product_capabilities import execution_action_capability, product_supports
 
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
 DB_FILE = Path(os.environ.get("METADATA_DB_FILE") or PUBLIC_DIR / "manager.db")
+DISPLAY_TIMEZONE = ZoneInfo("Asia/Shanghai")
 MIXED_AUTH_ENABLED = (
     os.environ.get("MANAGER_LOCAL_AUTH_ENABLED", "false").lower()
     in {"1", "true", "yes", "on"}
@@ -816,10 +818,11 @@ def admin_instance_usage(instance_public_id):
     if any(value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) for value in (start, end)):
         return jsonify({"error": "invalid date"}), 400
     if start:
-        start = f"{start}T00:00:00+00:00"
+        start = datetime.fromisoformat(start).replace(tzinfo=DISPLAY_TIMEZONE).isoformat()
     if end:
-        end = f"{end}T00:00:00+00:00"
-        end = (datetime.fromisoformat(end) + timedelta(days=1)).isoformat()
+        end = (datetime.fromisoformat(end) + timedelta(days=1)).replace(
+            tzinfo=DISPLAY_TIMEZONE
+        ).isoformat()
     try:
         return jsonify(metadata_store.get_model_usage(instance_public_id, start, end, db_file=DB_FILE))
     except ValueError:

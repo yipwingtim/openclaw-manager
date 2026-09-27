@@ -320,7 +320,9 @@ def instance_usage_page(instance_public_id):
     current = web_common.actor()
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
-    start, end = request.args.get("start", "").strip(), request.args.get("end", "").strip()
+    today = datetime.now(DISPLAY_TIMEZONE).date().isoformat()
+    start = request.args.get("start", "").strip() or today
+    end = request.args.get("end", "").strip() or today
     if any(value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) for value in (start, end)):
         return render_template("error.html", message="日期格式无效"), 400
     try:

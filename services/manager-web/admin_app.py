@@ -315,6 +315,21 @@ def instances():
     )
 
 
+@app.get("/admin/instances/<instance_public_id>/usage")
+def instance_usage_page(instance_public_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    start, end = request.args.get("start", "").strip(), request.args.get("end", "").strip()
+    if any(value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) for value in (start, end)):
+        return render_template("error.html", message="日期格式无效"), 400
+    try:
+        usage = control_client.get_admin_instance_usage(instance_public_id, start=start, end=end)
+    except control_client.ControlError as exc:
+        return render_template("error.html", message=str(exc)), getattr(exc, "status_code", 502) or 502
+    return render_template("admin_usage.html", usage=usage, start=start, end=end)
+
+
 @app.get("/admin/create-instance")
 def create_instance_page():
     current = web_common.actor()

@@ -1446,6 +1446,29 @@ def list_instances(status=None, db_file=None, conn=None, *, limit=None, offset=0
         return [instance_dict(row) for row in rows]
 
 
+def get_model_usage(instance_public_id, start=None, end=None, *, db_file=None, conn=None):
+    owns_conn = conn is None
+    context = connect(db_file) if owns_conn else nullcontext(conn)
+    with context as active_conn:
+        instance = active_conn.execute(
+            "SELECT public_id, legacy_user_id, instance_name, product FROM instances WHERE public_id = ?",
+            (instance_public_id,),
+        ).fetchone()
+        if instance is None:
+            raise ValueError("instance not found")
+        clauses, params = ["instance_id = ?"], [instance_public_id]
+        if start: clauses += ["created_at >= ?"]; params += [start]
+        if end: clauses += ["created_at < ?"]; params += [end]
+        where = " AND ".join(clauses)
+        summary = active_conn.execute(
+            f"SELECT COUNT(*) AS request_count, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens FROM model_usage_events WHERE {where}", params,
+        ).fetchone()
+        events = active_conn.execute(
+            f"SELECT id, model, input_tokens, output_tokens, total_tokens, status_code, request_id, created_at FROM model_usage_events WHERE {where} ORDER BY created_at DESC, id DESC LIMIT 200", params,
+        ).fetchall()
+        return {"instance": dict(instance), "summary": dict(summary), "events": [dict(row) for row in events]}
+
+
 def set_instance_basic_auth(instance_public_id, enabled, *, db_file=None, conn=None):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)

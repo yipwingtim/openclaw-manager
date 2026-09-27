@@ -4,7 +4,7 @@ import os
 import re
 import secrets
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -804,6 +804,26 @@ def admin_instances():
             ]
         }
     )
+
+
+@app.get("/internal/v1/admin/instances/<instance_public_id>/usage")
+@require_services("manager-admin-web")
+def admin_instance_usage(instance_public_id):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", instance_public_id):
+        return jsonify({"error": "invalid instance id"}), 400
+    start = request.args.get("start", "").strip()
+    end = request.args.get("end", "").strip()
+    if any(value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) for value in (start, end)):
+        return jsonify({"error": "invalid date"}), 400
+    if start:
+        start = f"{start}T00:00:00+00:00"
+    if end:
+        end = f"{end}T00:00:00+00:00"
+        end = (datetime.fromisoformat(end) + timedelta(days=1)).isoformat()
+    try:
+        return jsonify(metadata_store.get_model_usage(instance_public_id, start, end, db_file=DB_FILE))
+    except ValueError:
+        return jsonify({"error": "instance not found"}), 404
 
 
 @app.get("/internal/v1/admin/users")

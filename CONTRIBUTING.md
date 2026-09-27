@@ -16,6 +16,7 @@ You represent that you have the right to submit the contribution under these ter
 - Add or update tests when behavior changes.
 - Do not include credentials, private keys, certificates, tokens, or production runtime data.
 - Follow the repository pull request template.
+- For a user-visible feature or production-operation change, append an entry to `docs/architecture/release-timeline.md`.
 
 ## Existing Contributions
 

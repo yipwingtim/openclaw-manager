@@ -121,6 +121,7 @@ Runtime paths are configurable in `config/openclaw-manager.env` and intentionall
 - [Model Proxy Deployment](docs/deployment/model-proxy.md)
 - [Manager Web Authentication](docs/deployment/local-auth.md)
 - [User, Identity, and Instance Migration](docs/architecture/user-identity-instance-migration.md)
+- [Feature Release Timeline](docs/architecture/release-timeline.md)
 - [Metadata Storage Plan](docs/architecture/metadata-storage-plan.md)
 - [Metadata Data Dictionary](docs/architecture/metadata-data-dictionary.md)
 - [Web Service Split](docs/architecture/web-service-split.md)

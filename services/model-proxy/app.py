@@ -1,6 +1,7 @@
 import hmac
 import json
 import os
+import uuid
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -8,11 +9,17 @@ import requests
 from flask import Flask, Response, jsonify, request
 from observability import ModelProxyObservabilityAdapter, ModelRequestObserver, initialize
 
+try:
+    import psycopg
+except ImportError:
+    psycopg = None
+
 
 UPSTREAM_BASE_URL = os.environ.get("MODEL_PROXY_UPSTREAM_BASE_URL", "").rstrip("/")
 UPSTREAM_API_KEY = os.environ.get("MODEL_PROXY_UPSTREAM_API_KEY", "")
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
 TOKEN_DIR = Path(os.environ.get("MODEL_PROXY_TOKEN_DIR") or PUBLIC_DIR / "model-proxy-tokens")
+METADATA_DATABASE_URL = os.environ.get("METADATA_DATABASE_URL", "")
 REQUEST_TIMEOUT = int(os.environ.get("MODEL_PROXY_REQUEST_TIMEOUT", "300"))
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -155,7 +162,7 @@ def response_headers(upstream_response):
     return headers
 
 
-def observed_content(upstream_response, observation):
+def observed_content(upstream_response, observation, instance_id="", model="", request_id=""):
     """Stream upstream content and finish the observation at stream end."""
     error = (None, None, None)
     output_chunks = []
@@ -177,7 +184,12 @@ def observed_content(upstream_response, observation):
             parsed, usage = summarize_response(body, headers.get("Content-Type", ""))
             observation.set_output(parsed)
         if usage:
-            observation.set_usage(normalize_usage(usage))
+            normalized_usage = normalize_usage(usage)
+            observation.set_usage(normalized_usage)
+            try:
+                record_usage(instance_id, model, normalized_usage, upstream_response.status_code, request_id)
+            except Exception:
+                app.logger.warning("could not record usage for instance=%s", observation.instance_id, exc_info=True)
         observation.__exit__(*error)
 
 
@@ -235,6 +247,17 @@ def normalize_usage(usage):
     result.setdefault("output", result.get("completion_tokens", result.get("output_tokens")))
     result.setdefault("total", result.get("total_tokens"))
     return {key: value for key, value in result.items() if value is not None}
+
+
+def record_usage(instance_id, model, usage, status_code=None, request_id=""):
+    usage = normalize_usage(usage) or {}
+    values = [usage.get(key, 0) or 0 for key in ("input", "output", "total")]
+    if not METADATA_DATABASE_URL or not instance_id or not any(values):
+        return
+    if psycopg is None:
+        raise RuntimeError("psycopg is required for usage recording")
+    with psycopg.connect(METADATA_DATABASE_URL) as connection:
+        connection.execute("INSERT INTO model_usage_events (instance_id, model, input_tokens, output_tokens, total_tokens, status_code, request_id) VALUES (%s, %s, %s, %s, %s, %s, %s)", (instance_id, model or None, *values, status_code, request_id or None))
 
 
 def request_context():
@@ -299,6 +322,7 @@ def proxy(path=""):
         for key in ("temperature", "top_p", "max_tokens", "stream")
         if isinstance(payload, dict) and key in payload
     }
+    request_id = request.headers.get("X-Request-Id", "") or str(uuid.uuid4())
     observation = OBSERVER.observe(
         agent_id=user_id,
         model=request_model(),
@@ -341,7 +365,7 @@ def proxy(path=""):
             observation.__exit__(None, None, None)
 
     return Response(
-        observed_content(upstream_response, observation),
+        observed_content(upstream_response, observation, user_id, request_model(), request_id),
         status=upstream_response.status_code,
         headers=response_headers(upstream_response),
     )

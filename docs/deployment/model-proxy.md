@@ -55,6 +55,8 @@ MODEL_PROXY_PUBLIC_BASE_URL=http://openclaw-model-proxy:8081/v1
 MODEL_PROXY_TOKEN_DIR=/data/docker/openclaw-public/model-proxy-tokens
 MODEL_PROXY_UPSTREAM_BASE_URL=http://127.0.0.1:18080/v1
 MODEL_PROXY_UPSTREAM_API_KEY=replace-with-your-upstream-api-key
+# PostgreSQL metadata database used for per-request usage events
+METADATA_DATABASE_URL=postgresql://user:password@host:5432/openclaw
 ```
 
 启用内置 `model-proxy` 时，用户实例中的模型 Provider 应使用：
@@ -76,6 +78,36 @@ MODEL_BASE_URL=http://openclaw-model-proxy:8081/v1
 ```
 
 `MODEL_BASE_URL` 保留用于兼容旧脚本输入；优先使用 `MODEL_PROXY_PUBLIC_BASE_URL`。
+
+## Token 用量明细
+
+model-proxy 会在上游响应包含 `usage` 时，向 PostgreSQL 的
+`model_usage_events` 表写入一条明细。记录按实例 Token 归属，包含实例、模型、输入/输出/总
+Token、HTTP 状态码、请求 ID 和时间。上游未返回 usage、请求失败或 PostgreSQL 暂时不可用时，
+不会生成明细；统计写入失败只记录日志，不阻断模型响应。
+
+`db/schema.postgres.sql` 已包含建表语句。初始化或升级 PostgreSQL 元数据数据库后，可按实例
+汇总：
+
+```sql
+SELECT instance_id,
+       SUM(input_tokens) AS input_tokens,
+       SUM(output_tokens) AS output_tokens,
+       SUM(total_tokens) AS total_tokens
+FROM model_usage_events
+GROUP BY instance_id
+ORDER BY total_tokens DESC;
+```
+
+按时间范围查询时使用 `created_at`，例如最近 24 小时：
+
+```sql
+SELECT instance_id, SUM(total_tokens) AS total_tokens
+FROM model_usage_events
+WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+GROUP BY instance_id
+ORDER BY total_tokens DESC;
+```
 
 ## 可替换网关
 
@@ -180,7 +212,7 @@ qwen3.6-27b-fp8
 - 上游模型服务应尽量只允许 `model-proxy` 所在网络或主机访问。
 - 如果上游模型服务本身没有鉴权，必须通过网络层阻止用户实例直连上游；否则 model-proxy 只能隐藏配置，不能阻止用户绕过代理直接调用上游。
 - 如果上游 API Key 有多个模型权限，应使用每实例 `.models` 白名单限制实际可见和可调用的模型。
-- 当前版本是轻量透明代理，不包含配额、限流和审计页面。
+- 当前版本是轻量透明代理，不包含配额、限流和审计页面；Token 用量明细需直接查询 PostgreSQL。
 
 ## 验证
 

@@ -118,6 +118,7 @@ sudo -E python3 scripts/check_metadata_consistency.py
 - [模型代理部署](docs/deployment/model-proxy.md)
 - [Manager Web 认证](docs/deployment/local-auth.md)
 - [用户、身份与实例迁移](docs/architecture/user-identity-instance-migration.md)
+- [功能发布时间轴](docs/architecture/release-timeline.md)
 - [元数据存储规划](docs/architecture/metadata-storage-plan.md)
 - [元数据数据字典](docs/architecture/metadata-data-dictionary.md)
 - [Web 服务拆分](docs/architecture/web-service-split.md)

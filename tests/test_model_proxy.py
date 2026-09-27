@@ -55,7 +55,7 @@ class ModelProxyTests(unittest.TestCase):
                 pass
 
         observation = Observation()
-        self.assertEqual(list(app.observed_content(Upstream(), observation)), [b"a", b"b"])
+        self.assertEqual(list(app.observed_content(Upstream(), observation, "one")), [b"a", b"b"])
         self.assertEqual(observation.exit_args, (None, None, None))
 
     def test_observed_content_records_stream_error(self):
@@ -78,7 +78,7 @@ class ModelProxyTests(unittest.TestCase):
 
         observation = Observation()
         with self.assertRaisesRegex(RuntimeError, "stream failed"):
-            list(app.observed_content(Upstream(), observation))
+            list(app.observed_content(Upstream(), observation, "one"))
         self.assertIs(observation.exit_args[0], RuntimeError)
         self.assertIsInstance(observation.exit_args[1], RuntimeError)
 
@@ -124,6 +124,18 @@ class ModelProxyTests(unittest.TestCase):
         self.assertEqual(usage["total_tokens"], 3)
         self.assertEqual(app.normalize_usage(usage)["input"], 2)
         self.assertEqual(app.normalize_usage(usage)["output"], 1)
+
+    def test_record_usage_accumulates_per_instance(self):
+        app = load_app()
+        app.METADATA_DATABASE_URL = "postgresql://test"
+        calls = []
+        class Connection:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def execute(self, query, params): calls.append((query, params))
+        app.psycopg = types.SimpleNamespace(connect=lambda url: Connection())
+        app.record_usage("one", "model-a", {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}, 200, "req-1")
+        self.assertEqual(calls[0][1], ("one", "model-a", 2, 1, 3, 200, "req-1"))
 
 
 if __name__ == "__main__":

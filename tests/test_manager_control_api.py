@@ -817,6 +817,33 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(response.get_json(), {"error": "invalid pagination"})
 
+    def test_admin_instance_usage_converts_dates_and_paginates(self):
+        payload = {
+            "instance": {"public_id": "instance-1"}, "summary": {},
+            "events": [], "pagination": {},
+        }
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ), patch.object(
+            self.control.request, "args", {
+                "start": "2026-09-27", "end": "2026-09-27",
+                "page": "2", "per_page": "10",
+            }
+        ), patch.object(
+            self.control.metadata_store, "get_model_usage", return_value=payload
+        ) as get_usage:
+            response, status = response_parts(
+                self.control.admin_instance_usage("instance-1")
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json(), payload)
+        get_usage.assert_called_once_with(
+            "instance-1", "2026-09-27T00:00:00+08:00",
+            "2026-09-28T00:00:00+08:00", page=2, per_page=10,
+            db_file=self.control.DB_FILE,
+        )
+
     def test_admin_imports_uis_users_idempotently_and_records_audit(self):
         admin = self.control.metadata_store.create_user("admin", db_file=self.db_file)
         self.control.metadata_store.set_user_role(admin["id"], "admin", db_file=self.db_file)

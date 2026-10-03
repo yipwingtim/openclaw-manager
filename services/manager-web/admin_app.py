@@ -326,10 +326,30 @@ def instance_usage_page(instance_public_id):
     if any(value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) for value in (start, end)):
         return render_template("error.html", message="日期格式无效"), 400
     try:
-        usage = control_client.get_admin_instance_usage(instance_public_id, start=start, end=end)
+        page = int(request.args.get("page", 1))
+        per_page = int(request.args.get("per_page", DEFAULT_INSTANCE_PAGE_SIZE))
+    except (TypeError, ValueError):
+        return render_template("error.html", message="分页参数无效"), 400
+    if page < 1 or per_page not in INSTANCE_PAGE_SIZE_OPTIONS:
+        return render_template("error.html", message="分页参数无效"), 400
+    try:
+        usage = control_client.get_admin_instance_usage(
+            instance_public_id, start=start, end=end, page=page, per_page=per_page,
+        )
     except control_client.ControlError as exc:
         return render_template("error.html", message=str(exc)), getattr(exc, "status_code", 502) or 502
-    return render_template("admin_usage.html", usage=usage, start=start, end=end)
+    pagination = usage["pagination"]
+    pagination.update({
+        "start": (page - 1) * per_page + 1 if pagination["total"] else 0,
+        "end": min(page * per_page, pagination["total"]),
+        "has_prev": page > 1, "has_next": page < pagination["total_pages"],
+        "prev_page": max(1, page - 1),
+        "next_page": min(pagination["total_pages"], page + 1),
+    })
+    return render_template(
+        "admin_usage.html", usage=usage, start=start, end=end,
+        pagination=pagination, page_size_options=INSTANCE_PAGE_SIZE_OPTIONS,
+    )
 
 
 @app.get("/admin/create-instance")

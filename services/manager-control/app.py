@@ -815,6 +815,13 @@ def admin_instance_usage(instance_public_id):
         return jsonify({"error": "invalid instance id"}), 400
     start = request.args.get("start", "").strip()
     end = request.args.get("end", "").strip()
+    try:
+        page = int(request.args.get("page", 1))
+        per_page = int(request.args.get("per_page", 20))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid pagination"}), 400
+    if page < 1 or per_page not in {10, 20, 50, 100}:
+        return jsonify({"error": "invalid pagination"}), 400
     if any(value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) for value in (start, end)):
         return jsonify({"error": "invalid date"}), 400
     if start:
@@ -824,7 +831,10 @@ def admin_instance_usage(instance_public_id):
             tzinfo=DISPLAY_TIMEZONE
         ).isoformat()
     try:
-        return jsonify(metadata_store.get_model_usage(instance_public_id, start, end, db_file=DB_FILE))
+        return jsonify(metadata_store.get_model_usage(
+            instance_public_id, start, end, page=page, per_page=per_page,
+            db_file=DB_FILE,
+        ))
     except ValueError:
         return jsonify({"error": "instance not found"}), 404
 

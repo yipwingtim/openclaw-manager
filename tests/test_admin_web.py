@@ -46,6 +46,7 @@ def load_admin_app():
     control_client.ControlError = ControlError
     control_client.get_admin_metadata = lambda: {}
     control_client.get_activity_snapshots = lambda actor: []
+    control_client.get_admin_instance_usage = lambda *args, **kwargs: {}
     control_client.list_admin_instances = lambda: []
     control_client.list_admin_users = lambda: []
     control_client.list_platform_users = lambda **kwargs: {
@@ -189,6 +190,34 @@ class AdminWebTests(unittest.TestCase):
         })
         self.assertEqual(context["instances"], [])
         self.assertEqual(context["operations"], [])
+
+    def test_instance_usage_passes_date_filters_and_pagination(self):
+        actor = {"public_id": "admin-1", "role": "admin"}
+        usage = {
+            "instance": {"public_id": "instance-1", "instance_name": "One"},
+            "summary": {"request_count": 25, "input_tokens": 1,
+                        "output_tokens": 2, "total_tokens": 3},
+            "events": [{"id": 11}],
+            "pagination": {"page": 2, "per_page": 10, "total": 25,
+                           "total_pages": 3},
+        }
+        self.admin.request.args = {
+            "start": "2026-09-01", "end": "2026-09-27",
+            "page": "2", "per_page": "10",
+        }
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "get_admin_instance_usage", return_value=usage
+        ) as get_usage:
+            template, context = self.admin.instance_usage_page("instance-1")
+
+        get_usage.assert_called_once_with(
+            "instance-1", start="2026-09-01", end="2026-09-27",
+            page=2, per_page=10,
+        )
+        self.assertEqual(template, "admin_usage.html")
+        self.assertEqual(context["pagination"]["start"], 11)
+        self.assertEqual(context["pagination"]["end"], 20)
+        self.assertTrue(context["pagination"]["has_next"])
 
     def test_admin_metadata_adds_runtime_summary_in_bounded_batches(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}

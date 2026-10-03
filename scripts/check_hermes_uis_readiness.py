@@ -137,7 +137,9 @@ def main():
         result = subprocess.run(
             ["openssl", "verify", "-CAfile", str(ca_path), "-untrusted", str(cert_path),
              identity_option, host, str(cert_path)],
-            text=True, capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         if result.returncode:
             valid = fail("NGINX_SSL_CERT chain or SAN does not validate for the issuer host") and valid

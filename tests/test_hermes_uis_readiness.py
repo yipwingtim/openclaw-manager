@@ -68,6 +68,14 @@ class HermesUisReadinessTests(unittest.TestCase):
         source = CHECKER.read_text(encoding="utf-8")
         self.assertNotIn(".removeprefix(", source)
         self.assertIn('cert_value[len("/etc/nginx/certs/") :]', source)
+
+    def test_checker_uses_python36_compatible_subprocess_options(self):
+        source = CHECKER.read_text(encoding="utf-8")
+        self.assertIn("universal_newlines=True", source)
+        self.assertIn("stdout=subprocess.PIPE", source)
+        self.assertIn("stderr=subprocess.PIPE", source)
+        self.assertNotIn("capture_output=True", source)
+        self.assertNotIn("text=True", source)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

@@ -1446,7 +1446,10 @@ def list_instances(status=None, db_file=None, conn=None, *, limit=None, offset=0
         return [instance_dict(row) for row in rows]
 
 
-def get_model_usage(instance_public_id, start=None, end=None, *, db_file=None, conn=None):
+def get_model_usage(
+    instance_public_id, start=None, end=None, *, page=1, per_page=20,
+    db_file=None, conn=None,
+):
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
@@ -1466,9 +1469,19 @@ def get_model_usage(instance_public_id, start=None, end=None, *, db_file=None, c
             f"SELECT COUNT(*) AS request_count, COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens FROM model_usage_events WHERE {where}", params,
         ).fetchone()
         events = active_conn.execute(
-            f"SELECT id, model, input_tokens, output_tokens, total_tokens, status_code, request_id, created_at FROM model_usage_events WHERE {where} ORDER BY created_at DESC, id DESC LIMIT 200", params,
+            f"SELECT id, model, input_tokens, output_tokens, total_tokens, status_code, request_id, created_at FROM model_usage_events WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            [*params, per_page, (page - 1) * per_page],
         ).fetchall()
-        return {"instance": dict(instance), "summary": dict(summary), "events": [dict(row) for row in events]}
+        total = summary["request_count"]
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        return {
+            "instance": dict(instance), "summary": dict(summary),
+            "events": [dict(row) for row in events],
+            "pagination": {
+                "page": page, "per_page": per_page, "total": total,
+                "total_pages": total_pages,
+            },
+        }
 
 
 def set_instance_basic_auth(instance_public_id, enabled, *, db_file=None, conn=None):

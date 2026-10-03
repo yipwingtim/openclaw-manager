@@ -167,9 +167,13 @@ def list_admin_instances():
     return request_json("GET", "/internal/v1/admin/instances")["instances"]
 
 
-def get_admin_instance_usage(instance_public_id, *, start=None, end=None):
+def get_admin_instance_usage(instance_public_id, *, start=None, end=None, page=1, per_page=20):
     instance_id = urllib.parse.quote(instance_public_id, safe="")
-    params = urllib.parse.urlencode({key: value for key, value in (("start", start), ("end", end)) if value})
+    params = urllib.parse.urlencode({
+        key: value for key, value in (
+            ("start", start), ("end", end), ("page", page), ("per_page", per_page)
+        ) if value is not None
+    })
     return request_json("GET", f"/internal/v1/admin/instances/{instance_id}/usage" + (f"?{params}" if params else ""))
 
 

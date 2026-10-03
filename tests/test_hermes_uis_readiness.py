@@ -96,7 +96,13 @@ class HermesUisReadinessTests(unittest.TestCase):
             "NGINX_SSL_CERT": str(self.leaf),
         }
         env.update(overrides)
-        return subprocess.run([sys.executable, str(CHECKER)], env={**os.environ, **env}, text=True, capture_output=True)
+        return subprocess.run(
+            [sys.executable, str(CHECKER)],
+            env={**os.environ, **env},
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
     def test_accepts_valid_configuration_without_printing_secret_material(self):
         result = self.run_checker(SENSITIVE_PASSWORD="must-not-appear")
@@ -202,7 +208,7 @@ class HermesUisSigningKeyInitTests(unittest.TestCase):
         return subprocess.run([
             sys.executable, str(INIT), "--config", str(self.config),
             "--key-file", str(self.key), "--kid", "current", *args,
-        ], text=True, capture_output=True)
+        ], universal_newlines=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def test_preview_does_not_write(self):
         result = self.run_init()

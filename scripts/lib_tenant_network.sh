@@ -201,7 +201,11 @@ def inspect(names):
     if not names:
         return {}
     result = subprocess.run(
-        ["docker", "inspect", *names], capture_output=True, text=True, check=False
+        ["docker", "inspect", *names],
+        universal_newlines=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
     )
     if not result.stdout.strip():
         return {}
@@ -217,8 +221,9 @@ def inspect(names):
 
 result = subprocess.run(
     ["docker", "ps", "--format", "{{.Names}}"],
-    capture_output=True,
-    text=True,
+    universal_newlines=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
     check=False,
 )
 if result.returncode != 0:
@@ -252,7 +257,10 @@ for _ in range(3):
         service, network = pair
         labels = subprocess.run(
             ["docker", "network", "inspect", network, "--format", "{{json .Labels}}"],
-            capture_output=True, text=True, check=False,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
         )
         try:
             trusted_proxy = json.loads(labels.stdout or "null") or {}
@@ -262,7 +270,10 @@ for _ in range(3):
         if service == nginx and trusted_proxy:
             subnet = subprocess.run(
                 ["docker", "network", "inspect", network, "--format", "{{json .IPAM.Config}}"],
-                capture_output=True, text=True, check=False,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
             )
             try:
                 import ipaddress
@@ -272,13 +283,19 @@ for _ in range(3):
                     return subprocess.CompletedProcess([], 1, stderr="invalid tenant IPv4 subnet")
                 return subprocess.run(
                     ["docker", "network", "connect", "--ip", str(ipv4[0].network_address + 2), network, service],
-                    capture_output=True, text=True, check=False,
+                    universal_newlines=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
                 )
             except (ValueError, KeyError, TypeError, json.JSONDecodeError):
                 return subprocess.CompletedProcess([], 1, stderr="invalid tenant IPv4 subnet")
         return subprocess.run(
             ["docker", "network", "connect", network, service],
-            capture_output=True, text=True, check=False,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
         )
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(connect, missing))

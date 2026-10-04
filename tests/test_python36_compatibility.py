@@ -27,6 +27,11 @@ class Python36CompatibilityTests(unittest.TestCase):
         self.assertIn("stdout=subprocess.PIPE", source)
         self.assertIn("stderr=subprocess.PIPE", source)
 
+    def test_tenant_network_allocator_does_not_use_python37_network_helpers(self):
+        source = (ROOT / "scripts" / "tenant_network_allocator.py").read_text()
+        self.assertNotIn(".subnet_of(", source)
+        self.assertNotIn(".supernet_of(", source)
+
 
 if __name__ == "__main__":
     unittest.main()

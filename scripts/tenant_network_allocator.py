@@ -125,7 +125,7 @@ def validate_existing(network, data, pool, subnet_prefix, excluded, host_routes)
     if len(subnets) != 1:
         raise AllocationError(f"existing tenant network {network} must have one IPv4 subnet")
     subnet = subnets[0]
-    if not subnet.subnet_of(pool):
+    if not subnet.network_address >= pool.network_address or not subnet.broadcast_address <= pool.broadcast_address:
         raise AllocationError(
             f"existing tenant network {network} subnet {subnet} is outside configured tenant pool {pool}"
         )

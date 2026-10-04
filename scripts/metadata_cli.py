@@ -13,7 +13,12 @@ from legacy_recycle import deleted_payload
 SCRIPT_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(MANAGER_DIR / "services" / "manager-web"))
-CONFIG_FILE = MANAGER_DIR / "config" / "openclaw-manager.env"
+CONFIG_FILE = Path(
+    os.environ.get(
+        "OPENCLAW_MANAGER_CONFIG_FILE",
+        str(MANAGER_DIR / "config" / "openclaw-manager.env"),
+    )
+)
 METADATA_STORE_FILE = MANAGER_DIR / "services" / "manager-web" / "metadata_store.py"
 
 

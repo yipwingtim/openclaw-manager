@@ -37,6 +37,13 @@ class Python36CompatibilityTests(unittest.TestCase):
         self.assertNotIn("add_subparsers(dest=\"command\", required=True)", source)
         self.assertIn('if not getattr(args, "command", None):', source)
 
+    def test_metadata_consistency_tests_support_python36(self):
+        source = (ROOT / "tests" / "test_upgrade_metadata_consistency.py").read_text()
+        self.assertNotIn("capture_output=True", source)
+        self.assertNotIn("text=True", source)
+        self.assertIn('env["METADATA_DB_BACKEND"] = "sqlite"', source)
+        self.assertIn('env.pop("METADATA_DATABASE_URL", None)', source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,16 +20,20 @@ class UpgradeMetadataConsistencyTests(unittest.TestCase):
         public_dir = root / "public"
         public_dir.mkdir()
         env = os.environ.copy()
+        env["OPENCLAW_MANAGER_CONFIG_FILE"] = str(root / "missing-manager.env")
         env["OPENCLAW_PUBLIC_DIR"] = str(public_dir)
+        env["METADATA_DB_BACKEND"] = "sqlite"
         env["METADATA_DB_FILE"] = str(public_dir / "manager.db")
         env["METADATA_SCHEMA_FILE"] = str(ROOT_DIR / "db" / "schema.sql")
+        env.pop("METADATA_DATABASE_URL", None)
         return env
 
     def run_metadata(self, env, *args):
         return subprocess.run(
             ["python3", str(METADATA_CLI), *args],
-            text=True,
-            capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env,
             check=False,
         )
@@ -170,8 +174,9 @@ class UpgradeMetadataConsistencyTests(unittest.TestCase):
     def run_upgrade(self, script, env=None):
         return subprocess.run(
             ["bash", str(script), "alice", "2026.6.11"],
-            text=True,
-            capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env,
             check=False,
         )
@@ -267,8 +272,9 @@ class UpgradeMetadataConsistencyTests(unittest.TestCase):
 
             result = subprocess.run(
                 ["bash", str(script), "alice", "2026.6.11"],
-                text=True,
-                capture_output=True,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 env=env,
                 check=False,
             )

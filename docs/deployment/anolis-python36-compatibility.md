@@ -30,6 +30,9 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
 - `scripts/metadata_cli.py` performs the required subcommand check after
   parsing instead of passing `required=True` to `add_subparsers()`. This keeps
   instance metadata registration compatible with Python 3.6.
+- Metadata consistency tests use Python 3.6-compatible subprocess options and
+  explicitly select an isolated temporary SQLite database. They override the
+  Manager config path and cannot inherit a production PostgreSQL URL.
 
 ## Verification
 
@@ -39,7 +42,8 @@ Run the compatibility checks from the repository root:
 python3 -m unittest \
   tests.test_hermes_uis_readiness \
   tests.test_python36_compatibility \
-  tests.test_tenant_network_allocator
+  tests.test_tenant_network_allocator \
+  tests.test_upgrade_metadata_consistency
 ```
 
 The replacement is behavior-preserving on Python 3.10+ and Python 3.6: it

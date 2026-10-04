@@ -18,7 +18,10 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 MANAGER_DIR = SCRIPT_DIR.parent
-CONFIG_FILE = MANAGER_DIR / "config" / "openclaw-manager.env"
+CONFIG_FILE = Path(os.environ.get(
+    "OPENCLAW_MANAGER_CONFIG_FILE",
+    str(MANAGER_DIR / "config" / "openclaw-manager.env"),
+))
 HERMES_BRIDGE_CA_CONTAINER_FILE = "/opt/data/manager-auth/bridge-ca.crt"
 
 
@@ -666,7 +669,8 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
                 f"{user_id}: metadata container={db_row.get('container_name')} expected={expected_container}",
             )
         if os.environ.get("MANAGER_CONTROL_INSTANCE_AUTH_TOKEN", "").strip():
-            hermes_conf = NGINX_USERS_CONF_DIR / f"hermes-{db_row['public_id']}.conf"
+            public_id = db_row.get("public_id") or user_id
+            hermes_conf = NGINX_USERS_CONF_DIR / f"hermes-{public_id}.conf"
             if not detect_nginx_conf(hermes_conf)["instance_auth"]:
                 reporter.error(
                     "instance_auth_missing",

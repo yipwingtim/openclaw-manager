@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import runpy
+import os
 import sqlite3
 import unittest
 import tempfile
@@ -12,7 +13,27 @@ from tests.tls_fixtures import write_test_ca
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+_saved_config = os.environ.get("OPENCLAW_MANAGER_CONFIG_FILE")
+_saved_backend = os.environ.get("METADATA_DB_BACKEND")
+_saved_url = os.environ.get("METADATA_DATABASE_URL")
+os.environ["OPENCLAW_MANAGER_CONFIG_FILE"] = str(
+    Path(tempfile.gettempdir()) / "openclaw-manager-test-config-missing"
+)
+os.environ["METADATA_DB_BACKEND"] = "sqlite"
+os.environ.pop("METADATA_DATABASE_URL", None)
 CHECKER = runpy.run_path(str(ROOT_DIR / "scripts" / "check_metadata_consistency.py"))
+if _saved_config is None:
+    os.environ.pop("OPENCLAW_MANAGER_CONFIG_FILE", None)
+else:
+    os.environ["OPENCLAW_MANAGER_CONFIG_FILE"] = _saved_config
+if _saved_backend is None:
+    os.environ.pop("METADATA_DB_BACKEND", None)
+else:
+    os.environ["METADATA_DB_BACKEND"] = _saved_backend
+if _saved_url is None:
+    os.environ.pop("METADATA_DATABASE_URL", None)
+else:
+    os.environ["METADATA_DATABASE_URL"] = _saved_url
 Reporter = CHECKER["Reporter"]
 check_deleted_recycle_dirs = CHECKER["check_deleted_recycle_dirs"]
 check_global = CHECKER["check_global"]

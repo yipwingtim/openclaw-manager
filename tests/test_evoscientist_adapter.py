@@ -13,10 +13,22 @@ from unittest.mock import patch
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+_saved_backend = os.environ.get("METADATA_DB_BACKEND")
+_saved_url = os.environ.get("METADATA_DATABASE_URL")
+os.environ["METADATA_DB_BACKEND"] = "sqlite"
+os.environ.pop("METADATA_DATABASE_URL", None)
 MANAGER_WEB_DIR = ROOT_DIR / "services" / "manager-web"
 sys.path.insert(0, str(MANAGER_WEB_DIR))
 
 from instance_adapters import EvoScientistDockerAdapter
+if _saved_backend is None:
+    os.environ.pop("METADATA_DB_BACKEND", None)
+else:
+    os.environ["METADATA_DB_BACKEND"] = _saved_backend
+if _saved_url is None:
+    os.environ.pop("METADATA_DATABASE_URL", None)
+else:
+    os.environ["METADATA_DATABASE_URL"] = _saved_url
 
 
 class EvoScientistAdapterTests(unittest.TestCase):

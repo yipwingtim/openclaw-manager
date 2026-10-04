@@ -20,6 +20,10 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
 - `scripts/tenant_network_allocator.py` performs the required subcommand check
   in `main()` instead of passing `required=True` to `add_subparsers()`, which
   was added after Python 3.6.
+- The allocator's shared Docker and route command runner uses
+  `universal_newlines=True`, `stdout=subprocess.PIPE`, and
+  `stderr=subprocess.PIPE`; this covers the runtime path exercised by
+  `create_user.sh`.
 
 ## Verification
 

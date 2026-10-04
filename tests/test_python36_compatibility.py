@@ -19,6 +19,14 @@ class Python36CompatibilityTests(unittest.TestCase):
         self.assertNotIn("add_subparsers(dest=\"command\", required=True)", source)
         self.assertIn('if not getattr(args, "command", None):', source)
 
+    def test_tenant_network_allocator_subprocess_calls_support_python36(self):
+        source = (ROOT / "scripts" / "tenant_network_allocator.py").read_text()
+        self.assertNotIn("capture_output=True", source)
+        self.assertNotIn("text=True", source)
+        self.assertIn("universal_newlines=True", source)
+        self.assertIn("stdout=subprocess.PIPE", source)
+        self.assertIn("stderr=subprocess.PIPE", source)
+
 
 if __name__ == "__main__":
     unittest.main()

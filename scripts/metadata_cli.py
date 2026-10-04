@@ -380,7 +380,7 @@ def bind_identity(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Write OpenClaw Manager metadata records.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
 
     record = subparsers.add_parser("record-operation")
     record.add_argument("--action", required=True)
@@ -457,6 +457,8 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if not getattr(args, "command", None):
+        parser.error("the following arguments are required: command")
     args.func(args)
 
 

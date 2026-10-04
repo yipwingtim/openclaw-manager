@@ -57,6 +57,10 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
 - Subprocess-based metadata registration tests pass the same isolated config
   and SQLite environment to the child process; this prevents a child CLI from
   falling back to a root-only production env file.
+- Metadata consistency config loading tolerates an unreadable optional env
+  file and continues with explicit environment variables or safe defaults.
+  This keeps read-only inventory/checker imports usable for non-root operators
+  without changing production permission requirements.
 
 ## Verification
 

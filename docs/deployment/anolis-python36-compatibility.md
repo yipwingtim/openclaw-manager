@@ -27,6 +27,9 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
 - Existing tenant subnet validation compares network and broadcast boundaries
   directly instead of using `IPv4Network.subnet_of()`, which is unavailable in
   Python 3.6.
+- `scripts/metadata_cli.py` performs the required subcommand check after
+  parsing instead of passing `required=True` to `add_subparsers()`. This keeps
+  instance metadata registration compatible with Python 3.6.
 
 ## Verification
 

@@ -32,6 +32,11 @@ class Python36CompatibilityTests(unittest.TestCase):
         self.assertNotIn(".subnet_of(", source)
         self.assertNotIn(".supernet_of(", source)
 
+    def test_metadata_cli_does_not_use_python37_subparser_required(self):
+        source = (ROOT / "scripts" / "metadata_cli.py").read_text()
+        self.assertNotIn("add_subparsers(dest=\"command\", required=True)", source)
+        self.assertIn('if not getattr(args, "command", None):', source)
+
 
 if __name__ == "__main__":
     unittest.main()

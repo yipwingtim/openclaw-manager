@@ -14,6 +14,11 @@ class Python36CompatibilityTests(unittest.TestCase):
         self.assertGreaterEqual(source.count("stdout=subprocess.PIPE"), 6)
         self.assertGreaterEqual(source.count("stderr=subprocess.PIPE"), 6)
 
+    def test_tenant_network_allocator_does_not_use_python37_subparser_required(self):
+        source = (ROOT / "scripts" / "tenant_network_allocator.py").read_text()
+        self.assertNotIn("add_subparsers(dest=\"command\", required=True)", source)
+        self.assertIn('if not getattr(args, "command", None):', source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,9 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
 - `scripts/lib_tenant_network.sh` uses the same options in its embedded Python
   helper for Docker inspection and network connection operations. This keeps
   the deployment post-check compatible with Anolis Python 3.6.
+- `scripts/tenant_network_allocator.py` performs the required subcommand check
+  in `main()` instead of passing `required=True` to `add_subparsers()`, which
+  was added after Python 3.6.
 
 ## Verification
 

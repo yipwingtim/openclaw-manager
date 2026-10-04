@@ -249,7 +249,7 @@ def add_common_arguments(parser):
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Manage isolated tenant Docker networks")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
 
     plan = subparsers.add_parser("plan")
     add_common_arguments(plan)
@@ -269,6 +269,8 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
+    if not getattr(args, "command", None):
+        build_parser().error("the following arguments are required: command")
     try:
         args.handler(args)
     except AllocationError as exc:

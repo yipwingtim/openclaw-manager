@@ -15,7 +15,7 @@ MIGRATION = ROOT_DIR / "scripts" / "migrate_control_plane_model.py"
 class ControlPlaneMigrationTests(unittest.TestCase):
     def make_v3_database(self, root):
         db_file = root / "manager.db"
-        with sqlite3.connect(db_file) as conn:
+        with sqlite3.connect(str(db_file)) as conn:
             conn.executescript(SCHEMA.read_text(encoding="utf-8"))
             conn.execute("DELETE FROM schema_migrations WHERE version > 3")
             conn.executescript(
@@ -124,7 +124,7 @@ class ControlPlaneMigrationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("schema v3 -> v4", result.stdout)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
@@ -142,7 +142,7 @@ class ControlPlaneMigrationTests(unittest.TestCase):
             result = self.run_migration(db_file, "--apply")
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
@@ -171,7 +171,7 @@ class ControlPlaneMigrationTests(unittest.TestCase):
             self.assertEqual(violations, [])
             backups = list(root.glob("manager.db.pre-v4-*.bak"))
             self.assertEqual(len(backups), 1)
-            with sqlite3.connect(backups[0]) as backup:
+            with sqlite3.connect(str(backups[0])) as backup:
                 self.assertEqual(
                     backup.execute(
                         "SELECT MAX(version) FROM schema_migrations"
@@ -203,7 +203,7 @@ class ControlPlaneMigrationTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
@@ -213,7 +213,7 @@ class ControlPlaneMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             db_file = self.make_v3_database(root)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.execute(
                     "INSERT INTO operation_records (action, status) VALUES ('duplicate', 'success')"
                 )
@@ -245,7 +245,7 @@ class ControlPlaneMigrationTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]

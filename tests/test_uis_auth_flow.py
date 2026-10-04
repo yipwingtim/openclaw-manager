@@ -75,7 +75,7 @@ class UISAuthFlowTests(unittest.TestCase):
         ) as external_login:
             response = self.web_common.external_callback(self.app)
 
-        payload = external_login.call_args.args[0]
+        payload = external_login.call_args[0][0]
         self.assertEqual(
             payload["external_token_hash"],
             self.web_common.token_hash("uis-access-token"),
@@ -149,7 +149,7 @@ class UISAuthFlowTests(unittest.TestCase):
             response = self.web_common.login_page(self.app)
 
         self.assertIs(response, rendered)
-        self.assertEqual(render.call_args.kwargs["external_login_url"], "/auth/uis/login")
+        self.assertEqual(render.call_args[1]["external_login_url"], "/auth/uis/login")
 
     def test_local_login_returns_to_pending_hermes_authorization(self):
         return_path = "/auth/hermes/authorize?client_id=client-1"
@@ -187,7 +187,7 @@ class UISAuthFlowTests(unittest.TestCase):
 
         self.assertEqual(current["provider"], "local")
         self.assertEqual(
-            [call.args[1] for call in resolve_session.call_args_list],
+            [call[0][1] for call in resolve_session.call_args_list],
             ["campus-uis", "local"],
         )
 

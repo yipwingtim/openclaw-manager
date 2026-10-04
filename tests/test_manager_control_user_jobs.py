@@ -186,9 +186,9 @@ class ManagerControlUserJobTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         conn.execute.assert_called_once_with("BEGIN IMMEDIATE")
-        self.assertIs(list_jobs.call_args.kwargs["conn"], conn)
-        self.assertNotIn("actor_user_public_id", list_jobs.call_args.kwargs)
-        self.assertIs(create_job.call_args.kwargs["conn"], conn)
+        self.assertIs(list_jobs.call_args[1]["conn"], conn)
+        self.assertNotIn("actor_user_public_id", list_jobs.call_args[1])
+        self.assertIs(create_job.call_args[1]["conn"], conn)
 
 
 if __name__ == "__main__":

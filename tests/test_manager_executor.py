@@ -51,10 +51,10 @@ class ManagerExecutorTests(unittest.TestCase):
         adapter.start.assert_called_with(control.claim.return_value["instance"])
         self.assertEqual(adapter.start.call_count, 2)
         self.assertEqual(
-            control.update.call_args_list[-1].args,
+            control.update.call_args_list[-1][0],
             ("request-1", "succeeded"),
         )
-        self.assertEqual(control.update.call_args_list[-1].kwargs["output"], "started")
+        self.assertEqual(control.update.call_args_list[-1][1]["output"], "started")
 
     def test_registry_returns_hermes_adapter(self):
         adapter = self.executor.get_adapter("hermes")
@@ -127,12 +127,12 @@ class ManagerExecutorTests(unittest.TestCase):
         )
         adapter.reload_nginx.assert_called_once()
         connect = adapter.run_command.call_args_list[1]
-        self.assertIn("connect_shared_services_to_tenant_networks", connect.args[0][2])
-        self.assertEqual(connect.args[0][-2:], ["nginx", "openclaw-model-proxy"])
+        self.assertIn("connect_shared_services_to_tenant_networks", connect[0][0][2])
+        self.assertEqual(connect[0][0][-2:], ["nginx", "openclaw-model-proxy"])
         self.assertFalse(secret_path.exists())
-        self.assertEqual(control.update.call_args.args, ("create-1", "succeeded"))
-        self.assertEqual(control.update.call_args.kwargs["output"], "instance created")
-        self.assertEqual(control.update.call_args.kwargs["result"]["openclaw_token"], "runtime-token")
+        self.assertEqual(control.update.call_args[0], ("create-1", "succeeded"))
+        self.assertEqual(control.update.call_args[1]["output"], "instance created")
+        self.assertEqual(control.update.call_args[1]["result"]["openclaw_token"], "runtime-token")
 
     def test_run_once_passes_requested_creation_version(self):
         control = Mock()
@@ -156,7 +156,7 @@ class ManagerExecutorTests(unittest.TestCase):
             with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir):
                 self.executor.run_once(control, lambda product: adapter)
 
-        self.assertEqual(adapter.create.call_args.kwargs["version"], "2026.7.28")
+        self.assertEqual(adapter.create.call_args[1]["version"], "2026.7.28")
 
     def test_openclaw_creation_result_rejects_symlinked_config(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -278,14 +278,14 @@ class ManagerExecutorTests(unittest.TestCase):
                 self.executor.run_once(control, lambda product: adapter)
 
         adapter.configure_ingress.assert_called_once_with(instance)
-        self.assertEqual(adapter.create.call_args.args[1:3], ("false", ""))
+        self.assertEqual(adapter.create.call_args[0][1:3], ("false", ""))
         control.create_hermes_auth_client.assert_called_once_with(
             "instance-1",
             {"client_id": "client", "client_secret": "secret",
              "redirect_uri": "https://example.test:39119/auth/callback"},
         )
         control.delete_hermes_auth_client.assert_not_called()
-        result = control.update.call_args.kwargs["result"]
+        result = control.update.call_args[1]["result"]
         self.assertEqual(result["access_url"], "https://example.test:39119")
         self.assertEqual(result["openclaw_token"], "")
 
@@ -315,11 +315,11 @@ class ManagerExecutorTests(unittest.TestCase):
 
         self.assertEqual(adapter.run_command.call_count, 2)
         rollback = adapter.run_command.call_args_list[1]
-        self.assertTrue(str(rollback.args[0][0]).endswith("scripts/delete_user.sh"))
-        self.assertEqual(rollback.kwargs["env"]["OPENCLAW_SKIP_METADATA_WRITE"], "1")
-        self.assertEqual(control.update.call_args.args, ("create-1", "failed"))
-        self.assertIn("recycle bin", control.update.call_args.kwargs["output"])
-        self.assertIn("nginx failed", control.update.call_args.kwargs["output"])
+        self.assertTrue(str(rollback[0][0][0]).endswith("scripts/delete_user.sh"))
+        self.assertEqual(rollback[1]["env"]["OPENCLAW_SKIP_METADATA_WRITE"], "1")
+        self.assertEqual(control.update.call_args[0], ("create-1", "failed"))
+        self.assertIn("recycle bin", control.update.call_args[1]["output"])
+        self.assertIn("nginx failed", control.update.call_args[1]["output"])
 
     def test_run_once_rolls_back_when_shared_network_reconnect_fails(self):
         control = Mock()
@@ -351,8 +351,8 @@ class ManagerExecutorTests(unittest.TestCase):
                 self.executor.run_once(control, lambda product: adapter)
 
         adapter.reload_nginx.assert_not_called()
-        self.assertEqual(control.update.call_args.args, ("create-1", "failed"))
-        self.assertIn("network reconnect failed", control.update.call_args.kwargs["output"])
+        self.assertEqual(control.update.call_args[0], ("create-1", "failed"))
+        self.assertIn("network reconnect failed", control.update.call_args[1]["output"])
 
     def test_run_once_redacts_secrets_from_creation_failure(self):
         control = Mock()
@@ -380,7 +380,7 @@ class ManagerExecutorTests(unittest.TestCase):
             with patch.object(self.executor, "PROVISIONING_SECRET_DIR", secret_dir):
                 self.executor.run_once(control, lambda product: adapter)
 
-        output = control.update.call_args.kwargs["output"]
+        output = control.update.call_args[1]["output"]
         self.assertIn("allocator failed", output)
         self.assertIn("[REDACTED]", output)
         self.assertNotIn("secret-password", output)
@@ -400,8 +400,8 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter, max_attempts=2)
 
         adapter.start.assert_not_called()
-        self.assertEqual(control.update.call_args.args, ("request-1", "succeeded"))
-        self.assertIn("already running", control.update.call_args.kwargs["output"])
+        self.assertEqual(control.update.call_args[0], ("request-1", "succeeded"))
+        self.assertIn("already running", control.update.call_args[1]["output"])
 
     def test_run_once_records_failure_after_limited_attempts(self):
         control = Mock()
@@ -419,8 +419,8 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter, max_attempts=2)
 
         self.assertEqual(adapter.stop.call_count, 2)
-        self.assertEqual(control.update.call_args.args, ("request-1", "failed"))
-        self.assertEqual(control.update.call_args.kwargs["output"], "docker failed")
+        self.assertEqual(control.update.call_args[0], ("request-1", "failed"))
+        self.assertEqual(control.update.call_args[1]["output"], "docker failed")
 
     def test_run_once_retries_adapter_exceptions(self):
         control = Mock()
@@ -438,7 +438,7 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter, max_attempts=2)
 
         self.assertEqual(adapter.start.call_count, 2)
-        self.assertEqual(control.update.call_args.args, ("request-1", "succeeded"))
+        self.assertEqual(control.update.call_args[0], ("request-1", "succeeded"))
 
     def test_run_once_does_not_blindly_retry_restart(self):
         control = Mock()
@@ -456,7 +456,7 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter, max_attempts=2)
 
         adapter.restart.assert_called_once()
-        self.assertEqual(control.update.call_args.args, ("request-1", "failed"))
+        self.assertEqual(control.update.call_args[0], ("request-1", "failed"))
 
     def test_run_once_rejects_action_not_supported_by_adapter(self):
         control = Mock()
@@ -474,9 +474,9 @@ class ManagerExecutorTests(unittest.TestCase):
 
         adapter.status.assert_not_called()
         adapter.restart.assert_not_called()
-        self.assertEqual(control.update.call_args.args, ("request-1", "failed"))
+        self.assertEqual(control.update.call_args[0], ("request-1", "failed"))
         self.assertEqual(
-            control.update.call_args.kwargs["error_summary"],
+            control.update.call_args[1]["error_summary"],
             "instance product does not support restart",
         )
 
@@ -504,8 +504,8 @@ class ManagerExecutorTests(unittest.TestCase):
         adapter.set_basic_auth.assert_called_once_with(
             control.claim.return_value["instance"], False
         )
-        self.assertEqual(control.update.call_args.args, ("basic-auth-1", "succeeded"))
-        self.assertEqual(control.update.call_args.kwargs["output"], "disabled")
+        self.assertEqual(control.update.call_args[0], ("basic-auth-1", "succeeded"))
+        self.assertEqual(control.update.call_args[1]["output"], "disabled")
 
     def test_run_once_updates_version_without_retry(self):
         control = Mock()
@@ -536,7 +536,7 @@ class ManagerExecutorTests(unittest.TestCase):
             "2026.7.28",
             restore_model_provider=True,
         )
-        self.assertEqual(control.update.call_args.args, ("version-1", "succeeded"))
+        self.assertEqual(control.update.call_args[0], ("version-1", "succeeded"))
 
     def test_run_once_installs_skill_without_retry(self):
         control = Mock()
@@ -561,7 +561,7 @@ class ManagerExecutorTests(unittest.TestCase):
         adapter.install_skill.assert_called_once_with(
             control.claim.return_value["instance"], "weather@1.0", request_id="skill-1"
         )
-        self.assertEqual(control.update.call_args.args, ("skill-1", "succeeded"))
+        self.assertEqual(control.update.call_args[0], ("skill-1", "succeeded"))
 
     def test_run_once_sets_model_provider_without_sensitive_params(self):
         control = Mock()
@@ -592,7 +592,7 @@ class ManagerExecutorTests(unittest.TestCase):
             control.claim.return_value["instance"], "openai", "openai/gpt-5",
             "https://models.example/v1", "GPT-5",
         )
-        self.assertEqual(control.update.call_args.args, ("model-provider-1", "succeeded"))
+        self.assertEqual(control.update.call_args[0], ("model-provider-1", "succeeded"))
 
     def test_run_once_refreshes_devices_without_retry(self):
         control = Mock()
@@ -618,7 +618,7 @@ class ManagerExecutorTests(unittest.TestCase):
         adapter.refresh_devices.assert_called_once_with(
             control.claim.return_value["instance"]
         )
-        self.assertEqual(control.update.call_args.args, ("devices-1", "succeeded"))
+        self.assertEqual(control.update.call_args[0], ("devices-1", "succeeded"))
 
     def test_run_once_approves_latest_device_with_stable_request_id(self):
         control = Mock()
@@ -661,7 +661,7 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter, max_attempts=2)
 
         adapter.delete.assert_called_once_with(control.claim.return_value["instance"])
-        self.assertEqual(control.update.call_args.args, ("delete-1", "failed"))
+        self.assertEqual(control.update.call_args[0], ("delete-1", "failed"))
 
     def test_run_once_restores_only_restorable_deleted_instance(self):
         control = Mock()
@@ -728,7 +728,7 @@ class ManagerExecutorTests(unittest.TestCase):
         self.executor.run_once(control, lambda product: adapter)
 
         adapter.purge_deleted.assert_called_once_with(instance)
-        self.assertEqual(control.update.call_args.args, ("purge-1", "succeeded"))
+        self.assertEqual(control.update.call_args[0], ("purge-1", "succeeded"))
 
     def test_run_once_executes_wechat_bind_with_resolved_runtime_target(self):
         control = Mock()
@@ -761,10 +761,10 @@ class ManagerExecutorTests(unittest.TestCase):
             self.executor.run_once(control, lambda product: adapter)
 
         popen.assert_called_once()
-        command = popen.call_args.args[0]
+        command = popen.call_args[0][0]
         self.assertEqual(command[:3], ["docker", "exec", "openclaw_alice"])
         self.assertIn("@tencent-weixin/openclaw-weixin-cli", command)
-        self.assertEqual(control.update.call_args_list[-1].args, ("request-wechat", "succeeded"))
+        self.assertEqual(control.update.call_args_list[-1][0], ("request-wechat", "succeeded"))
 
     def test_run_once_stops_wechat_bind_after_cancellation(self):
         control = Mock()
@@ -795,7 +795,7 @@ class ManagerExecutorTests(unittest.TestCase):
 
         process.terminate.assert_called_once()
         process.wait.assert_called_once_with(timeout=5)
-        self.assertEqual(run.call_args.args[0][:3], ["docker", "exec", "openclaw_alice"])
+        self.assertEqual(run.call_args[0][0][:3], ["docker", "exec", "openclaw_alice"])
 
     def test_run_once_does_not_start_wechat_bind_for_stopped_instance(self):
         control = Mock()
@@ -819,8 +819,8 @@ class ManagerExecutorTests(unittest.TestCase):
             self.executor.run_once(control, lambda product: adapter)
 
         popen.assert_not_called()
-        self.assertEqual(control.update.call_args.args, ("request-wechat", "failed"))
-        self.assertEqual(control.update.call_args.kwargs["error_summary"], "instance is not running")
+        self.assertEqual(control.update.call_args[0], ("request-wechat", "failed"))
+        self.assertEqual(control.update.call_args[1]["error_summary"], "instance is not running")
 
     def test_run_once_cleans_up_when_cancel_races_with_output_update(self):
         control = Mock()
@@ -864,7 +864,7 @@ class ManagerExecutorTests(unittest.TestCase):
         selector.close.assert_called_once()
         process.terminate.assert_called_once()
         process.stdout.close.assert_called_once()
-        self.assertEqual(run.call_args.args[0][:3], ["docker", "exec", "openclaw_alice"])
+        self.assertEqual(run.call_args[0][0][:3], ["docker", "exec", "openclaw_alice"])
 
     def test_run_once_cleans_up_container_command_after_update_error(self):
         control = Mock()
@@ -903,7 +903,7 @@ class ManagerExecutorTests(unittest.TestCase):
 
         process.terminate.assert_called_once()
         process.stdout.close.assert_called_once()
-        self.assertEqual(run.call_args.args[0][:3], ["docker", "exec", "openclaw_alice"])
+        self.assertEqual(run.call_args[0][0][:3], ["docker", "exec", "openclaw_alice"])
 
     def test_runtime_file_path_cannot_escape_instance_data_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -83,7 +83,7 @@ class InstanceAuthProxyTests(unittest.TestCase):
             {"X-OpenClaw-Authenticated-User": "11111111-1111-4111-8111-111111111111"},
         )
 
-        upstream = urlopen.call_args.args[0]
+        upstream = urlopen.call_args[0][0]
         self.assertIn(
             "token_hash=2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b",
             upstream.full_url,

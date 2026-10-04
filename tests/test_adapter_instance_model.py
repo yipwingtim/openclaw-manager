@@ -64,7 +64,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
         with patch.object(adapter, "run_command", return_value=(0, "created")) as run:
             adapter.create(instance, "false", "unused")
 
-        env = run.call_args.kwargs["env"]
+        env = run.call_args[1]["env"]
         self.assertEqual(env["OPENCLAW_INSTANCE_AUTH_MODE"], "trusted-proxy")
         self.assertEqual(env["OPENCLAW_INSTANCE_PUBLIC_ID"], instance["public_id"])
 
@@ -97,7 +97,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
                 self.assertEqual(adapter.status(instance), "Up")
 
             self.assertEqual(
-                run.call_args.args[0],
+                run.call_args[0][0],
                 [
                     "docker",
                     "inspect",
@@ -132,7 +132,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             network = "openclaw-user-" + hashlib.sha256(b"alice").hexdigest()
-            reconnect = run.call_args_list[1].args[0]
+            reconnect = run.call_args_list[1][0][0]
             self.assertIn("connect_container_to_network", reconnect[2])
             self.assertEqual(reconnect[-3:], ["openclaw-nginx", "openclaw-model-proxy", network])
             enable_nginx.assert_called_once_with(instance)
@@ -177,10 +177,10 @@ class AdapterInstanceModelTests(unittest.TestCase):
             self.assertIn("Restored Nginx config", output)
             self.assertEqual(reload_nginx.call_count, 2)
             self.assertEqual(
-                run.call_args.kwargs["env"]["OPENCLAW_SKIP_METADATA_WRITE"], "1"
+                run.call_args[1]["env"]["OPENCLAW_SKIP_METADATA_WRITE"], "1"
             )
             self.assertEqual(
-                run.call_args.kwargs["env"]["OPENCLAW_SKIP_HTPASSWD_PERMISSIONS"],
+                run.call_args[1]["env"]["OPENCLAW_SKIP_HTPASSWD_PERMISSIONS"],
                 "1",
             )
 
@@ -254,7 +254,7 @@ class AdapterInstanceModelTests(unittest.TestCase):
                     "weather@1.0",
                     request_id="skill-1",
                 )
-            command = process.call_args.args[0]
+            command = process.call_args[0][0]
             self.assertEqual(result, (0, "installed"))
             self.assertEqual(
                 command,
@@ -263,9 +263,9 @@ class AdapterInstanceModelTests(unittest.TestCase):
                     "openclaw", "skills", "install", "weather@1.0",
                 ],
             )
-            self.assertTrue(process.call_args.kwargs["start_new_session"])
+            self.assertTrue(process.call_args[1]["start_new_session"])
             self.assertEqual(
-                process.return_value.communicate.call_args.kwargs["timeout"], 190
+                process.return_value.communicate.call_args[1]["timeout"], 190
             )
 
     def test_install_skill_restores_skill_data_on_failure(self):
@@ -425,21 +425,21 @@ class AdapterInstanceModelTests(unittest.TestCase):
                 adapter.approve_latest_device(instance, request_id="devices-1")
                 approve = popen.call_args
 
-            self.assertEqual(refresh.args[0][-1], "--list-only")
-            self.assertEqual(approve.args[0][-1], "--latest")
+            self.assertEqual(refresh[0][0][-1], "--list-only")
+            self.assertEqual(approve[0][0][-1], "--latest")
             self.assertEqual(
-                refresh.kwargs["env"]["OPENCLAW_RUNTIME_TARGET"],
+                refresh[1]["env"]["OPENCLAW_RUNTIME_TARGET"],
                 "openclaw_custom_runtime",
             )
             self.assertEqual(
-                approve.kwargs["env"]["OPENCLAW_RUNTIME_TARGET"],
+                approve[1]["env"]["OPENCLAW_RUNTIME_TARGET"],
                 "openclaw_custom_runtime",
             )
             self.assertEqual(
-                approve.kwargs["env"]["OPENCLAW_EXECUTION_REQUEST_ID"],
+                approve[1]["env"]["OPENCLAW_EXECUTION_REQUEST_ID"],
                 "devices-1",
             )
-            self.assertTrue(approve.kwargs["start_new_session"])
+            self.assertTrue(approve[1]["start_new_session"])
 
     def test_retention_actions_run_in_separate_process_groups(self):
         with TemporaryDirectory() as temp_dir:
@@ -458,10 +458,10 @@ class AdapterInstanceModelTests(unittest.TestCase):
                 adapter.restore(instance)
                 restored = popen.call_args
 
-            self.assertTrue(deleted.kwargs["start_new_session"])
-            self.assertEqual(deleted.args[0][-1], "alice")
-            self.assertTrue(restored.kwargs["start_new_session"])
-            self.assertEqual(restored.args[0][-1], "alice")
+            self.assertTrue(deleted[1]["start_new_session"])
+            self.assertEqual(deleted[0][0][-1], "alice")
+            self.assertTrue(restored[1]["start_new_session"])
+            self.assertEqual(restored[0][0][-1], "alice")
 
     def test_runtime_methods_reject_user_id_strings(self):
         with TemporaryDirectory() as temp_dir:

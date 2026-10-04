@@ -61,6 +61,14 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
   file and continues with explicit environment variables or safe defaults.
   This keeps read-only inventory/checker imports usable for non-root operators
   without changing production permission requirements.
+- Tests pass filesystem paths through `str()` before `sqlite3.connect()` and
+  inspect `unittest.mock` calls through tuple indexes instead of the
+  Python 3.8+ `.args` and `.kwargs` properties.
+- Metadata consistency tests clear the production instance-auth token so a
+  developer or deployment host environment cannot enable unrelated UIS
+  authorization checks inside isolated fixtures.
+- The compatibility suite parses every `tests/test_*.py` file using the Python
+  3.6 grammar and statically checks the SQLite and mock-call rules above.
 
 ## Verification
 

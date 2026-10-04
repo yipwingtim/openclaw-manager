@@ -43,10 +43,19 @@ check_hermes_auth_bridge = CHECKER["check_hermes_auth_bridge"]
 
 
 class MetadataConsistencyTests(unittest.TestCase):
+    def setUp(self):
+        self.instance_auth_token = patch.dict(
+            os.environ, {"MANAGER_CONTROL_INSTANCE_AUTH_TOKEN": ""}
+        )
+        self.instance_auth_token.start()
+
+    def tearDown(self):
+        self.instance_auth_token.stop()
+
     def test_hermes_bridge_reports_inconsistent_client_and_grant(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_file = Path(temp_dir) / "manager.db"
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.executescript((ROOT_DIR / "db" / "schema.sql").read_text())
                 conn.execute(
                     "INSERT INTO users(public_id,username,normalized_username) "
@@ -93,7 +102,7 @@ class MetadataConsistencyTests(unittest.TestCase):
             (data_path / ".env").write_text("HERMES_UIS_BRIDGE_CLIENT_ID=client\n")
             (data_path / ".env").chmod(0o644)
             (data_path / "config.yaml").write_text("security: {}\n")
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.executescript((ROOT_DIR / "db" / "schema.sql").read_text())
                 conn.execute("INSERT INTO users(id,public_id,username,normalized_username) VALUES(1,'u','u','u')")
                 conn.execute(
@@ -133,7 +142,7 @@ class MetadataConsistencyTests(unittest.TestCase):
             (data_path / "config.yaml").write_text(
                 "plugins:\n  enabled:\n    - campus-uis-bridge\n"
             )
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.executescript((ROOT_DIR / "db" / "schema.sql").read_text())
                 conn.execute("INSERT INTO users(id,public_id,username,normalized_username) VALUES(1,'u','u','u')")
                 conn.execute(
@@ -181,7 +190,7 @@ class MetadataConsistencyTests(unittest.TestCase):
             (data_path / "config.yaml").write_text(
                 "plugins:\n  enabled:\n    - campus-uis-bridge\n"
             )
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.executescript((ROOT_DIR / "db" / "schema.sql").read_text())
                 conn.execute("INSERT INTO users(id,public_id,username,normalized_username) VALUES(1,'u','u','u')")
                 conn.execute(
@@ -508,7 +517,7 @@ class MetadataConsistencyTests(unittest.TestCase):
     def test_new_instances_without_legacy_ids_are_not_overwritten(self):
         with TemporaryDirectory() as temp_dir:
             db_file = Path(temp_dir) / "manager.db"
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.executescript(
                     (ROOT_DIR / "db" / "schema.sql").read_text(encoding="utf-8")
                 )

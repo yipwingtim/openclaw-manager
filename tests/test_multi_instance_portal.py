@@ -53,7 +53,7 @@ class ManagerControlClientTests(unittest.TestCase):
             instances = client.list_instances("user-1")
 
         self.assertEqual(instances, [{"public_id": "instance-1"}])
-        request = urlopen.call_args.args[0]
+        request = urlopen.call_args[0][0]
         self.assertEqual(
             request.full_url,
             "http://manager-control:8082/internal/v1/users/user-1/instances",
@@ -168,8 +168,8 @@ class MultiInstancePortalTests(unittest.TestCase):
             response = self.manager_web.my_instance()
 
         self.assertEqual(response, "rendered")
-        self.assertTrue(render.call_args.kwargs["is_admin"])
-        self.assertTrue(render.call_args.kwargs["show_global_admin_nav"])
+        self.assertTrue(render.call_args[1]["is_admin"])
+        self.assertTrue(render.call_args[1]["show_global_admin_nav"])
 
     def test_manager_detail_uses_role_and_product_capabilities(self):
         actor = {
@@ -239,7 +239,7 @@ class MultiInstancePortalTests(unittest.TestCase):
                                         )
 
         self.assertEqual(response, "rendered")
-        template, context = render.call_args.args[0], render.call_args.kwargs
+        template, context = render.call_args[0][0], render.call_args[1]
         self.assertEqual(template, "user.html")
         self.assertEqual(context["instance_public_id"], "instance-1")
         self.assertEqual(context["instance_name"], "Research assistant")
@@ -378,8 +378,8 @@ class MultiInstancePortalTests(unittest.TestCase):
             response = self.manager_web.instance_detail("instance-1")
 
         self.assertEqual(response, "rendered")
-        self.assertEqual(render.call_args.args[0], "instance_detail.html")
-        self.assertTrue(render.call_args.kwargs["can_manage_members"])
+        self.assertEqual(render.call_args[0][0], "instance_detail.html")
+        self.assertTrue(render.call_args[1]["can_manage_members"])
 
     def test_legacy_user_id_mutation_route_never_runs_action(self):
         with patch.object(

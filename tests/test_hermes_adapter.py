@@ -60,7 +60,7 @@ class HermesAdapterTests(unittest.TestCase):
                 self.assertEqual(adapter.start(instance)[0], 0)
                 self.assertEqual(adapter.stop(instance), (0, "ok"))
 
-            commands = [call.args[0] for call in run_command.call_args_list]
+            commands = [call[0][0] for call in run_command.call_args_list]
             self.assertEqual(commands[0], ["docker", "start", "hermes-alice"])
             self.assertEqual(commands[-1], ["docker", "stop", "hermes-alice"])
             acl_commands = [command for command in commands if command[0] == "find"]
@@ -94,7 +94,7 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertIn("stable", output)
             self.assertEqual(checks, 21)
             self.assertEqual(
-                len([call for call in run_command.call_args_list if call.args[0][0] == "find"]),
+                len([call for call in run_command.call_args_list if call[0][0][0] == "find"]),
                 4,
             )
 
@@ -385,7 +385,7 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertIn("access_log off", callback)
             self.assertIn("openclaw-instance-auth-proxy:8084 resolve;", nginx)
             self.assertEqual(run_command.call_count, 2)
-            reconnect = run_command.call_args_list[1].args[0]
+            reconnect = run_command.call_args_list[1][0][0]
             self.assertIn("connect_shared_services_to_tenant_networks", reconnect[2])
             self.assertEqual(
                 reconnect[-2:], ["openclaw-nginx", "openclaw-model-proxy"]
@@ -502,7 +502,7 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertEqual(plugin.stat().st_mode & 0o777, 0o750)
             self.assertEqual((plugin / "plugin.yaml").stat().st_mode & 0o777, 0o640)
             self.assertEqual((plugin / "__init__.py").stat().st_mode & 0o777, 0o640)
-            self.assertTrue(any(call.args[1:] == (10000, 10000) for call in chown.call_args_list))
+            self.assertTrue(any(call[0][1:] == (10000, 10000) for call in chown.call_args_list))
             self.assertEqual(
                 (Path(instance["data_path"]) / "config.yaml").read_text(encoding="utf-8"),
                 "security:\n  allow_lazy_installs: false\nplugins:\n  enabled:\n    - campus-uis-bridge\n",

@@ -243,7 +243,7 @@ class AdminWebTests(unittest.TestCase):
             template, context = self.admin.metadata()
 
         self.assertEqual(template, "admin_metadata.html")
-        self.assertEqual([len(call.args[1]) for call in statuses.call_args_list], [100, 1])
+        self.assertEqual([len(call[0][1]) for call in statuses.call_args_list], [100, 1])
         self.assertEqual(context["overview"]["runtime"], {
             "running": 101, "stopped": 0, "unknown": 0,
         })
@@ -385,7 +385,7 @@ class AdminWebTests(unittest.TestCase):
         ) as collect, patch.object(self.admin, "url_for", return_value="activity-url"):
             response = self.admin.collect_activity()
         self.assertEqual(response, "activity-url")
-        self.assertEqual([len(call.args[1]) for call in collect.call_args_list], [100, 1])
+        self.assertEqual([len(call[0][1]) for call in collect.call_args_list], [100, 1])
 
     def test_activity_page_filters_stopped_instances_and_paginates(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
@@ -563,7 +563,7 @@ class AdminWebTests(unittest.TestCase):
         ) as statuses:
             self.admin.instances()
 
-        self.assertEqual([len(call.args[1]) for call in statuses.call_args_list], [100, 1])
+        self.assertEqual([len(call[0][1]) for call in statuses.call_args_list], [100, 1])
 
     def test_admin_sidebar_calls_model_provider_page_model_settings(self):
         template = (ROOT_DIR / "services" / "manager-web" / "templates" / "base.html").read_text(
@@ -837,9 +837,9 @@ class AdminWebTests(unittest.TestCase):
 
         self.assertEqual(response, "job-url")
         self.assertEqual(
-            create_instance.call_args.args[0],
+            create_instance.call_args[0][0],
             {
-                "request_id": create_instance.call_args.args[0]["request_id"],
+                "request_id": create_instance.call_args[0][0]["request_id"],
                 "actor_user_public_id": "admin-1",
                 "owner_identity_type": "campus-uis",
                 "owner_identity": "12345",
@@ -850,7 +850,7 @@ class AdminWebTests(unittest.TestCase):
                 "basic_auth_password": "secret",
             },
         )
-        self.assertTrue(create_instance.call_args.args[0]["request_id"].startswith("instance-create-"))
+        self.assertTrue(create_instance.call_args[0][0]["request_id"].startswith("instance-create-"))
         url_for.assert_called_once_with("create_instance_job", request_id="create-1")
 
     def test_admin_creates_hermes_without_basic_auth_fields(self):
@@ -869,7 +869,7 @@ class AdminWebTests(unittest.TestCase):
             response = self.admin.create_instance()
 
         self.assertEqual(response, "job-url")
-        payload = create_instance.call_args.args[0]
+        payload = create_instance.call_args[0][0]
         self.assertNotIn("basic_auth_enabled", payload)
         self.assertNotIn("basic_auth_password", payload)
 
@@ -891,7 +891,7 @@ class AdminWebTests(unittest.TestCase):
         ) as url_for:
             response = self.admin.create_instance_batch()
 
-        payload = create_batch.call_args.args[0]
+        payload = create_batch.call_args[0][0]
         self.assertEqual(payload["actor_user_public_id"], "admin-1")
         self.assertTrue(payload["request_id"].startswith("instance-batch-"))
         self.assertEqual(payload["instances"], [{
@@ -928,7 +928,7 @@ class AdminWebTests(unittest.TestCase):
 
         self.assertEqual(response, "batch-url")
         self.assertEqual(
-            create_batch.call_args.args[0]["instances"],
+            create_batch.call_args[0][0]["instances"],
             [
                 {
                     "owner_user_public_id": "user-1",
@@ -971,7 +971,7 @@ class AdminWebTests(unittest.TestCase):
 
         self.assertEqual(response, "batch-url")
         list_users.assert_not_called()
-        self.assertEqual(create_batch.call_args.args[0]["instances"], [
+        self.assertEqual(create_batch.call_args[0][0]["instances"], [
             {
                 "owner_identity_type": "local", "owner_identity": "alice",
                 "legacy_user_id": "alice-hermes", "instance_name": "Alice Hermes",
@@ -1007,7 +1007,7 @@ class AdminWebTests(unittest.TestCase):
         ):
             response = self.admin.create_model_provider_batch()
 
-        payload = create_batch.call_args.args[0]
+        payload = create_batch.call_args[0][0]
         self.assertEqual(response, "batch-url")
         self.assertEqual(payload["instances"], [{
             "instance_public_id": "instance-1",
@@ -1049,7 +1049,7 @@ class AdminWebTests(unittest.TestCase):
         ) as create_job:
             response = self.admin.basic_auth("instance-1")
 
-        payload = create_job.call_args.args[0]
+        payload = create_job.call_args[0][0]
         self.assertEqual(payload["instance_public_id"], "instance-1")
         self.assertEqual(payload["action"], "instance.set_basic_auth")
         self.assertEqual(payload["params"], {"enabled": False})
@@ -1067,7 +1067,7 @@ class AdminWebTests(unittest.TestCase):
         ) as create_job:
             response = self.admin.set_model_provider("instance-1")
 
-        payload = create_job.call_args.args[0]
+        payload = create_job.call_args[0][0]
         self.assertEqual(payload["instance_public_id"], "instance-1")
         self.assertEqual(payload["action"], "instance.set_model_provider")
         self.assertEqual(
@@ -1105,7 +1105,7 @@ class AdminWebTests(unittest.TestCase):
         ) as create_job:
             response = self.admin.update_version("instance-1")
 
-        payload = create_job.call_args.args[0]
+        payload = create_job.call_args[0][0]
         self.assertEqual(payload["instance_public_id"], "instance-1")
         self.assertEqual(payload["action"], "instance.update_version")
         self.assertEqual(
@@ -1123,7 +1123,7 @@ class AdminWebTests(unittest.TestCase):
         ) as create_job:
             response = self.admin.install_skill("instance-1")
 
-        payload = create_job.call_args.args[0]
+        payload = create_job.call_args[0][0]
         self.assertEqual(payload["action"], "instance.install_skill")
         self.assertEqual(payload["params"], {"skill_id": "weather@1.0"})
         self.assertNotIn("legacy_user_id", payload)
@@ -1137,7 +1137,7 @@ class AdminWebTests(unittest.TestCase):
         ) as create_job:
             response = self.admin.devices("instance-1")
 
-        payload = create_job.call_args.args[0]
+        payload = create_job.call_args[0][0]
         self.assertEqual(payload["instance_public_id"], "instance-1")
         self.assertEqual(payload["action"], "instance.approve_latest_device")
         self.assertEqual(payload["params"], {})
@@ -1152,7 +1152,7 @@ class AdminWebTests(unittest.TestCase):
         ) as create_job:
             response = self.admin.retention("instance-1")
 
-        payload = create_job.call_args.args[0]
+        payload = create_job.call_args[0][0]
         self.assertEqual(payload["instance_public_id"], "instance-1")
         self.assertEqual(payload["action"], "instance.delete")
         self.assertEqual(payload["params"], {})
@@ -1176,7 +1176,7 @@ class AdminWebTests(unittest.TestCase):
              patch.object(self.admin, "url_for", return_value="batch-url"):
             response = self.admin.run_action_batch()
 
-        payload = create_batch.call_args.args[0]
+        payload = create_batch.call_args[0][0]
         self.assertEqual(payload["actor_user_public_id"], "admin-1")
         self.assertEqual(payload["action"], "install_skill")
         self.assertEqual(payload["skill_id"], "weather@1.0")
@@ -1218,7 +1218,7 @@ class AdminWebTests(unittest.TestCase):
         ):
             response = self.admin.run_device_approvals()
 
-        payload = create_batch.call_args.args[0]
+        payload = create_batch.call_args[0][0]
         self.assertEqual(payload["actor_user_public_id"], "admin-1")
         self.assertEqual(payload["action"], "approve")
         self.assertEqual(payload["instance_public_ids"], ["instance-1"])

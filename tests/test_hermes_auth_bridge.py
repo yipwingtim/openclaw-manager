@@ -30,7 +30,7 @@ class BridgeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.db = Path(self.temp.name) / "manager.db"
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             conn.executescript((ROOT / "db" / "schema.sql").read_text())
             conn.execute("INSERT INTO users(public_id,username,normalized_username) VALUES('user-1','u','u')")
             conn.execute("INSERT INTO instances(public_id,owner_user_id,product,instance_name,runtime_identifier) VALUES('instance-1',1,'hermes','h','h')")
@@ -100,7 +100,7 @@ class BridgeTests(unittest.TestCase):
             )
 
     def test_grant_requires_instance_authorization(self):
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             conn.execute(
                 "INSERT INTO users(public_id,username,normalized_username) "
                 "VALUES('user-2','u2','u2')"
@@ -115,7 +115,7 @@ class BridgeTests(unittest.TestCase):
                 session_id="session-2", redirect_uri="https://h/auth/callback",
                 code_challenge=pkce_challenge("v" * 43),
             )
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             conn.execute(
                 "INSERT INTO instance_members(instance_id,user_id,role) "
                 "VALUES(1,2,'viewer')"
@@ -128,7 +128,7 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(code)
 
     def test_client_requires_active_hermes_instance(self):
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             conn.execute(
                 "INSERT INTO instances(public_id,owner_user_id,product,instance_name,runtime_identifier) "
                 "VALUES('openclaw-1',1,'openclaw','o','o')"
@@ -152,7 +152,7 @@ class BridgeTests(unittest.TestCase):
                 session_id="session", redirect_uri="https://h/auth/callback",
                 code_challenge="!" * 43,
             )
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             conn.execute("UPDATE user_sessions SET provider = 'local'")
         with self.assertRaisesRegex(ValueError, "invalid client"):
             self.grant()

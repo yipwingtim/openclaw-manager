@@ -25,7 +25,7 @@ class OpenClawAuthInventoryTests(unittest.TestCase):
         self.db = self.public / "manager.db"
         self.public.mkdir()
         self.nginx.mkdir()
-        with sqlite3.connect(self.db) as connection:
+        with sqlite3.connect(str(self.db)) as connection:
             connection.executescript("""
                 CREATE TABLE users (id INTEGER PRIMARY KEY, username, normalized_username);
                 CREATE TABLE instances (
@@ -46,7 +46,7 @@ class OpenClawAuthInventoryTests(unittest.TestCase):
         conf = nginx_path or self.nginx / f"{public_id}.conf"
         conf.parent.mkdir(parents=True, exist_ok=True)
         conf.write_text(nginx, encoding="utf-8")
-        with sqlite3.connect(self.db) as connection:
+        with sqlite3.connect(str(self.db)) as connection:
             connection.execute(
                 "INSERT INTO instances VALUES (?,?,?,?,?,?,?,1)",
                 (public_id, public_id, public_id, status, str(data), str(conf), "openclaw"),
@@ -90,7 +90,7 @@ class OpenClawAuthInventoryTests(unittest.TestCase):
             status="stopped", nginx='server { listen 30104; location / { auth_basic "OpenClaw Login"; } }',
             nginx_path=self.nginx / "_disabled/stopped.conf",
         )
-        with sqlite3.connect(self.db) as connection:
+        with sqlite3.connect(str(self.db)) as connection:
             connection.execute("UPDATE instances SET nginx_conf_path=?", (str(self.nginx / "stopped.conf"),))
         output = io.StringIO()
         self.assertEqual(INVENTORY.main([
@@ -154,7 +154,7 @@ server { listen 30106;
             json.dumps({"gateway": {"auth": {"mode": "token", "token": "secret"}}}),
             encoding="utf-8",
         )
-        with sqlite3.connect(self.db) as connection:
+        with sqlite3.connect(str(self.db)) as connection:
             connection.execute(
                 "INSERT INTO instances VALUES (?,?,?,?,?,?,?,1)",
                 ("outside", "outside", "outside", "active", str(outside), None, "openclaw"),

@@ -21,7 +21,7 @@ class ActivityAdapterTests(unittest.TestCase):
 
     def database(self, path, schema):
         path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(path) as connection:
+        with sqlite3.connect(str(path)) as connection:
             connection.executescript(schema)
         return path
 

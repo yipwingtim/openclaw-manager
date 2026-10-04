@@ -282,14 +282,14 @@ class MigrateInstanceAuthTests(unittest.TestCase):
             def access(path, mode):
                 return False if Path(path) == evo else real_access(path, mode)
 
-            with (
-                patch.object(self.module, "instances", return_value=rows),
-                patch.object(self.module, "run", side_effect=run),
-                patch.object(self.module.os, "access", side_effect=access),
-                patch.object(sys, "argv", [str(SCRIPT), "--apply"]),
-                self.assertRaisesRegex(SystemExit, "Run this command through manager-executor"),
-            ):
-                self.module.main()
+            with patch.object(self.module, "instances", return_value=rows):
+                with patch.object(self.module, "run", side_effect=run):
+                    with patch.object(self.module.os, "access", side_effect=access):
+                        with patch.object(sys, "argv", [str(SCRIPT), "--apply"]):
+                            with self.assertRaisesRegex(
+                                SystemExit, "Run this command through manager-executor"
+                            ):
+                                self.module.main()
 
             self.assertEqual(evo.read_text(encoding="utf-8"), config)
             self.assertEqual(hermes.read_text(encoding="utf-8"), config)

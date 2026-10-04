@@ -32,7 +32,7 @@ class RefreshDeviceCacheScriptTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (scripts / "approve_device.sh").chmod(0o755)
-            with sqlite3.connect(public / "manager.db") as connection:
+            with sqlite3.connect(str(public / "manager.db")) as connection:
                 connection.execute(
                     "CREATE TABLE instances (legacy_user_id TEXT, product TEXT, status TEXT, data_path TEXT, runtime_identifier TEXT)"
                 )

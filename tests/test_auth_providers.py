@@ -110,7 +110,7 @@ class AuthProviderTests(unittest.TestCase):
             client = auth_providers.register_external_client(Mock(), config)
 
         self.assertEqual(client, "client")
-        kwargs = oauth.register.call_args.kwargs
+        kwargs = oauth.register.call_args[1]
         self.assertEqual(kwargs["token_endpoint_auth_method"], "client_secret_basic")
 
     def test_external_identity_rejects_missing_subject(self):

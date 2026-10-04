@@ -201,7 +201,7 @@ class EvoScientistAdapterTests(unittest.TestCase):
                 result = adapter._wait_for_services(self.INSTANCE)
 
             self.assertEqual(result, (0, "EvoScientist services are ready"))
-            readiness_command = run.call_args_list[-1].args[0]
+            readiness_command = run.call_args_list[-1][0][0]
             self.assertEqual(readiness_command[:3], ["docker", "exec", "evoscientist_alice"])
             self.assertIn("http://127.0.0.1:4716/", readiness_command[-1])
             self.assertIn("http://127.0.0.1:6175/info", readiness_command[-1])
@@ -368,10 +368,10 @@ class EvoScientistAdapterTests(unittest.TestCase):
                     "chown", "-R", "evosci:evosci",
                     "/home/evosci/.evoscientist/.config",
                 ],
-                [call.args[0] for call in run.call_args_list],
+                [call[0][0] for call in run.call_args_list],
             )
             self.assertEqual(
-                [call.args[0] for call in run.call_args_list[-2:]],
+                [call[0][0] for call in run.call_args_list[-2:]],
                 [
                     ["docker", "restart", "evoscientist_alice"],
                     ["docker", "restart", "evoscientist_alice-proxy"],
@@ -456,7 +456,7 @@ class EvoScientistRegistrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            with sqlite3.connect(public_dir / "manager.db") as conn:
+            with sqlite3.connect(str(public_dir / "manager.db")) as conn:
                 row = conn.execute(
                     "SELECT product, status, container_name, port "
                     "FROM instances WHERE legacy_user_id = ?",

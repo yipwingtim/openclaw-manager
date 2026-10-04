@@ -17,7 +17,7 @@ NGINX_USERS_CONF_DIR = Path(os.environ.get("NGINX_USERS_CONF_DIR", "/data/docker
 
 
 def instances(db_file):
-    with sqlite3.connect(db_file) as connection:
+    with sqlite3.connect(str(db_file)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(
             """

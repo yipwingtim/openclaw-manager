@@ -12,7 +12,7 @@ import sys
 import subprocess
 import urllib.parse
 import ipaddress
-from dataclasses import dataclass
+from collections import namedtuple
 from pathlib import Path
 
 
@@ -48,11 +48,7 @@ NGINX_HTPASSWD_FILE_IN_CONTAINER = os.environ.get(
 NGINX_AUTH_DIR = Path(os.environ.get("NGINX_AUTH_DIR", "/data/docker/nginx/auth"))
 
 
-@dataclass
-class Issue:
-    level: str
-    code: str
-    message: str
+Issue = namedtuple("Issue", "level code message")
 
 
 class Reporter:
@@ -219,7 +215,10 @@ def expected_tenant_proxy_ip(user_id):
     network = f"{os.environ.get('OPENCLAW_TENANT_NETWORK_PREFIX', 'openclaw-user')}-{hashlib.sha256(user_id.encode()).hexdigest()}"
     result = subprocess.run(
         ["docker", "network", "inspect", network, "--format", "{{json .IPAM.Config}}"],
-        capture_output=True, text=True, check=False,
+        universal_newlines=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
     )
     try:
         configs = json.loads(result.stdout)
@@ -332,7 +331,7 @@ def load_db(path, reporter):
     if not path.is_file():
         reporter.warn("metadata_db_missing", f"metadata database not found: {path}")
         return instances, ports
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(str(path)) as conn:
         conn.row_factory = sqlite3.Row
         try:
             instance_columns = {
@@ -365,7 +364,7 @@ def load_db(path, reporter):
 def check_hermes_auth_bridge(path, reporter):
     if not path.is_file():
         return
-    with sqlite3.connect(path) as conn:
+    with sqlite3.connect(str(path)) as conn:
         tables = {
             row[0] for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -492,8 +491,8 @@ def check_hermes_auth_bridge(path, reporter):
                 ca_file = root / "manager-auth" / "bridge-ca.crt"
                 try:
                     root_stat = root.stat()
-                    ca_parent_stat = ca_file.parent.stat(follow_symlinks=False)
-                    ca_stat = ca_file.stat(follow_symlinks=False)
+                    ca_parent_stat = os.stat(str(ca_file.parent), follow_symlinks=False)
+                    ca_stat = os.stat(str(ca_file), follow_symlinks=False)
                     ca_valid = bool(
                         env["HERMES_UIS_BRIDGE_CA_FILE"]
                         == HERMES_BRIDGE_CA_CONTAINER_FILE

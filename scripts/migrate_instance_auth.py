@@ -23,7 +23,13 @@ AUTH_CONTAINER = "openclaw-instance-auth-proxy"
 
 
 def run(command):
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        command,
+        universal_newlines=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     return result.returncode, (result.stdout + "\n" + result.stderr).strip()
 
 
@@ -116,7 +122,7 @@ def migrate_config(text, public_id, product):
 
 
 def instances():
-    with sqlite3.connect(DB_FILE) as connection:
+    with sqlite3.connect(str(DB_FILE)) as connection:
         connection.row_factory = sqlite3.Row
         return connection.execute(
             """
@@ -209,7 +215,7 @@ def recreate_evoscientist_ingress(instance, config_file):
 def update_metadata_config_path(instance, path):
     if instance["product"] != "evoscientist":
         return
-    with sqlite3.connect(DB_FILE) as connection:
+    with sqlite3.connect(str(DB_FILE)) as connection:
         connection.execute(
             "UPDATE instances SET nginx_conf_path = ?, updated_at = datetime('now') WHERE public_id = ?",
             (str(path), instance["public_id"]),
@@ -346,7 +352,10 @@ def apply_one(instance, backup_dir):
         return "updated"
     except Exception:
         if source != target:
-            target.unlink(missing_ok=True)
+            try:
+                target.unlink()
+            except FileNotFoundError:
+                pass
         source.write_text(old, encoding="utf-8")
         if connected:
             run(["docker", "network", "disconnect", AUTH_NETWORK, container])

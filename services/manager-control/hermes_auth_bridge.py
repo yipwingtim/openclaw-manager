@@ -7,7 +7,7 @@ import re
 import secrets
 import time
 import urllib.parse
-from dataclasses import dataclass
+from collections import namedtuple
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -80,11 +80,7 @@ def verify_client_secret(secret, encoded):
         return False
 
 
-@dataclass(frozen=True)
-class BridgePrincipal:
-    user_id: str
-    instance_id: str
-    client_id: str
+BridgePrincipal = namedtuple("BridgePrincipal", "user_id instance_id client_id")
 
 
 class BridgeStore:

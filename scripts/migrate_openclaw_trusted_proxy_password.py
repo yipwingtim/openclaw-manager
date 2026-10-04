@@ -15,7 +15,7 @@ DB_FILE = Path(os.environ.get("METADATA_DB_FILE", PUBLIC_DIR / "manager.db"))
 
 
 def instances():
-    with sqlite3.connect(DB_FILE) as connection:
+    with sqlite3.connect(str(DB_FILE)) as connection:
         connection.row_factory = sqlite3.Row
         return connection.execute(
             """

@@ -97,7 +97,7 @@ def backup_database(db_file):
     while backup.exists():
         backup = db_file.with_name(f"{db_file.name}.pre-v2-{stamp}-{suffix}.bak")
         suffix += 1
-    with sqlite3.connect(db_file) as source, sqlite3.connect(backup) as destination:
+    with sqlite3.connect(str(db_file)) as source, sqlite3.connect(str(backup)) as destination:
         source.backup(destination)
     return backup
 
@@ -270,7 +270,7 @@ def main():
         print(f"[ERROR] metadata database not found: {args.db}", file=sys.stderr)
         return 1
 
-    with sqlite3.connect(args.db) as conn:
+    with sqlite3.connect(str(args.db)) as conn:
         conn.row_factory = sqlite3.Row
         version = schema_version(conn)
         if version >= 2:
@@ -305,7 +305,7 @@ def main():
         backup = backup_database(args.db)
         print(f"[INFO] Backup created: {backup}")
 
-    with sqlite3.connect(args.db, isolation_level=None) as conn:
+    with sqlite3.connect(str(args.db), isolation_level=None) as conn:
         conn.row_factory = sqlite3.Row
         migrate(conn, instances, args.schema, public_dir)
     print("[INFO] Metadata migration to schema version 2 completed")

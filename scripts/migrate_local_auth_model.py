@@ -26,7 +26,7 @@ def main():
         parser.error("database and schema files must exist")
 
     admins = [value.strip().casefold() for value in args.admins.split(",") if value.strip()]
-    with sqlite3.connect(args.db) as conn:
+    with sqlite3.connect(str(args.db)) as conn:
         version = schema_version(conn)
         users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         matched_admins = conn.execute(
@@ -50,7 +50,7 @@ def main():
         print(f"[INFO] Backup created: {backup}")
 
     schema = args.schema.read_text(encoding="utf-8")
-    with sqlite3.connect(args.db) as conn:
+    with sqlite3.connect(str(args.db)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("BEGIN IMMEDIATE")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}

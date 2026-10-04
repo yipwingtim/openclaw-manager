@@ -85,6 +85,29 @@ check_writable_file() {
   fi
 }
 
+check_nonempty_value() {
+  local name="$1"
+  local value="$2"
+  if [ -n "$value" ]; then
+    ok "$name is configured"
+  else
+    missing "$name is empty"
+  fi
+}
+
+check_lock_file_parent() {
+  local lock_file="$1"
+  local parent
+  parent="$(dirname "$lock_file")"
+  if [ ! -d "$parent" ]; then
+    missing "lock-file parent directory missing: $parent ($lock_file)"
+  elif [ -w "$parent" ]; then
+    ok "lock-file parent directory is writable: $parent ($lock_file)"
+  else
+    missing "lock-file parent directory is not writable by current user: $parent ($lock_file)"
+  fi
+}
+
 check_executable_file() {
   if [ ! -f "$1" ]; then
     missing "file missing: $1"
@@ -223,9 +246,18 @@ fi
 
 OPENCLAW_PUBLIC_DIR="${OPENCLAW_PUBLIC_DIR:-/data/docker/openclaw-public}"
 PORT_FILE="${PORT_FILE:-$OPENCLAW_PUBLIC_DIR/ports.txt}"
+PORT_LOCK_FILE="${PORT_LOCK_FILE:-${PORT_FILE}.lock}"
 USERS_CSV="${USERS_CSV:-$OPENCLAW_PUBLIC_DIR/users.csv}"
 METADATA_DB_FILE="${METADATA_DB_FILE:-$OPENCLAW_PUBLIC_DIR/manager.db}"
 METADATA_DB_BACKEND="${METADATA_DB_BACKEND:-sqlite}"
+OPENCLAW_TENANT_NETWORK_LOCK_FILE="${OPENCLAW_TENANT_NETWORK_LOCK_FILE:-$OPENCLAW_PUBLIC_DIR/tenant-network.lock}"
+OPENCLAW_TENANT_SUBNET_POOL="${OPENCLAW_TENANT_SUBNET_POOL:-}"
+OPENCLAW_INTERNAL_TOKEN="${OPENCLAW_INTERNAL_TOKEN:-}"
+NGINX_CONTAINER_NAME="${NGINX_CONTAINER_NAME:-openclaw-nginx}"
+MANAGER_CONTROL_USER_WEB_TOKEN="${MANAGER_CONTROL_USER_WEB_TOKEN:-}"
+MANAGER_CONTROL_ADMIN_WEB_TOKEN="${MANAGER_CONTROL_ADMIN_WEB_TOKEN:-}"
+MANAGER_CONTROL_EXECUTOR_TOKEN="${MANAGER_CONTROL_EXECUTOR_TOKEN:-}"
+MANAGER_CONTROL_INSTANCE_AUTH_TOKEN="${MANAGER_CONTROL_INSTANCE_AUTH_TOKEN:-}"
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 DOCKER_DATA_ROOT="${DOCKER_DATA_ROOT:-/data/docker}"
 CONTAINERD_ROOT="${CONTAINERD_ROOT:-/data/docker/containerd}"
@@ -252,6 +284,14 @@ check_dir "$OPENCLAW_PUBLIC_DIR/logs"
 check_dir "$MODEL_PROXY_TOKEN_DIR"
 check_writable_file "$USERS_CSV"
 check_writable_file "$PORT_FILE"
+check_lock_file_parent "$PORT_LOCK_FILE"
+check_lock_file_parent "$OPENCLAW_TENANT_NETWORK_LOCK_FILE"
+check_nonempty_value "OPENCLAW_TENANT_SUBNET_POOL" "$OPENCLAW_TENANT_SUBNET_POOL"
+check_nonempty_value "OPENCLAW_INTERNAL_TOKEN" "$OPENCLAW_INTERNAL_TOKEN"
+check_nonempty_value "MANAGER_CONTROL_USER_WEB_TOKEN" "$MANAGER_CONTROL_USER_WEB_TOKEN"
+check_nonempty_value "MANAGER_CONTROL_ADMIN_WEB_TOKEN" "$MANAGER_CONTROL_ADMIN_WEB_TOKEN"
+check_nonempty_value "MANAGER_CONTROL_EXECUTOR_TOKEN" "$MANAGER_CONTROL_EXECUTOR_TOKEN"
+check_nonempty_value "MANAGER_CONTROL_INSTANCE_AUTH_TOKEN" "$MANAGER_CONTROL_INSTANCE_AUTH_TOKEN"
 if [ "$METADATA_DB_BACKEND" = "sqlite" ]; then
   check_file "$METADATA_DB_FILE"
 elif [ "$METADATA_DB_BACKEND" = "postgres" ]; then
@@ -259,6 +299,11 @@ elif [ "$METADATA_DB_BACKEND" = "postgres" ]; then
     ok "PostgreSQL metadata URL is configured"
   else
     missing "METADATA_DATABASE_URL is required for postgres backend"
+  fi
+  if python3 -c 'import psycopg' >/dev/null 2>&1; then
+    ok "host Python can import psycopg for direct PostgreSQL metadata writes"
+  else
+    warn "host Python cannot import psycopg; direct lifecycle scripts cannot write PostgreSQL metadata, so create instances through the containerized Manager control plane"
   fi
 else
   missing "METADATA_DB_BACKEND must be sqlite or postgres"
@@ -276,6 +321,15 @@ check_dir "$NGINX_AUTH_DIR"
 check_writable_dir "$NGINX_AUTH_USERS_DIR"
 check_file "$NGINX_COMPOSE_FILE"
 check_nonempty_file "$NGINX_HTPASSWD_FILE"
+if command -v docker >/dev/null 2>&1; then
+  if ! docker inspect "$NGINX_CONTAINER_NAME" >/dev/null 2>&1; then
+    warn "Nginx container is not created yet: $NGINX_CONTAINER_NAME"
+  elif [ "$(docker inspect "$NGINX_CONTAINER_NAME" --format '{{.State.Status}}' 2>/dev/null || true)" = "running" ]; then
+    ok "Nginx container is running: $NGINX_CONTAINER_NAME"
+  else
+    warn "Nginx container exists but is not running: $NGINX_CONTAINER_NAME"
+  fi
+fi
 
 cert_host_path="$NGINX_SSL_CERT"
 key_host_path="$NGINX_SSL_KEY"

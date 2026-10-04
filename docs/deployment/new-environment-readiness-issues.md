@@ -66,6 +66,32 @@ preparation. Python and operating-system compatibility defects are tracked in
 - Resolution: configure `OPENCLAW_TENANT_NETWORK_LOCK_FILE` and `PORT_LOCK_FILE`
   under an existing operator-owned runtime subdirectory. Do not loosen the
   permissions of the entire public data directory.
+- Prevention: rerun `scripts/check_bootstrap_readiness.sh`; it now validates
+  the parent directories of the effective lock-file paths.
+
+## PostgreSQL writes from a Python 3.6 host
+
+- Symptom: instance runtime creation succeeded, but metadata registration
+  ended with `psycopg is required for postgres backend` and PostgreSQL had no
+  instance row.
+- Cause: Anolis OS 8.6 provides Python 3.6, while the project's PostgreSQL
+  driver is psycopg 3 and runs in the Python 3.12 Manager control container.
+- Resolution: use the Manager Admin UI and containerized control-plane flow for
+  instance lifecycle operations. If a runtime was already created, verify its
+  actual files, container, ingress, and port before recovering its metadata in
+  one PostgreSQL transaction.
+- Prevention: treat the readiness warning about a missing host `psycopg` as a
+  prohibition on direct host lifecycle scripts, not as a request to replace
+  the distribution Python.
+
+## Readiness checks before deployment
+
+Run `scripts/check_bootstrap_readiness.sh` after editing the environment file
+and again after the first Nginx start. The check validates the effective tenant
+network pool, internal service tokens, manager service tokens, lock-file parent
+directories, and Nginx container state without printing secret values. A
+missing initial Nginx container is a warning before its documented one-time
+startup; it should be running before Manager services are deployed.
 
 ## Instance Basic Auth input
 

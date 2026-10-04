@@ -102,6 +102,30 @@ class ConfigurableRuntimePathTests(unittest.TestCase):
                 self.assertIn('METADATA_DB_BACKEND="${METADATA_DB_BACKEND:-sqlite}"', source)
                 self.assertIn('METADATA_DATABASE_URL', source)
 
+    def test_readiness_checks_lock_paths_and_postgres_host_driver(self):
+        source = (
+            ROOT_DIR / "scripts" / "check_bootstrap_readiness.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('check_lock_file_parent "$PORT_LOCK_FILE"', source)
+        self.assertIn(
+            'check_lock_file_parent "$OPENCLAW_TENANT_NETWORK_LOCK_FILE"', source
+        )
+        self.assertIn("python3 -c 'import psycopg'", source)
+        self.assertIn("direct lifecycle scripts cannot write PostgreSQL metadata", source)
+        for value in (
+            "OPENCLAW_TENANT_SUBNET_POOL",
+            "OPENCLAW_INTERNAL_TOKEN",
+            "MANAGER_CONTROL_USER_WEB_TOKEN",
+            "MANAGER_CONTROL_ADMIN_WEB_TOKEN",
+            "MANAGER_CONTROL_EXECUTOR_TOKEN",
+            "MANAGER_CONTROL_INSTANCE_AUTH_TOKEN",
+        ):
+            with self.subTest(value=value):
+                self.assertIn('check_nonempty_value "%s"' % value, source)
+        self.assertIn('NGINX_CONTAINER_NAME', source)
+        self.assertIn('Nginx container is not created yet', source)
+
 
 if __name__ == "__main__":
     unittest.main()

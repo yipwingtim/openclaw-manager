@@ -28,8 +28,7 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
   directly instead of using `IPv4Network.subnet_of()`, which is unavailable in
   Python 3.6.
 - `scripts/metadata_cli.py` performs the required subcommand check after
-  parsing instead of passing `required=True` to `add_subparsers()`. This keeps
-  instance metadata registration compatible with Python 3.6.
+  parsing instead of passing `required=True` to `add_subparsers()`.
 - Metadata consistency tests use Python 3.6-compatible subprocess options and
   explicitly select an isolated temporary SQLite database. They override the
   Manager config path and cannot inherit a production PostgreSQL URL.
@@ -93,3 +92,25 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 The replacement is behavior-preserving on Python 3.10+ and Python 3.6: it
 requests decoded stdout/stderr through the older spelling and captures both
 streams explicitly.
+
+## PostgreSQL limitation on Python 3.6 hosts
+
+The project uses psycopg 3 for PostgreSQL metadata. Psycopg 3 does not support
+Python 3.6, so an Anolis host's system Python cannot run direct PostgreSQL
+metadata writes even though the host-side script syntax remains compatible.
+Create and manage instances through the Manager Admin UI and its containerized
+Python 3.12 control plane. Do not treat a successful runtime container creation
+as complete until the instance is present in PostgreSQL.
+
+`scripts/check_bootstrap_readiness.sh` reports this host-driver limitation as a
+warning. It does not reject the deployment because `manager-control` includes
+psycopg and is the intended PostgreSQL metadata authority.
+
+The readiness check also verifies that PostgreSQL deployments have the tenant
+subnet pool, internal service tokens, and effective lock-file parent
+directories configured. It reports a missing initial Nginx container as a
+warning because Nginx is intentionally started once before Manager services.
+
+`scripts/check_metadata_consistency.py` currently checks SQLite metadata only.
+Its `manager.db` warnings are not PostgreSQL consistency results; query through
+`manager-control` when validating a PostgreSQL deployment.

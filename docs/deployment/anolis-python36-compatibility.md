@@ -24,6 +24,9 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
   `universal_newlines=True`, `stdout=subprocess.PIPE`, and
   `stderr=subprocess.PIPE`; this covers the runtime path exercised by
   `create_user.sh`.
+- Existing tenant subnet validation compares network and broadcast boundaries
+  directly instead of using `IPv4Network.subnet_of()`, which is unavailable in
+  Python 3.6.
 
 ## Verification
 

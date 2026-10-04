@@ -13,12 +13,24 @@ from tests.tls_fixtures import write_test_ca
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+_saved_backend = os.environ.get("METADATA_DB_BACKEND")
+_saved_url = os.environ.get("METADATA_DATABASE_URL")
+os.environ["METADATA_DB_BACKEND"] = "sqlite"
+os.environ.pop("METADATA_DATABASE_URL", None)
 SCRIPT = ROOT_DIR / "scripts" / "migrate_hermes_uis_auth.py"
 SCHEMA = ROOT_DIR / "db" / "schema.sql"
 
 spec = importlib.util.spec_from_file_location("migrate_hermes_uis_auth", SCRIPT)
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
+if _saved_backend is None:
+    os.environ.pop("METADATA_DB_BACKEND", None)
+else:
+    os.environ["METADATA_DB_BACKEND"] = _saved_backend
+if _saved_url is None:
+    os.environ.pop("METADATA_DATABASE_URL", None)
+else:
+    os.environ["METADATA_DATABASE_URL"] = _saved_url
 
 
 class HermesUISMigrationTests(unittest.TestCase):

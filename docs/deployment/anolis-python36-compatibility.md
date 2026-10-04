@@ -50,6 +50,10 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
 - `tests/test_python36_compatibility.py` scans the complete host runtime import
   closure for prohibited newer APIs and guards SQLite path conversion. Add any
   new host-imported service module to `HOST_RUNTIME_FILES`.
+- `check_metadata_consistency.py` accepts `OPENCLAW_MANAGER_CONFIG_FILE`, and
+  metadata/bridge tests explicitly select temporary SQLite and clear the
+  production PostgreSQL URL. Tests therefore work as a normal deployment user
+  even when the production env file is root-readable only.
 
 ## Verification
 

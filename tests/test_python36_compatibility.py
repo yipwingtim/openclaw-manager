@@ -85,6 +85,10 @@ class Python36CompatibilityTests(unittest.TestCase):
         self.assertIn('env["METADATA_DB_BACKEND"] = "sqlite"', source)
         self.assertIn('env.pop("METADATA_DATABASE_URL", None)', source)
 
+    def test_metadata_consistency_checker_allows_config_override(self):
+        source = (ROOT / "scripts" / "check_metadata_consistency.py").read_text()
+        self.assertIn('OPENCLAW_MANAGER_CONFIG_FILE', source)
+
 
 if __name__ == "__main__":
     unittest.main()

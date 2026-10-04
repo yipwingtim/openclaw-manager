@@ -24,6 +24,13 @@ HERMES_BRIDGE_CA_CONTAINER_FILE = "/opt/data/manager-auth/bridge-ca.crt"
 HERMES_UPLOAD_MAX_BODY_SIZE_RE = re.compile(r"^[1-9][0-9]*(?:[kKmMgG])?$")
 
 
+def unlink_if_exists(path):
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def hermes_upload_max_body_size():
     value = os.environ.get("HERMES_UPLOAD_MAX_BODY_SIZE", "50M").strip()
     if not HERMES_UPLOAD_MAX_BODY_SIZE_RE.fullmatch(value):
@@ -74,7 +81,7 @@ def stage_hermes_bridge_ca(source, target, uid, gid):
         temporary.chmod(0o640)
         temporary.replace(target)
     except Exception:
-        temporary.unlink(missing_ok=True)
+        unlink_if_exists(temporary)
         raise
 
 
@@ -173,8 +180,9 @@ class OpenClawDockerAdapter:
             command,
             cwd=str(cwd or self.manager_dir),
             env=env,
-            text=True,
-            capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=timeout,
             check=False,
         )
@@ -320,8 +328,9 @@ class OpenClawDockerAdapter:
         result = subprocess.run(
             ["docker", "inspect", "--format", "{{.State.Status}}", runtime_target],
             cwd=str(self.manager_dir),
-            text=True,
-            capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=10,
             check=False,
         )
@@ -332,8 +341,9 @@ class OpenClawDockerAdapter:
         result = subprocess.run(
             ["docker", "logs", "--tail", str(tail), runtime_target],
             cwd=str(self.manager_dir),
-            text=True,
-            capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=10,
             check=False,
         )
@@ -549,7 +559,7 @@ class OpenClawDockerAdapter:
                 command,
                 cwd=str(self.manager_dir),
                 env={**os.environ, "OPENCLAW_DATA_PATH": str(user_dir), "OPENCLAW_SKIP_METADATA_WRITE": "1"},
-                text=True,
+                universal_newlines=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -616,7 +626,7 @@ class OpenClawDockerAdapter:
                     "openclaw", "skills", "install", skill_id,
                 ],
                 cwd=str(self.manager_dir),
-                text=True,
+                universal_newlines=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -701,7 +711,7 @@ class OpenClawDockerAdapter:
                     **os.environ,
                     **(env or {}),
                 },
-                text=True,
+                universal_newlines=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -928,7 +938,7 @@ while True:
         prefix = self.IMAGE_REPOSITORY + "@"
         if not image.startswith(prefix):
             raise ValueError("EVOSCIENTIST_IMAGE must use the official repository and a sha256 digest")
-        self._image_ref(image.removeprefix(prefix))
+        self._image_ref(image[len(prefix):])
         return image
 
     def _write_htpasswd(self, user_id, password):
@@ -937,7 +947,8 @@ while True:
         target.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
             ["htpasswd", "-ci", str(target), user_id], input=password + "\n",
-            text=True, capture_output=True, timeout=30, check=False,
+            universal_newlines=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=30, check=False,
         )
         if result.returncode != 0:
             raise RuntimeError((result.stdout + "\n" + result.stderr).strip())
@@ -1079,7 +1090,7 @@ else:
                 ], timeout=120,
             )
             if code != 0:
-                config_file.unlink(missing_ok=True)
+                unlink_if_exists(config_file)
                 return code, output
             code, network_output = self.run_command(
                 ["docker", "network", "connect", "instance-auth-net", ingress_container],
@@ -1087,7 +1098,7 @@ else:
             )
             if code != 0 and "already exists" not in network_output.lower():
                 self.run_command(["docker", "rm", "-f", ingress_container], timeout=60)
-                config_file.unlink(missing_ok=True)
+                unlink_if_exists(config_file)
                 return code, network_output
             return 0, "\n".join(part for part in (output, network_output) if part)
         except Exception as exc:
@@ -1174,12 +1185,12 @@ else:
             return 0, "EvoScientist model provider updated."
         except Exception as exc:
             if old_config is None:
-                config_file.unlink(missing_ok=True)
+                unlink_if_exists(config_file)
             else:
                 config_file.write_bytes(old_config)
             for path, content in ((token_file, old_token), (models_file, old_models)):
                 if content is None:
-                    path.unlink(missing_ok=True)
+                    unlink_if_exists(path)
                 else:
                     self._write_private_file(path, content)
             if connected:
@@ -1216,8 +1227,9 @@ else:
         result = subprocess.run(
             ["docker", "inspect", "--format", "{{.State.Status}}", container_name],
             cwd=str(self.manager_dir),
-            text=True,
-            capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=10,
             check=False,
         )
@@ -1336,7 +1348,7 @@ else:
             if user_dir is not None and user_dir.is_dir():
                 for path in (locals().get("workspace"), locals().get("data_dir"), locals().get("proxy_script")):
                     if path is not None:
-                        Path(path).unlink(missing_ok=True) if Path(path).is_file() else shutil.rmtree(path, ignore_errors=True)
+                        unlink_if_exists(Path(path)) if Path(path).is_file() else shutil.rmtree(path, ignore_errors=True)
                 try:
                     user_dir.rmdir()
                 except OSError:
@@ -1362,8 +1374,8 @@ else:
                 if path.exists():
                     shutil.move(str(path), str(recycle / path.name))
             self.run_command(["docker", "rm", "-f", self.ingress_container_name(instance)], timeout=60)
-            self._existing_ingress_conf(instance).unlink(missing_ok=True)
-            self.legacy_ingress_conf(instance).unlink(missing_ok=True)
+            unlink_if_exists(self._existing_ingress_conf(instance))
+            unlink_if_exists(self.legacy_ingress_conf(instance))
             (recycle / "manifest.json").write_text(json.dumps({
                 "image": image, "network": network, "was_running": was_running,
                 "port": instance.get("port"),
@@ -1404,7 +1416,7 @@ else:
                 return code, output
             outputs.append(output)
         for path in (self.ingress_conf(instance), self.ingress_conf(instance, disabled=True)):
-            path.unlink(missing_ok=True)
+            unlink_if_exists(path)
         network = self.tenant_network(instance)
         for shared in (self.nginx_container_name, os.environ.get("MODEL_PROXY_CONTAINER_NAME", "openclaw-model-proxy")):
             code, output = self.run_command(["docker", "network", "disconnect", network, shared], timeout=30)
@@ -1718,7 +1730,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             os.replace(temporary, path)
         finally:
             if temporary is not None:
-                Path(temporary).unlink(missing_ok=True)
+                unlink_if_exists(Path(temporary))
 
     def start(self, instance):
         code, output = self.run_command(
@@ -1792,8 +1804,9 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 runtime_target,
             ],
             cwd=str(self.manager_dir),
-            text=True,
-            capture_output=True,
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=10,
             check=False,
         )
@@ -1878,7 +1891,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         except Exception as exc:
             compose_file.write_bytes(old_compose)
             if old_conf is None:
-                conf.unlink(missing_ok=True)
+                unlink_if_exists(conf)
             else:
                 conf.write_bytes(old_conf)
             self.apply_nginx_compose(compose_file)
@@ -2098,8 +2111,8 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         old_compose = compose_file.read_bytes()
         old_conf = conf.read_bytes() if conf.is_file() else None
         old_disabled_conf = disabled_conf.read_bytes() if disabled_conf.is_file() else None
-        conf.unlink(missing_ok=True)
-        disabled_conf.unlink(missing_ok=True)
+        unlink_if_exists(conf)
+        unlink_if_exists(disabled_conf)
         compose_file.write_text(
             self._remove_ingress_from_nginx_compose(
                 compose_file.read_text(encoding="utf-8"), port, networks
@@ -2301,8 +2314,8 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             if cleanup_code != 0 and "no such container" not in cleanup_output.lower():
                 rollback_errors.append(cleanup_output)
             compose_file.write_bytes(old_compose)
-            active_conf.unlink(missing_ok=True)
-            disabled_conf.unlink(missing_ok=True)
+            unlink_if_exists(active_conf)
+            unlink_if_exists(disabled_conf)
             if old_active_conf is not None:
                 active_conf.write_bytes(old_active_conf)
             if old_disabled_conf is not None:
@@ -2413,7 +2426,8 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         if not config_file.is_file():
             return 1, f"Hermes config file not found: {config_file}"
 
-        model_short_id = model_id.removeprefix(provider_id + "/")
+        prefix = provider_id + "/"
+        model_short_id = model_id[len(prefix):] if model_id.startswith(prefix) else model_id
         proxy_base_url = os.environ.get(
             "MODEL_PROXY_PUBLIC_BASE_URL",
             "http://openclaw-model-proxy:8081/v1",
@@ -2496,7 +2510,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             for path, content in ((token_file, old_token), (models_file, old_models)):
                 try:
                     if content is None:
-                        path.unlink(missing_ok=True)
+                        unlink_if_exists(path)
                     else:
                         self._write_private_file(path, content)
                 except Exception as rollback_exc:

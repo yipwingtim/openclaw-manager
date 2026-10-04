@@ -37,7 +37,10 @@ if manifest.is_file():
         if item.get("existed", True):
             shutil.copy2(item["backup"], path)
         else:
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
 PY
 }
 

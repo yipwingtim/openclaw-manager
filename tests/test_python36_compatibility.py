@@ -3,9 +3,50 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+HOST_RUNTIME_FILES = [
+    *sorted((ROOT / "scripts").glob("*.py")),
+    ROOT / "scripts" / "update_manager_auth.sh",
+    ROOT / "services" / "manager-control" / "hermes_auth_bridge.py",
+    ROOT / "services" / "manager-web" / "auth_providers.py",
+    ROOT / "services" / "manager-web" / "instance_adapters.py",
+    ROOT / "services" / "manager-web" / "metadata_store.py",
+    ROOT / "services" / "manager-web" / "product_capabilities.py",
+]
+
+FORBIDDEN_PYTHON36_APIS = (
+    "capture_output=True",
+    "text=True",
+    "missing_ok=True",
+    ".removeprefix(",
+    ".removesuffix(",
+    ".subnet_of(",
+    ".supernet_of(",
+    "from dataclasses import",
+    "from zoneinfo import",
+)
 
 
 class Python36CompatibilityTests(unittest.TestCase):
+    def test_host_runtime_closure_avoids_newer_python_apis(self):
+        for path in HOST_RUNTIME_FILES:
+            source = path.read_text()
+            for api in FORBIDDEN_PYTHON36_APIS:
+                self.assertNotIn(api, source, "%s uses %s" % (path, api))
+
+    def test_host_sqlite_calls_convert_path_objects_to_strings(self):
+        for path in HOST_RUNTIME_FILES:
+            source = path.read_text()
+            for line_number, line in enumerate(source.splitlines(), 1):
+                if "sqlite3.connect(" not in line:
+                    continue
+                argument = line.split("sqlite3.connect(", 1)[1].lstrip()
+                self.assertTrue(
+                    argument.startswith(('str(', 'f"', "f'", '":memory:"', "':memory:'")),
+                    "%s:%s passes a possible PathLike to sqlite3.connect" % (
+                        path, line_number,
+                    ),
+                )
+
     def test_tenant_network_helper_uses_python36_subprocess_options(self):
         source = (ROOT / "scripts" / "lib_tenant_network.sh").read_text()
         self.assertNotIn("capture_output=True", source)

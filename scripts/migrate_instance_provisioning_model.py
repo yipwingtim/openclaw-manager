@@ -40,7 +40,7 @@ def backup_database(db_file):
     while backup.exists():
         backup = db_file.with_name(f"{db_file.name}.pre-v5-{stamp}-{suffix}.bak")
         suffix += 1
-    with sqlite3.connect(db_file) as source, sqlite3.connect(backup) as destination:
+    with sqlite3.connect(str(db_file)) as source, sqlite3.connect(str(backup)) as destination:
         source.backup(destination)
     return backup
 
@@ -120,7 +120,7 @@ def main():
     except (OSError, sqlite3.Error, RuntimeError) as exc:
         print(f"[ERROR] invalid schema: {exc}", file=sys.stderr)
         return 1
-    with sqlite3.connect(args.db) as conn:
+    with sqlite3.connect(str(args.db)) as conn:
         version = schema_version(conn)
         instances = conn.execute("SELECT COUNT(*) FROM instances").fetchone()[0]
     if version == 5:
@@ -136,7 +136,7 @@ def main():
     if not args.no_backup:
         print(f"[INFO] Backup created: {backup_database(args.db)}")
     try:
-        with sqlite3.connect(args.db, isolation_level=None) as conn:
+        with sqlite3.connect(str(args.db), isolation_level=None) as conn:
             migrate(conn, args.schema)
     except (sqlite3.Error, RuntimeError) as exc:
         print(f"[ERROR] migration failed: {exc}", file=sys.stderr)

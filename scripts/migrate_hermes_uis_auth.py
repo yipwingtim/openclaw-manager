@@ -33,7 +33,7 @@ BASIC_KEYS = {
 
 
 def load_instance(db_file, public_id):
-    with sqlite3.connect(db_file) as conn:
+    with sqlite3.connect(str(db_file)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT * FROM instances WHERE public_id = ? AND product = 'hermes' "
@@ -71,7 +71,13 @@ def env_values(text):
 
 
 def run(command):
-    return subprocess.run(command, text=True, capture_output=True, check=False)
+    return subprocess.run(
+        command,
+        universal_newlines=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
 
 
 def apply(instance, db_file, issuer, ca_file):
@@ -97,10 +103,10 @@ def apply(instance, db_file, issuer, ca_file):
     old_ca = ca_target.read_bytes() if ca_target.is_file() else None
     if ca_target.exists() and old_ca is None:
         raise RuntimeError("existing Hermes Bridge CA path is not a regular file")
-    old_ca_stat = ca_target.stat(follow_symlinks=False) if old_ca is not None else None
+    old_ca_stat = os.stat(str(ca_target), follow_symlinks=False) if old_ca is not None else None
     ca_parent_created = not ca_target.parent.exists()
     ca_parent_stat = (
-        ca_target.parent.stat(follow_symlinks=False)
+        os.stat(str(ca_target.parent), follow_symlinks=False)
         if not ca_parent_created else None
     )
     current_env = env_values(old_env.decode())
@@ -140,7 +146,7 @@ def apply(instance, db_file, issuer, ca_file):
     created_client = False
     plugin_parent_created = not plugin.parent.exists()
     plugin_parent_stat = (
-        plugin.parent.stat(follow_symlinks=False)
+        os.stat(str(plugin.parent), follow_symlinks=False)
         if not plugin_parent_created else None
     )
     try:
@@ -179,7 +185,10 @@ def apply(instance, db_file, issuer, ca_file):
         env_file.write_bytes(old_env)
         config_file.write_bytes(old_config)
         if old_ca is None:
-            ca_target.unlink(missing_ok=True)
+            try:
+                ca_target.unlink()
+            except FileNotFoundError:
+                pass
             if ca_parent_created:
                 try:
                     ca_target.parent.rmdir()

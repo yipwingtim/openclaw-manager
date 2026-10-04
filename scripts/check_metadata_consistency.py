@@ -28,7 +28,11 @@ HERMES_BRIDGE_CA_CONTAINER_FILE = "/opt/data/manager-auth/bridge-ca.crt"
 def load_env_file(path):
     if not path.is_file():
         return
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return
+    for line in lines:
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue

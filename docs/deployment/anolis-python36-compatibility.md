@@ -11,6 +11,9 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
   `text=True` and `capture_output=True`.
 - `tests/test_hermes_uis_readiness.py` uses the same Python 3.6-compatible
   subprocess options when invoking the checker and signing-key initializer.
+- `tests/test_tenant_network_allocator.py` uses the same options when invoking
+  the allocator subprocess, so the compatibility suite itself runs on Python
+  3.6.
 - `scripts/lib_tenant_network.sh` uses the same options in its embedded Python
   helper for Docker inspection and network connection operations. This keeps
   the deployment post-check compatible with Anolis Python 3.6.
@@ -25,7 +28,8 @@ Run the compatibility checks from the repository root:
 ```bash
 python3 -m unittest \
   tests.test_hermes_uis_readiness \
-  tests.test_python36_compatibility
+  tests.test_python36_compatibility \
+  tests.test_tenant_network_allocator
 ```
 
 The replacement is behavior-preserving on Python 3.10+ and Python 3.6: it

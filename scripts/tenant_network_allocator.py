@@ -18,7 +18,13 @@ class AllocationError(RuntimeError):
 
 
 def run(command, check=True):
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        command,
+        universal_newlines=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     if check and result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "command failed"
         raise AllocationError(f"{' '.join(command)}: {detail}")

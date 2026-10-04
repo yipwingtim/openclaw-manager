@@ -19,7 +19,7 @@ class LocalAuthMigrationTests(unittest.TestCase):
             db_file = Path(tmp) / "manager.db"
             public_dir = Path(tmp) / "public"
             public_dir.mkdir()
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.executescript(SCHEMA_V1.read_text(encoding="utf-8"))
                 conn.execute(
                     "INSERT INTO instances (user_id, status) VALUES ('openclaw', 'active')"
@@ -38,7 +38,7 @@ class LocalAuthMigrationTests(unittest.TestCase):
                 text=True,
             )
 
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 role = conn.execute("SELECT role FROM users WHERE username = 'openclaw'").fetchone()[0]
                 provider = conn.execute("SELECT provider FROM user_identities WHERE provider = 'nginx-basic'").fetchone()[0]
                 credentials = conn.execute("SELECT COUNT(*) FROM local_credentials").fetchone()[0]

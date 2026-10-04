@@ -119,7 +119,7 @@ class HermesAuthHttpTests(unittest.TestCase):
             response.location,
             "https://manager.example.test:39119/auth/callback?code=one-time-code&state=state-1",
         )
-        payload = authorize.call_args.args[0]
+        payload = authorize.call_args[0][0]
         self.assertNotIn("instance_id", payload)
         self.assertNotIn("user_id", payload)
         self.assertEqual(payload["session_hash"], app.web_common.token_hash("manager-session"))

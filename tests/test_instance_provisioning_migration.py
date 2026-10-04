@@ -27,7 +27,7 @@ class InstanceProvisioningMigrationTests(unittest.TestCase):
             "VALUES (5, 'instance_provisioning');\n",
             "",
         )
-        with sqlite3.connect(db_file) as conn:
+        with sqlite3.connect(str(db_file)) as conn:
             conn.executescript(schema)
             conn.execute("DELETE FROM schema_migrations WHERE version > 4")
             conn.execute(
@@ -81,7 +81,7 @@ class InstanceProvisioningMigrationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("schema v4 -> v5", result.stdout)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 self.assertEqual(
                     conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0],
                     4,
@@ -95,7 +95,7 @@ class InstanceProvisioningMigrationTests(unittest.TestCase):
             result = self.run_migration(db_file, "--apply")
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
@@ -130,7 +130,7 @@ class InstanceProvisioningMigrationTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("migrate_instance_provisioning_model.py", result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
@@ -140,7 +140,7 @@ class InstanceProvisioningMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             db_file = self.make_v4_database(root)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.execute(
                     "INSERT INTO operation_records (action, status) "
                     "VALUES ('duplicate', 'success')"
@@ -162,7 +162,7 @@ class InstanceProvisioningMigrationTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]

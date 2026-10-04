@@ -28,7 +28,7 @@ class MigrationTests(unittest.TestCase):
             "VALUES (8, 'hermes_auth_bridge');\n",
             "",
         )
-        with sqlite3.connect(db_file) as conn:
+        with sqlite3.connect(str(db_file)) as conn:
             conn.executescript(schema)
         return db_file
 
@@ -44,7 +44,7 @@ class MigrationTests(unittest.TestCase):
             db_file = self.make_v7_database(root)
             result = self.run_migration(db_file, "--apply")
             self.assertEqual(result.returncode, 0, result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 self.assertEqual(migration.schema_version(conn), 8)
                 self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertEqual(len(list(root.glob("manager.db.pre-v8-*.bak"))), 1)
@@ -52,9 +52,9 @@ class MigrationTests(unittest.TestCase):
     def test_migration_rolls_back_all_statements_on_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_file = self.make_v7_database(Path(temp_dir))
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.execute("CREATE TABLE hermes_auth_grants(blocker INTEGER)")
-            with sqlite3.connect(db_file, isolation_level=None) as conn:
+            with sqlite3.connect(str(db_file), isolation_level=None) as conn:
                 with self.assertRaises(sqlite3.Error):
                     migration.migrate(conn)
                 self.assertEqual(migration.schema_version(conn), 7)

@@ -154,7 +154,7 @@ class ManagerExecutorApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["results"], [{
             "instance_public_id": "instance-1", "status": "success", "error_summary": None,
         }])
-        self.assertEqual(record.call_args.args[0], {
+        self.assertEqual(record.call_args[0][0], {
             "actor_user_public_id": "admin-1", "instance_public_id": "instance-1", **collected,
         })
 
@@ -190,7 +190,7 @@ class ManagerExecutorApiTests(unittest.TestCase):
             else:
                 get_adapter.return_value.approve_latest_device.assert_called_once()
                 self.assertEqual(
-                    get_adapter.return_value.approve_latest_device.call_args.args[0], instance
+                    get_adapter.return_value.approve_latest_device.call_args[0][0], instance
                 )
 
     def test_upload_rejects_target_replacement_before_open(self):

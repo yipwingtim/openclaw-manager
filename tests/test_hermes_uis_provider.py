@@ -112,7 +112,7 @@ class HermesUISProviderTests(unittest.TestCase):
 
         create_context.assert_called_once_with(cafile=str(self.ca_file))
         self.assertIs(provider.ssl_context, context)
-        self.assertIs(jwks.call_args.kwargs["ssl_context"], context)
+        self.assertIs(jwks.call_args[1]["ssl_context"], context)
 
         response = types.SimpleNamespace(status_code=400, json=lambda: {})
         with patch.object(self.plugin.httpx, "post", return_value=response) as post:
@@ -121,7 +121,7 @@ class HermesUISProviderTests(unittest.TestCase):
                     code="one-time-code", state="state", code_verifier="verifier",
                     redirect_uri="http://manager.example.test/auth/callback",
                 )
-        self.assertIs(post.call_args.kwargs["verify"], context)
+        self.assertIs(post.call_args[1]["verify"], context)
 
     def valid_claims(self, **overrides):
         claims = {
@@ -154,8 +154,8 @@ class HermesUISProviderTests(unittest.TestCase):
         self.assertEqual(session.user_id, "22222222-2222-2222-2222-222222222222")
         self.assertEqual(session.provider, "campus-uis-bridge")
         self.assertEqual(session.refresh_token, "")
-        self.assertEqual(decode.call_args.kwargs["algorithms"], ["EdDSA"])
-        self.assertEqual(decode.call_args.kwargs["audience"], "client-1")
+        self.assertEqual(decode.call_args[1]["algorithms"], ["EdDSA"])
+        self.assertEqual(decode.call_args[1]["audience"], "client-1")
 
         for claims in (
             self.valid_claims(instance_id="33333333-3333-3333-3333-333333333333"),
@@ -177,7 +177,7 @@ class HermesUISProviderTests(unittest.TestCase):
                     code="one-time-code", state="state", code_verifier="verifier",
                     redirect_uri="http://manager.example.test/auth/callback",
                 )
-        data = post.call_args.kwargs["data"]
+        data = post.call_args[1]["data"]
         self.assertEqual(data["client_secret"], "secret-1")
         self.assertEqual(data["code_verifier"], "verifier")
         self.assertEqual(

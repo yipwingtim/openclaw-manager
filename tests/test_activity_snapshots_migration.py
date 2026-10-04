@@ -21,7 +21,7 @@ class ActivitySnapshotsMigrationTests(unittest.TestCase):
             "\nINSERT OR IGNORE INTO schema_migrations (version, name)\nVALUES (7, 'activity_snapshots');\n",
             "",
         )
-        with sqlite3.connect(db_file) as conn:
+        with sqlite3.connect(str(db_file)) as conn:
             conn.executescript(schema)
         return db_file
 
@@ -37,13 +37,13 @@ class ActivitySnapshotsMigrationTests(unittest.TestCase):
             db_file = self.make_v6_database(root)
             dry_run = self.run_migration(db_file)
             self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 self.assertEqual(conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 6)
                 self.assertIsNone(conn.execute("SELECT 1 FROM sqlite_master WHERE name='activity_snapshots'").fetchone())
 
             applied = self.run_migration(db_file, "--apply")
             self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 self.assertEqual(conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 7)
                 self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertEqual(len(list(root.glob("manager.db.pre-v7-*.bak"))), 1)

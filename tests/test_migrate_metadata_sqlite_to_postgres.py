@@ -79,7 +79,7 @@ class MigrationTests(unittest.TestCase):
     def test_import_failure_reaches_caller_for_transaction_rollback(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        source = sqlite3.connect(Path(temp.name) / "source.db")
+        source = sqlite3.connect(str(Path(temp.name) / "source.db"))
         for table in MIGRATION.TABLES:
             source.execute(f"CREATE TABLE {table}(id INTEGER)")
         source.execute("INSERT INTO users VALUES(1)")

@@ -17,7 +17,7 @@ V1_SCHEMA = ROOT_DIR / "tests" / "fixtures" / "metadata_schema_v1.sql"
 class IdentityInstanceMigrationTests(unittest.TestCase):
     def make_v1_database(self, root, rows):
         db_file = root / "manager.db"
-        with sqlite3.connect(db_file) as conn:
+        with sqlite3.connect(str(db_file)) as conn:
             conn.executescript(V1_SCHEMA.read_text(encoding="utf-8"))
             for user_id, status, container_name, port in rows:
                 conn.execute(
@@ -74,7 +74,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("users=1 instances=1 deleted=0", result.stdout)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 columns = {
                     row[1] for row in conn.execute("PRAGMA table_info(instances)")
                 }
@@ -126,7 +126,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.row_factory = sqlite3.Row
                 users = conn.execute(
                     "SELECT username, normalized_username FROM users ORDER BY username"
@@ -203,7 +203,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("restorable=0 incomplete=1", result.stdout)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 restore_state = conn.execute(
                     "SELECT restore_state FROM instances WHERE legacy_user_id = 'alice'"
                 ).fetchone()[0]
@@ -215,7 +215,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             db_file = self.make_v1_database(
                 root, [("alice", "active", "openclaw_alice", 30021)]
             )
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 conn.execute("PRAGMA foreign_keys = OFF")
                 conn.execute(
                     "INSERT INTO instance_credentials (user_id, openclaw_token) VALUES ('missing', 'token')"
@@ -247,7 +247,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 row = conn.execute(
                     "SELECT restore_state, data_path FROM instances WHERE legacy_user_id = 'alice'"
                 ).fetchone()
@@ -272,7 +272,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 row = conn.execute(
                     "SELECT restore_state, data_path FROM instances WHERE legacy_user_id = 'alice'"
                 ).fetchone()
@@ -293,7 +293,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 restore_state = conn.execute(
                     "SELECT restore_state FROM instances WHERE legacy_user_id = 'alice'"
                 ).fetchone()[0]
@@ -318,7 +318,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 restore_state = conn.execute(
                     "SELECT restore_state FROM instances WHERE legacy_user_id = 'alice'"
                 ).fetchone()[0]
@@ -343,7 +343,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 restore_state = conn.execute(
                     "SELECT restore_state FROM instances WHERE legacy_user_id = 'alice'"
                 ).fetchone()[0]
@@ -361,7 +361,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             backups = list(root.glob("manager.db.pre-v2-*.bak"))
             self.assertEqual(len(backups), 1)
-            with sqlite3.connect(backups[0]) as conn:
+            with sqlite3.connect(str(backups[0])) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
@@ -406,7 +406,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 row = conn.execute(
                     "SELECT restore_state, data_path FROM instances WHERE legacy_user_id = 'alice'"
                 ).fetchone()
@@ -441,7 +441,7 @@ class IdentityInstanceMigrationTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Metadata schema v1 requires", result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
                 users_table = conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"

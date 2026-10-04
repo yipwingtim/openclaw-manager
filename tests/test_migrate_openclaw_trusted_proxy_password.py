@@ -27,7 +27,7 @@ class TrustedProxyPasswordMigrationTests(unittest.TestCase):
             path = module.PUBLIC_DIR / "instances/openclaw/id/config/openclaw.json"
             path.parent.mkdir(parents=True)
             path.write_text(json.dumps({"gateway": {"auth": {"mode": "trusted-proxy"}}}), encoding="utf-8")
-            with sqlite3.connect(module.DB_FILE) as db:
+            with sqlite3.connect(str(module.DB_FILE)) as db:
                 db.execute("CREATE TABLE instances (public_id, legacy_user_id, data_path, status, product)")
                 db.execute("INSERT INTO instances VALUES ('id', 'alice', ?, 'active', 'openclaw')", (str(path.parent.parent),))
             self.assertEqual(module.main([]), 0)

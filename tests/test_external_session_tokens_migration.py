@@ -46,7 +46,7 @@ VALUES (7, 'activity_snapshots');
 """,
             "",
         )
-        with sqlite3.connect(db_file) as conn:
+        with sqlite3.connect(str(db_file)) as conn:
             conn.executescript(schema)
         return db_file
 
@@ -65,7 +65,7 @@ VALUES (7, 'activity_snapshots');
             result = self.run_migration(db_file)
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
@@ -84,7 +84,7 @@ VALUES (7, 'activity_snapshots');
             result = self.run_migration(db_file, "--apply")
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(db_file) as conn:
+            with sqlite3.connect(str(db_file)) as conn:
                 version = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]

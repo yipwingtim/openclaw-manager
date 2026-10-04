@@ -142,7 +142,7 @@ class LifecycleActionTests(unittest.TestCase):
                         self.assertEqual(self.app_module.get_container_logs("alice"), "logs")
 
         self.assertEqual(get_record.call_count, 2)
-        self.assertEqual(get_adapter.call_args_list[0].args, ("openclaw",))
+        self.assertEqual(get_adapter.call_args_list[0][0], ("openclaw",))
         status.assert_called_once_with(instance)
         logs.assert_called_once_with(instance, tail=120)
 
@@ -382,8 +382,8 @@ class LifecycleActionTests(unittest.TestCase):
             ["[SKIP] alice: already running", "[OK] bob: Start completed"],
         )
         self.assertEqual(errors, ["[ERROR] carol: Start failed: failed"])
-        self.assertEqual(run_action.call_args_list[0].args, ("bob", "start"))
-        self.assertEqual(run_action.call_args_list[1].args, ("carol", "start"))
+        self.assertEqual(run_action.call_args_list[0][0], ("bob", "start"))
+        self.assertEqual(run_action.call_args_list[1][0], ("carol", "start"))
         persist_metadata.assert_called_once_with("bob", "start", "started")
 
     def test_bulk_stop_skips_stopped_instances(self):
@@ -474,7 +474,7 @@ class LifecycleActionTests(unittest.TestCase):
                     response = self.app_module.upload_file_for_user("alice")
 
             self.assertEqual(response, "redirected")
-            self.assertIn("Unsupported file type", redirect_dashboard.call_args.kwargs["error"])
+            self.assertIn("Unsupported file type", redirect_dashboard.call_args[1]["error"])
             self.assertFalse((Path(public_dir) / "users" / "alice" / "uploads" / "script.sh").exists())
 
     def test_upload_file_accepts_supported_extension(self):
@@ -637,7 +637,7 @@ class BatchCreatePreflightTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "updated")
-            command = run_command.call_args.args[0]
+            command = run_command.call_args[0][0]
             self.assertTrue(str(command[0]).endswith("scripts/batch_set_model_provider.sh"))
             self.assertEqual(command[1:], [str(input_csv), str(output_csv)])
 
@@ -657,7 +657,7 @@ class BatchCreatePreflightTests(unittest.TestCase):
 
             self.assertEqual(result, (0, "updated"))
             self.assertEqual(
-                run.call_args.args[0][1:],
+                run.call_args[0][0][1:],
                 ["alice", "openai", "openai/gpt-5", "https://models.example/v1", "GPT-5"],
             )
 
@@ -686,15 +686,15 @@ class BatchCreatePreflightTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "created")
-            command = run_command.call_args.args[0]
+            command = run_command.call_args[0][0]
             self.assertTrue(str(command[0]).endswith("scripts/create_user.sh"))
             self.assertEqual(command[1:], ["alice", "--basic-auth-enabled", "true", "--skip-nginx-reload"])
             self.assertEqual(
-                run_command.call_args.kwargs["env"]["OPENCLAW_BASIC_AUTH_PASSWORD"],
+                run_command.call_args[1]["env"]["OPENCLAW_BASIC_AUTH_PASSWORD"],
                 "secret",
             )
             self.assertNotIn(
-                "OPENCLAW_SKIP_METADATA_WRITE", run_command.call_args.kwargs["env"]
+                "OPENCLAW_SKIP_METADATA_WRITE", run_command.call_args[1]["env"]
             )
 
     def test_adapter_batch_create_runs_batch_create_script(self):
@@ -714,7 +714,7 @@ class BatchCreatePreflightTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "created")
-            command = run_command.call_args.args[0]
+            command = run_command.call_args[0][0]
             self.assertTrue(str(command[0]).endswith("scripts/batch_create_users.sh"))
             self.assertEqual(command[1:], [str(input_csv), str(output_csv), "--skip-nginx-refresh"])
 
@@ -747,15 +747,15 @@ class BatchCreatePreflightTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(output, "updated")
-            command = popen.call_args.args[0]
+            command = popen.call_args[0][0]
             self.assertTrue(str(command[0]).endswith("scripts/update_instance_version.sh"))
             self.assertEqual(
-                popen.call_args.kwargs["env"]["OPENCLAW_SKIP_METADATA_WRITE"],
+                popen.call_args[1]["env"]["OPENCLAW_SKIP_METADATA_WRITE"],
                 "1",
             )
             self.assertEqual(command[1:], ["alice", "2026.5.26", "--restore-model-provider"])
-            self.assertEqual(process.communicate.call_args.kwargs["timeout"], 123)
-            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+            self.assertEqual(process.communicate.call_args[1]["timeout"], 123)
+            self.assertTrue(popen.call_args[1]["start_new_session"])
 
     def test_version_update_job_reports_missing_instance(self):
         with patch.object(self.app_module, "get_instance_record", return_value={}):
@@ -784,7 +784,7 @@ class BatchCreatePreflightTests(unittest.TestCase):
             result = self.app_module.run_instance_version_update_job("alice", "2026.5.26")
 
         self.assertEqual(result, (1, "instance legacy_user_id is required"))
-        self.assertEqual(persist.call_args.kwargs["status"], "failed")
+        self.assertEqual(persist.call_args[1]["status"], "failed")
 
 
 if __name__ == "__main__":

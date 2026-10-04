@@ -38,7 +38,7 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.db = self.root / "manager.db"
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             conn.executescript(SCHEMA.read_text())
             conn.execute(
                 "INSERT INTO users(id,public_id,username,normalized_username) VALUES(1,?,?,?)",
@@ -78,7 +78,7 @@ class HermesUISMigrationTests(unittest.TestCase):
             ])
         self.assertEqual(status, 0)
         self.assertEqual((self.data / ".env").read_bytes(), before)
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 0)
 
     def test_apply_removes_basic_auth_and_registers_one_client(self):
@@ -105,8 +105,8 @@ class HermesUISMigrationTests(unittest.TestCase):
         staged_ca = self.data / "manager-auth" / "bridge-ca.crt"
         self.assertEqual(staged_ca.read_bytes(), self.ca_file.read_bytes())
         self.assertEqual(staged_ca.stat().st_mode & 0o777, 0o640)
-        self.assertEqual(run.call_args_list[-1].args[0], ["docker", "restart", "hermes_alice"])
-        with sqlite3.connect(self.db) as conn:
+        self.assertEqual(run.call_args_list[-1][0][0], ["docker", "restart", "hermes_alice"])
+        with sqlite3.connect(str(self.db)) as conn:
             client = conn.execute("SELECT client_secret_hash,redirect_uri FROM hermes_auth_clients").fetchone()
         self.assertTrue(client[0].startswith("scrypt$"))
         self.assertEqual(client[1], "https://manager.example.test:39119/auth/callback")
@@ -119,7 +119,7 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.assertEqual(plugin.stat().st_mode & 0o777, 0o750)
         self.assertEqual((plugin / "plugin.yaml").stat().st_mode & 0o777, 0o640)
         self.assertEqual((plugin / "__init__.py").stat().st_mode & 0o777, 0o640)
-        self.assertTrue(any(call.args[1:] == (self.data.stat().st_uid, self.data.stat().st_gid)
+        self.assertTrue(any(call[0][1:] == (self.data.stat().st_uid, self.data.stat().st_gid)
                             for call in chown.call_args_list))
 
     def test_apply_reuses_matching_existing_client_to_repair_provider(self):
@@ -154,7 +154,7 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.assertIn(
             "HERMES_UIS_BRIDGE_CA_FILE=/opt/data/manager-auth/bridge-ca.crt", env
         )
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             self.assertEqual(
                 conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 1
             )
@@ -196,7 +196,7 @@ class HermesUISMigrationTests(unittest.TestCase):
         self.assertEqual((self.data / "config.yaml").read_bytes(), before_config)
         self.assertFalse((self.data / "plugins").exists())
         self.assertFalse((self.data / "manager-auth").exists())
-        with sqlite3.connect(self.db) as conn:
+        with sqlite3.connect(str(self.db)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM hermes_auth_clients").fetchone()[0], 0)
 
     def test_restart_failure_restores_existing_ca(self):

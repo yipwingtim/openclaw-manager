@@ -58,7 +58,10 @@ class TenantNetworkAllocatorTests(unittest.TestCase):
             """).lstrip())
             result = subprocess.run(
                 self.command(root, "--exclude", "10.250.0.0/28"),
-                text=True, capture_output=True, env=env, check=False,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             log = (root / "docker.log").read_text(encoding="utf-8")
@@ -76,7 +79,9 @@ class TenantNetworkAllocatorTests(unittest.TestCase):
                 '[{"dst":"10.250.0.0/24","dev":"eth0"}]',
             )
             result = subprocess.run(
-                self.command(root), text=True, capture_output=True, env=env, check=False
+                self.command(root), universal_newlines=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=env, check=False
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("overlaps host route", result.stderr)
@@ -93,7 +98,9 @@ class TenantNetworkAllocatorTests(unittest.TestCase):
                 exit 1
             """).lstrip())
             result = subprocess.run(
-                self.command(root), text=True, capture_output=True, env=env, check=False
+                self.command(root), universal_newlines=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=env, check=False
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("outside configured tenant pool", result.stderr)
@@ -113,7 +120,9 @@ class TenantNetworkAllocatorTests(unittest.TestCase):
                 exit 1
             """).lstrip())
             result = subprocess.run(
-                self.command(root), text=True, capture_output=True, env=env, check=False
+                self.command(root), universal_newlines=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=env, check=False
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("not owned", result.stderr)
@@ -140,7 +149,10 @@ class TenantNetworkAllocatorTests(unittest.TestCase):
                     "--pool", "10.250.0.0/24",
                     "--subnet-prefix", "28",
                 ],
-                text=True, capture_output=True, env=env, check=False,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(
@@ -177,7 +189,10 @@ class TenantNetworkAllocatorTests(unittest.TestCase):
                     "--subnet-prefix", "28",
                     "--lock-file", str(root / "tenant-network.lock"),
                 ],
-                text=True, capture_output=True, env=env, check=False,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env, check=False,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("does not have capacity", result.stderr)
@@ -213,7 +228,10 @@ class TenantNetworkAllocatorTests(unittest.TestCase):
                     "--subnet-prefix", "28",
                     "--lock-file", str(root / "tenant-network.lock"),
                 ],
-                text=True, capture_output=True, env=env, check=False,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env, check=False,
             )
             self.assertNotEqual(result.returncode, 0)
             log = (root / "docker.log").read_text(encoding="utf-8")

@@ -432,6 +432,9 @@ class EvoScientistRegistrationTests(unittest.TestCase):
             env["NGINX_USERS_CONF_DIR"] = str(nginx_dir)
             env["METADATA_DB_FILE"] = str(public_dir / "manager.db")
             env["METADATA_SCHEMA_FILE"] = str(ROOT_DIR / "db" / "schema.sql")
+            env["OPENCLAW_MANAGER_CONFIG_FILE"] = str(root / "missing-manager.env")
+            env["METADATA_DB_BACKEND"] = "sqlite"
+            env.pop("METADATA_DATABASE_URL", None)
 
             result = subprocess.run(
                 [
@@ -445,8 +448,9 @@ class EvoScientistRegistrationTests(unittest.TestCase):
                     "--container-name",
                     "evoscientist_alice",
                 ],
-                text=True,
-                capture_output=True,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 env=env,
                 check=False,
             )

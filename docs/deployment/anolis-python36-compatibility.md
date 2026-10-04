@@ -54,6 +54,9 @@ scripts therefore avoid subprocess arguments introduced after Python 3.6.
   metadata/bridge tests explicitly select temporary SQLite and clear the
   production PostgreSQL URL. Tests therefore work as a normal deployment user
   even when the production env file is root-readable only.
+- Subprocess-based metadata registration tests pass the same isolated config
+  and SQLite environment to the child process; this prevents a child CLI from
+  falling back to a root-only production env file.
 
 ## Verification
 

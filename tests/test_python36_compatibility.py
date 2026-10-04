@@ -89,6 +89,14 @@ class Python36CompatibilityTests(unittest.TestCase):
         source = (ROOT / "scripts" / "check_metadata_consistency.py").read_text()
         self.assertIn('OPENCLAW_MANAGER_CONFIG_FILE', source)
 
+    def test_evoscientist_metadata_subprocess_isolated_from_production_config(self):
+        source = (ROOT / "tests" / "test_evoscientist_adapter.py").read_text()
+        self.assertIn('env["OPENCLAW_MANAGER_CONFIG_FILE"]', source)
+        self.assertIn('env["METADATA_DB_BACKEND"] = "sqlite"', source)
+        self.assertIn('env.pop("METADATA_DATABASE_URL", None)', source)
+        self.assertNotIn("capture_output=True", source)
+        self.assertNotIn("text=True", source)
+
 
 if __name__ == "__main__":
     unittest.main()

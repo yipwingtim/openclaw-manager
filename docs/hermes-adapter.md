@@ -49,9 +49,10 @@ support the legacy two-container topology.
   state. Restore recreates the same deployment, port, ingress, and state.
 - Version updates follow the OpenClaw pre-pull rule: the target image must
   already exist locally (`docker pull nousresearch/hermes-agent:<version>`).
-  A failed recreate automatically restores the previous image and state. Upgrade
-  results distinguish a Dashboard readiness failure, an ACL verification failure,
-  and a recreated previous-image container that fails post-rollback verification.
+  A failed recreate automatically restores the previous image and state. Dashboard
+  readiness determines lifecycle success. Host-manager ACL application is best-effort
+  because Hermes may tighten runtime-generated files with `chmod`; ACL failures are
+  returned as warnings instead of triggering rollback.
 
 Registration writes the instance, endpoint, allocated port, audit record,
 Nginx server configuration, port mapping, and external network attachment. A

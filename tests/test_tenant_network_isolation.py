@@ -144,14 +144,15 @@ class TenantNetworkIsolationTests(unittest.TestCase):
         self.assertIn('docker network ls -q --filter "label=com.openclaw.tenant-network"', script)
         self.assertIn("--format '{{range .Containers}}{{println .Name}}{{end}}'", script)
 
-    def test_runtime_check_treats_hermes_data_permissions_as_container_managed(self):
+    def test_runtime_check_treats_hermes_host_acl_as_best_effort(self):
         script = RUNTIME_SECURITY_CHECK.read_text(encoding="utf-8")
 
-        self.assertIn("Hermes data permissions are managed by the container", script)
+        self.assertIn("Hermes host ACL is best-effort", script)
+        self.assertIn("runtime chmod may restrict generated files", script)
         self.assertNotIn("hermes_acl_has_access", script)
         self.assertNotIn("Hermes host manager access missing", script)
 
-    def test_runtime_check_reports_container_managed_hermes_data_permissions(self):
+    def test_runtime_check_reports_best_effort_hermes_host_acl(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             manager = root / "manager"
@@ -182,7 +183,7 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             )
 
             self.assertIn(
-                f"[INFO] Hermes data permissions are managed by the container: {instance_dir}",
+                f"[INFO] Hermes host ACL is best-effort; runtime chmod may restrict generated files: {instance_dir}",
                 result.stdout,
             )
 

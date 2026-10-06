@@ -153,7 +153,7 @@ mount_is_readonly() {
 for hermes_root in "$OPENCLAW_PUBLIC_DIR/hermes" "$OPENCLAW_PUBLIC_DIR/instances/hermes"; do
   [ -d "$hermes_root" ] || continue
   while IFS= read -r -d '' instance_dir; do
-    echo "[INFO] Hermes data permissions are managed by the container: $instance_dir"
+    echo "[INFO] Hermes host ACL is best-effort; runtime chmod may restrict generated files: $instance_dir"
   done < <(find "$hermes_root" -mindepth 1 -maxdepth 1 -type d -print0)
 done
 

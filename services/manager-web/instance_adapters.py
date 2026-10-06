@@ -1607,7 +1607,6 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         )
 
     def _grant_host_manager_access(self, instance):
-        # ponytail: bounded startup retries; add a watcher only if Hermes resets ACLs later.
         data_path = self._hermes_data_path(instance)
         if not data_path.is_dir():
             return 1, f"Hermes data path not found: {data_path}"
@@ -1616,71 +1615,21 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         except OSError as exc:
             return 1, f"Could not resolve host manager UID: {exc}"
         outputs = []
-        stable_checks = 0
-        required_stable_checks = 15
-        last_error = ""
-        for _ in range(5):
-            applied = True
-            for file_type, acl in (
-                ("d", f"u:{manager_uid}:rwx,m::rwx,d:u:{manager_uid}:rwx,d:m::rwx"),
-                ("f", f"u:{manager_uid}:rw-,m::rwx"),
-            ):
-                code, output = self.run_command(
-                    [
-                        "find", str(data_path), "-xdev", "-type", file_type, "-exec",
-                        "setfacl", "-m", acl, "{}", "+",
-                    ],
-                    timeout=60,
-                )
-                outputs.append(output)
-                if code != 0:
-                    applied = False
-                    stable_checks = 0
-                    last_error = output
-                    break
-            if not applied:
-                continue
-            for _ in range(required_stable_checks):
-                code, output = self.run_command(
-                    [
-                        "bash", "-lc",
-                        'sleep 1; uid="$1"; root="$2"; '
-                        'while IFS= read -r -d "" path; do '
-                        'acl=$(getfacl -cpn -- "$path" 2>&1); status=$?; '
-                        'if [ $status -ne 0 ]; then '
-                        'if [ ! -e "$path" ]; then continue; fi; '
-                        'printf "%s\\n" "$acl" >&2; exit $status; fi; '
-                        'printf "%s\\n" "$acl" | awk -F: -v uid="$uid" '
-                        "'$1 == \"user\" && $2 == uid && $3 ~ /^rwx/ { user = 1 } "
-                        "$1 == \"mask\" && $2 == \"\" && $3 ~ /^rwx/ { mask = 1 } "
-                        "$1 == \"default\" && $2 == \"user\" && $3 == uid && $4 ~ /^rwx/ { duser = 1 } "
-                        "$1 == \"default\" && $2 == \"mask\" && $3 == \"\" && $4 ~ /^rwx/ { dmask = 1 } "
-                        "END { exit !(user && mask && duser && dmask) }' || exit 1; "
-                        'done < <(find "$root" -xdev -type d -print0); '
-                        'while IFS= read -r -d "" path; do '
-                        'acl=$(getfacl -cpn -- "$path" 2>&1); status=$?; '
-                        'if [ $status -ne 0 ]; then '
-                        'if [ ! -e "$path" ]; then continue; fi; '
-                        'printf "%s\\n" "$acl" >&2; exit $status; fi; '
-                        'printf "%s\\n" "$acl" | awk -F: -v uid="$uid" '
-                        "'$1 == \"user\" && $2 == uid && $3 ~ /^rw/ { user = 1 } "
-                        "$1 == \"mask\" && $2 == \"\" && $3 ~ /^rw/ { mask = 1 } "
-                        "END { exit !(user && mask) }' || exit 1; "
-                        'done < <(find "$root" -xdev -type f -print0)',
-                        "bash", str(manager_uid), str(data_path),
-                    ],
-                    timeout=60,
-                )
-                outputs.append(output)
-                if code != 0:
-                    stable_checks = 0
-                    last_error = output
-                    break
-                stable_checks += 1
-            if stable_checks == required_stable_checks:
-                return 0, "\n".join(part for part in outputs if part)
-        detail = f"\n{last_error}" if last_error else ""
-        return 1, f"Hermes host manager ACL did not become stable after startup.{detail}"
+        for file_type, acl in (
+            ("d", f"u:{manager_uid}:rwx,m::rwx,d:u:{manager_uid}:rwx,d:m::rwx"),
+            ("f", f"u:{manager_uid}:rw-,m::rwx"),
+        ):
+            code, output = self.run_command(
+                [
+                    "find", str(data_path), "-xdev", "-type", file_type, "-exec",
+                    "setfacl", "-m", acl, "{}", "+",
+                ],
+                timeout=60,
+            )
+            outputs.append(output)
+            if code != 0:
+                return code, output
+        return 0, "\n".join(part for part in outputs if part)
 
     def _wait_for_dashboard(self, instance):
         code, output = self.run_command(
@@ -1695,7 +1644,9 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         if code != 0:
             return code, f"Hermes Dashboard did not become ready.\n{output}".strip()
         acl_code, acl_output = self._grant_host_manager_access(instance)
-        return acl_code, acl_output
+        if acl_code != 0:
+            return 0, f"WARNING: Hermes host manager ACL update failed: {acl_output}"
+        return 0, acl_output
 
     def _restore_hermes_runtime(self, instance, image, was_running, network):
         code, output = self.run_command(
@@ -2402,11 +2353,14 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             code, output = self._wait_for_dashboard(instance)
             if code != 0:
                 raise RuntimeError(output or "Hermes Dashboard did not become ready")
+            readiness_output = output
             if not was_running:
                 code, output = self.stop(instance)
                 if code != 0:
                     raise RuntimeError(output)
-            return 0, f"Hermes version updated to {version}."
+            return 0, "\n".join(part for part in (
+                f"Hermes version updated to {version}.", readiness_output,
+            ) if part)
         except Exception as exc:
             self.run_command(["docker", "rm", "-f", self.get_runtime_target(instance)], timeout=60)
             rollback_code, rollback_output = self._run_hermes_container(

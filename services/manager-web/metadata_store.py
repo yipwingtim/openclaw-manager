@@ -1947,6 +1947,15 @@ class _PostgresCursor:
             (column.name for column in self._cursor.description), row
         )
 
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
+
     def fetchone(self):
         return self._row(self._cursor.fetchone())
 

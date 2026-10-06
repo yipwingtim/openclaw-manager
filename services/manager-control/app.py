@@ -1475,8 +1475,8 @@ def admin_metadata():
                 """
                 SELECT identity.provider, COUNT(DISTINCT identity.user_id) AS count
                 FROM user_identities identity
-                JOIN users user ON user.id = identity.user_id
-                WHERE user.status != 'deleted'
+                JOIN users AS identity_user ON identity_user.id = identity.user_id
+                WHERE identity_user.status != 'deleted'
                   AND identity.provider IN ('local', 'campus-uis')
                 GROUP BY identity.provider
                 """

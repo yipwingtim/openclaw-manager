@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -119,6 +120,84 @@ class HermesAdapterTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertIn("ok", output)
+
+    def test_acl_check_skips_disappeared_file_but_rejects_existing_read_error(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            check_command = None
+
+            def capture(command, **kwargs):
+                nonlocal check_command
+                if command[:2] == ["bash", "-lc"]:
+                    check_command = command
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=capture):
+                self.assertEqual(adapter._grant_host_manager_access(instance)[0], 0)
+
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_getfacl = fake_bin / "getfacl"
+            fake_getfacl.write_text(
+                "#!/bin/sh\n"
+                "path=$3\n"
+                "case $path in\n"
+                "  *vanishing.db-shm) rm -f -- \"$path\"; exit 1 ;;\n"
+                "  *denied.db) echo 'permission denied' >&2; exit 1 ;;\n"
+                "esac\n"
+                f"printf 'user:{os.getuid()}:rwx\\nmask::rwx\\n"
+                f"default:user:{os.getuid()}:rwx\\ndefault:mask::rwx\\n'\n",
+                encoding="utf-8",
+            )
+            fake_getfacl.chmod(0o755)
+            env = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"}
+            script = check_command[2].replace("sleep 1; ", "", 1)
+            args = ["bash", "-c", script, *check_command[3:]]
+
+            (data_path / "vanishing.db-shm").touch()
+            disappeared = subprocess.run(
+                args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            self.assertEqual(disappeared.returncode, 0, disappeared.stderr)
+
+            (data_path / "denied.db").touch()
+            denied = subprocess.run(
+                args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("permission denied", denied.stderr)
+
+    def test_dashboard_wait_reports_readiness_and_acl_failures_separately(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+
+            with patch.object(
+                adapter, "run_command", return_value=(1, "curl: (7) Failed to connect")
+            ), patch.object(adapter, "_grant_host_manager_access") as grant:
+                code, output = adapter._wait_for_dashboard(instance)
+
+            self.assertEqual(code, 1)
+            self.assertIn("Dashboard did not become ready", output)
+            grant.assert_not_called()
+
+            with patch.object(
+                adapter, "run_command", return_value=(0, "curl: (7) earlier retry")
+            ), patch.object(
+                adapter, "_grant_host_manager_access", return_value=(1, "ACL invalid")
+            ):
+                code, output = adapter._wait_for_dashboard(instance)
+
+            self.assertEqual((code, output), (1, "ACL invalid"))
 
     def test_host_access_fails_when_acl_never_stabilizes(self):
         with TemporaryDirectory() as temp_dir:
@@ -266,6 +345,32 @@ class HermesAdapterTests(unittest.TestCase):
             runs = [command for command in calls if command[:2] == ["docker", "run"]]
             self.assertTrue(any(any(value.endswith(":v2026.8.1") for value in command) for command in runs))
             self.assertTrue(any(any(value.endswith(":v2026.7.20") for value in command) for command in runs))
+
+    def test_update_version_distinguishes_rollback_verification_failure(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+
+            def run(command, **kwargs):
+                if command[:3] == ["docker", "inspect", "--format"]:
+                    return 0, "nousresearch/hermes-agent:v2026.7.30|true|hermes-net"
+                return 0, "ok"
+
+            with patch.object(adapter, "run_command", side_effect=run), patch.object(
+                adapter, "_wait_for_dashboard", side_effect=[
+                    (1, "new image ACL verification failed"),
+                    (1, "old image ACL verification failed"),
+                ]
+            ):
+                code, output = adapter.update_version(instance, "v2026.9.21")
+
+            self.assertEqual(code, 1)
+            self.assertIn("previous image container was recreated", output)
+            self.assertIn("rollback verification", output)
+            self.assertNotIn("automatic rollback failed", output)
 
     def test_compose_ingress_is_persistent_and_idempotent(self):
         text = (

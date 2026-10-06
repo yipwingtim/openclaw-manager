@@ -1646,7 +1646,11 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                         "bash", "-lc",
                         'sleep 1; uid="$1"; root="$2"; '
                         'while IFS= read -r -d "" path; do '
-                        'getfacl -cpn -- "$path" | awk -F: -v uid="$uid" '
+                        'acl=$(getfacl -cpn -- "$path" 2>&1); status=$?; '
+                        'if [ $status -ne 0 ]; then '
+                        'if [ ! -e "$path" ]; then continue; fi; '
+                        'printf "%s\\n" "$acl" >&2; exit $status; fi; '
+                        'printf "%s\\n" "$acl" | awk -F: -v uid="$uid" '
                         "'$1 == \"user\" && $2 == uid && $3 ~ /^rwx/ { user = 1 } "
                         "$1 == \"mask\" && $2 == \"\" && $3 ~ /^rwx/ { mask = 1 } "
                         "$1 == \"default\" && $2 == \"user\" && $3 == uid && $4 ~ /^rwx/ { duser = 1 } "
@@ -1654,7 +1658,11 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                         "END { exit !(user && mask && duser && dmask) }' || exit 1; "
                         'done < <(find "$root" -xdev -type d -print0); '
                         'while IFS= read -r -d "" path; do '
-                        'getfacl -cpn -- "$path" | awk -F: -v uid="$uid" '
+                        'acl=$(getfacl -cpn -- "$path" 2>&1); status=$?; '
+                        'if [ $status -ne 0 ]; then '
+                        'if [ ! -e "$path" ]; then continue; fi; '
+                        'printf "%s\\n" "$acl" >&2; exit $status; fi; '
+                        'printf "%s\\n" "$acl" | awk -F: -v uid="$uid" '
                         "'$1 == \"user\" && $2 == uid && $3 ~ /^rw/ { user = 1 } "
                         "$1 == \"mask\" && $2 == \"\" && $3 ~ /^rw/ { mask = 1 } "
                         "END { exit !(user && mask) }' || exit 1; "
@@ -1685,9 +1693,9 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             timeout=70,
         )
         if code != 0:
-            return code, output
+            return code, f"Hermes Dashboard did not become ready.\n{output}".strip()
         acl_code, acl_output = self._grant_host_manager_access(instance)
-        return acl_code, "\n".join(part for part in (output, acl_output) if part)
+        return acl_code, acl_output
 
     def _restore_hermes_runtime(self, instance, image, was_running, network):
         code, output = self.run_command(
@@ -2404,11 +2412,18 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             rollback_code, rollback_output = self._run_hermes_container(
                 instance, current_image, network, timeout
             )
+            rollback_container_recreated = rollback_code == 0
             if rollback_code == 0:
                 rollback_code, rollback_output = self._wait_for_dashboard(instance)
             if rollback_code == 0 and not was_running:
                 rollback_code, rollback_output = self.stop(instance)
             if rollback_code != 0:
+                if rollback_container_recreated:
+                    return 1, (
+                        f"Hermes version update failed; previous image container was recreated, "
+                        f"but rollback verification or state restoration failed: "
+                        f"{exc}; {rollback_output}"
+                    )
                 return 1, (
                     f"Hermes version update failed and automatic rollback failed: "
                     f"{exc}; {rollback_output}"

@@ -82,6 +82,25 @@ class MetadataBackendConfigTests(unittest.TestCase):
         conn.execute("SELECT last_insert_rowid()")
         self.assertEqual(raw.calls[-1][0], "SELECT LASTVAL()")
 
+    def test_postgres_cursor_iteration_consumes_remaining_rows(self):
+        module = load()
+
+        class Cursor:
+            description = [type("Column", (), {"name": "id"})()]
+
+            def __init__(self):
+                self.rows = iter([(7,), (9,), (11,)])
+
+            def fetchone(self):
+                return next(self.rows, None)
+
+        cursor = module._PostgresCursor(Cursor())
+        self.assertEqual(cursor.fetchone()["id"], 7)
+        self.assertIs(iter(cursor), cursor)
+        self.assertEqual([(row[0], row["id"]) for row in cursor], [(9, 9), (11, 11)])
+        self.assertEqual(list(cursor), [])
+        self.assertIsNone(cursor.fetchone())
+
     def test_postgres_row_keeps_duplicate_columns_for_positional_access(self):
         row = load()._CompatRow(("id", "id"), (7, 9))
         self.assertEqual((row[0], row[1], row["id"]), (7, 9, 9))

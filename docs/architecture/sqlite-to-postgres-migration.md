@@ -26,3 +26,15 @@ reported counts match the SQLite source, then run
 Rollback is to keep Manager stopped, restore the PostgreSQL backup (or clear
 the failed empty target if the transaction already rolled back), and switch
 the configured backend back to the verified SQLite copy.
+
+## Overview compatibility verification
+
+After migration, open Platform Overview (`/admin/metadata`) and verify user,
+identity and instance counts. A healthy `/health` response alone does not
+exercise database queries. The admin page can return HTTP 200 while showing
+an internal metadata API failure. Check manager-control logs as well.
+
+The PostgreSQL cursor adapter must support iteration and preserve named and
+positional row access. Identity aggregation uses `identity_user` as its table
+alias because PostgreSQL reserves `USER`. The cursor-contract regression test
+uses SQLite for fixtures; it does not replace a real PostgreSQL smoke test.

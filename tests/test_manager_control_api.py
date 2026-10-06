@@ -1092,6 +1092,57 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(invalid_status, 400)
         self.assertEqual(invalid.get_json(), {"error": "invalid user status"})
 
+    def test_admin_metadata_with_postgres_cursor_contract(self):
+        from contextlib import contextmanager
+
+        store = self.control.metadata_store
+        original_connect = store.connect
+
+        class DriverCursor:
+            def __init__(self, cursor):
+                self.cursor = cursor
+
+            @property
+            def description(self):
+                return [types.SimpleNamespace(name=column[0]) for column in self.cursor.description]
+
+            def fetchone(self):
+                return self.cursor.fetchone()
+
+            def fetchall(self):
+                return self.cursor.fetchall()
+
+            @property
+            def rowcount(self):
+                return self.cursor.rowcount
+
+        class Connection:
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, params=()):
+                self.assert_postgres_safe_alias(sql)
+                cursor = self.connection.execute(sql, params)
+                if sql.lstrip().upper().startswith("SELECT"):
+                    return store._PostgresCursor(DriverCursor(cursor))
+                return cursor
+
+            @staticmethod
+            def assert_postgres_safe_alias(sql):
+                if "JOIN users user " in sql:
+                    raise AssertionError("PostgreSQL reserved word used as table alias")
+
+        @contextmanager
+        def connect(*args, **kwargs):
+            with original_connect(*args, **kwargs) as connection:
+                yield Connection(connection)
+
+        with patch.object(store, "connect", connect):
+            self.test_admin_reads_metadata_summary_without_sensitive_fields()
+
     def test_admin_reads_metadata_summary_without_sensitive_fields(self):
         self.control.metadata_store.upsert_identity(
             self.user["id"], "local", "alice", db_file=self.db_file

@@ -501,7 +501,7 @@ def update_configuration():
                 "actor_user_public_id": current["public_id"],
                 "instance_public_id": instance["public_id"],
                 "action": "instance.refresh_ingress",
-                "params": {},
+                "params": {"hermes_upload_max_body_size": value},
             })
             queued += 1
     except control_client.ControlError as exc:

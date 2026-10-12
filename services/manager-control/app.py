@@ -93,7 +93,7 @@ JOB_ACTION_PARAMS = {
     "instance.purge_deleted": set(),
     "instance.cleanup_failed": set(),
     "instance.wechat_bind": set(),
-    "instance.refresh_ingress": set(),
+    "instance.refresh_ingress": {"hermes_upload_max_body_size"},
 }
 
 app = Flask(__name__)
@@ -2287,6 +2287,11 @@ def create_execution_job():
         return jsonify({"error": "unsupported execution action"}), 400
     if set(params) - allowed_params:
         return jsonify({"error": f"unsupported params for {action}"}), 400
+    if action == "instance.refresh_ingress" and "hermes_upload_max_body_size" in params and (
+        not isinstance(params["hermes_upload_max_body_size"], str)
+        or not re.fullmatch(r"[1-9][0-9]*(?:[kKmMgG])?", params["hermes_upload_max_body_size"])
+    ):
+        return jsonify({"error": "invalid Hermes upload size"}), 400
     if "reason" in params and (
         not isinstance(params["reason"], str) or len(params["reason"]) > 500
     ):

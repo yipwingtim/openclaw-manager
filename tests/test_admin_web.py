@@ -147,6 +147,15 @@ class AdminWebTests(unittest.TestCase):
             self.assertIn("HERMES_UPLOAD_MAX_BODY_SIZE=50M\n", config.read_text(encoding="utf-8"))
             self.assertIn("PUBLIC_HOST=test\n", config.read_text(encoding="utf-8"))
 
+    def test_configuration_refresh_job_carries_saved_upload_size(self):
+        with patch.object(self.admin.web_common, "actor", return_value={"role": "admin", "public_id": "admin-1"}), patch.object(
+            self.admin.request, "form", {"hermes_upload_max_body_size": "60M"}
+        ), patch.object(self.admin, "write_platform_config"), patch.dict(self.admin.os.environ, {}), patch.object(
+            self.admin.control_client, "list_admin_instances", return_value=[{"product": "hermes", "public_id": "instance-1"}]
+        ), patch.object(self.admin.control_client, "create_execution_job", create=True) as create_job:
+            self.admin.update_configuration()
+        self.assertEqual(create_job.call_args.args[0]["params"], {"hermes_upload_max_body_size": "60M"})
+
     def test_active_import_pages_link_templates_and_warn_about_examples(self):
         pages = {
             "admin_platform_users.html": ("platform-users-uis", "platform-users-local"),

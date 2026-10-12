@@ -393,14 +393,14 @@ class HermesAdapterTests(unittest.TestCase):
                 adapter, "reload_nginx", return_value=(0, "reloaded")
             ):
                 code, output = adapter.configure_ingress(
-                    {**self.INSTANCE, "port": 39119}
+                    {**self.INSTANCE, "port": 39119}, upload_max_body_size="60M"
                 )
 
             self.assertEqual((code, output), (0, "applied\napplied\nreloaded"))
             nginx = adapter.ingress_conf(self.INSTANCE).read_text(encoding="utf-8")
             self.assertIn("server hermes-alice:9119 resolve;", nginx)
             self.assertIn("listen 39119 ssl;", nginx)
-            self.assertIn("client_max_body_size 50M;", nginx)
+            self.assertIn("client_max_body_size 60M;", nginx)
             compose_text = compose.read_text(encoding="utf-8")
             self.assertIn('      - "39119:39119"', compose_text)
             self.assertIn("      - hermes-net", compose_text)

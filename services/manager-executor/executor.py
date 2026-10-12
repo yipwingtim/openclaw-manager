@@ -508,7 +508,10 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             return True
         if action == "refresh_ingress":
             control.update(request_id, "running", current_step="refreshing Hermes ingress")
-            code, output = adapter.configure_ingress(instance)
+            code, output = adapter.configure_ingress(
+                instance,
+                upload_max_body_size=job["params"].get("hermes_upload_max_body_size"),
+            )
             output = output[-MAX_OUTPUT_LENGTH:]
             if code == 0:
                 control.update(request_id, "succeeded", output=output)

@@ -19,7 +19,9 @@ support the legacy two-container topology.
 - Hermes ingress upload size is controlled by `HERMES_UPLOAD_MAX_BODY_SIZE`
   (default `50M`). The value
   accepts a positive Nginx size such as `50M`. Changing it regenerates Hermes
-  ingress files and performs a validated graceful Nginx reload.
+  ingress files and performs a validated graceful Nginx reload. The saved value
+  is carried in each refresh job, so existing instances do not require Manager
+  containers to be rebuilt to apply the setting.
 - Nginx requires Manager UIS instance authorization before routing. New Hermes
   instances use the custom `campus-uis-bridge` `DashboardAuthProvider` as the
   second layer and establish an official Hermes Session without another password.

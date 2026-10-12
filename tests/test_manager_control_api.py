@@ -2587,6 +2587,22 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(event["action"], "instance_member.remove")
         self.assertEqual(event["status"], "success")
 
+    def test_refresh_ingress_accepts_size_and_rejects_invalid_values(self):
+        self.control.metadata_store.set_user_role(self.user["id"], "admin", db_file=self.db_file)
+        instance = self.control.metadata_store.create_instance(
+            owner_public_id=self.user["public_id"], product="hermes",
+            instance_name="Hermes", runtime_identifier="hermes_alice", db_file=self.db_file,
+        )
+        payload = {"request_id": "refresh-1", "actor_user_public_id": self.user["public_id"],
+                   "instance_public_id": instance["public_id"], "action": "instance.refresh_ingress"}
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer admin-token"}):
+            for value in ("60M", "0M", "60M;", 60, None):
+                with self.subTest(value=value), patch.object(self.control.request, "get_json", return_value={
+                    **payload, "params": {"hermes_upload_max_body_size": value}
+                }):
+                    response, status = response_parts(self.control.create_execution_job())
+                    self.assertEqual(status, 200 if value == "60M" else 400)
+
     def test_admin_creates_idempotent_execution_job_and_user_service_cannot(self):
         self.control.metadata_store.set_user_role(
             self.user["id"],

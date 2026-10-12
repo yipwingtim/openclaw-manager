@@ -27,6 +27,20 @@ class ManagerExecutorTests(unittest.TestCase):
     def setUpClass(cls):
         cls.executor = load_executor()
 
+    def test_refresh_ingress_passes_saved_upload_size(self):
+        control = Mock()
+        instance = {"public_id": "instance-1", "product": "hermes"}
+        control.claim.return_value = {
+            "job": {"request_id": "request-1", "action": "instance.refresh_ingress",
+                    "params": {"hermes_upload_max_body_size": "60M"}},
+            "instance": instance,
+        }
+        adapter = Mock()
+        adapter.configure_ingress.return_value = (0, "reloaded")
+        self.assertTrue(self.executor.run_once(control, lambda product: adapter))
+        adapter.configure_ingress.assert_called_once_with(instance, upload_max_body_size="60M")
+        self.assertEqual(control.update.call_args_list[-1][0], ("request-1", "succeeded"))
+
     def test_run_once_retries_serial_job_and_records_success(self):
         control = Mock()
         control.claim.return_value = {

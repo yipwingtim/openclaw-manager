@@ -1744,8 +1744,13 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
             self.reload_nginx()
         return code, output
 
-    def configure_ingress(self, instance):
+    def configure_ingress(self, instance, upload_max_body_size=None):
         """Publish the registered Hermes dashboard through the shared Nginx."""
+        if upload_max_body_size is not None and (
+            not isinstance(upload_max_body_size, str)
+            or not HERMES_UPLOAD_MAX_BODY_SIZE_RE.fullmatch(upload_max_body_size)
+        ):
+            return 1, "Invalid Hermes upload size."
         runtime_target = self.get_runtime_target(instance)
         port = instance.get("_created_port", instance.get("port"))
         public_id = instance.get("public_id")
@@ -1802,7 +1807,7 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
                 "server {\n"
                 f"    listen {port} ssl;\n"
                 "    server_name _;\n"
-                f"    client_max_body_size {hermes_upload_max_body_size()};\n"
+                f"    client_max_body_size {upload_max_body_size or hermes_upload_max_body_size()};\n"
                 f"    ssl_certificate {cert};\n"
                 f"    ssl_certificate_key {key};\n\n"
                 + auth_locations

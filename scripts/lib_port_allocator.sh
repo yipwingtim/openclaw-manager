@@ -34,6 +34,7 @@ allocate_port() {
   local next_port
   local released_ports
   local metadata_db_file="${METADATA_DB_FILE:-${OPENCLAW_PUBLIC_DIR:-}/manager.db}"
+  local occupied_ports
 
   mkdir -p "$(dirname "$port_file")"
   touch "$lock_file"
@@ -46,7 +47,7 @@ allocate_port() {
     fi
 
     released_ports=""
-    if [ -f "$metadata_db_file" ]; then
+    if [ "${METADATA_DB_BACKEND:-sqlite}" = "sqlite" ] && [ -f "$metadata_db_file" ]; then
       released_ports="$(python3 - "$metadata_db_file" "$port_start" "$port_end" <<'PY'
 import sqlite3
 import sys
@@ -59,6 +60,22 @@ try:
         )
         print("\n".join(str(row[0]) for row in rows))
 except (OSError, sqlite3.Error, ValueError):
+    pass
+PY
+)"
+    fi
+
+    occupied_ports=""
+    if [ "${METADATA_DB_BACKEND:-sqlite}" = "postgres" ] && [ -n "${METADATA_DATABASE_URL:-}" ]; then
+      occupied_ports="$(python3 <<'PY'
+import os
+try:
+    import psycopg
+    with psycopg.connect(os.environ["METADATA_DATABASE_URL"], connect_timeout=5) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT port FROM instances WHERE port IS NOT NULL AND status NOT IN ('deleted', 'failed')")
+            print("\n".join(str(row[0]) for row in cur.fetchall()))
+except Exception:
     pass
 PY
 )"
@@ -84,6 +101,11 @@ PY
         exit 1
       fi
 
+      if printf '%s\n' "$occupied_ports" | grep -qx "$port"; then
+        echo "[INFO] Port $port is already reserved in metadata, skip" >&2
+        port=$((port + 1))
+        continue
+      fi
       if port_is_available "$port"; then
         break
       fi

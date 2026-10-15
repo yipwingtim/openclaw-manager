@@ -51,7 +51,10 @@ class ControlClient:
                 body = response.read()
         except urllib.error.HTTPError as exc:
             body = exc.read()
-            message = json.loads(body).get("error", str(exc)) if body else str(exc)
+            try:
+                message = json.loads(body).get("error", str(exc)) if body else str(exc)
+            except (TypeError, json.JSONDecodeError):
+                message = body.decode("utf-8", errors="replace").strip() or str(exc)
             raise RuntimeError(message) from exc
         return json.loads(body) if body else None
 

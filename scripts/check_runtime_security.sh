@@ -140,6 +140,19 @@ MODEL_PROXY_CONTAINER_NAME="${MODEL_PROXY_CONTAINER_NAME:-openclaw-model-proxy}"
 INSTANCE_AUTH_CONTAINER_NAME="${INSTANCE_AUTH_CONTAINER_NAME:-openclaw-instance-auth-proxy}"
 MANAGER_CONTROL_CONTAINER_NAME="${MANAGER_CONTROL_CONTAINER_NAME:-openclaw-manager-control}"
 MANAGER_EXECUTOR_CONTAINER_NAME="${MANAGER_EXECUTOR_CONTAINER_NAME:-openclaw-manager-executor}"
+if [ "${METADATA_DB_BACKEND:-sqlite}" = "postgres" ]; then
+  if docker exec "$MANAGER_EXECUTOR_CONTAINER_NAME" python3 -c '
+import os
+import psycopg
+with psycopg.connect(os.environ["METADATA_DATABASE_URL"], connect_timeout=5) as conn:
+    conn.read_only = True
+    conn.execute("SELECT port FROM instances LIMIT 0")
+' >/dev/null 2>&1; then
+    ok "executor PostgreSQL port lookup is available"
+  else
+    error "executor PostgreSQL port lookup is unavailable"
+  fi
+fi
 MODEL_PROXY_TOKEN_DIR="${MODEL_PROXY_TOKEN_DIR:-$OPENCLAW_PUBLIC_DIR/model-proxy-tokens}"
 OPENCLAW_TENANT_NETWORK_PREFIX="${OPENCLAW_TENANT_NETWORK_PREFIX:-openclaw-user}"
 USER_CONTAINER_PREFIX="${USER_CONTAINER_PREFIX:-openclaw_}"

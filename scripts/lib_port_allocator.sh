@@ -66,19 +66,23 @@ PY
     fi
 
     occupied_ports=""
-    if [ "${METADATA_DB_BACKEND:-sqlite}" = "postgres" ] && [ -n "${METADATA_DATABASE_URL:-}" ]; then
-      occupied_ports="$(python3 <<'PY'
+    if [ "${METADATA_DB_BACKEND:-sqlite}" = "postgres" ]; then
+      if ! occupied_ports="$(python3 <<'PY'
 import os
+import sys
 try:
     import psycopg
     with psycopg.connect(os.environ["METADATA_DATABASE_URL"], connect_timeout=5) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT port FROM instances WHERE port IS NOT NULL AND status NOT IN ('deleted', 'failed')")
+            cur.execute("SELECT port FROM instances WHERE port IS NOT NULL AND status IN ('provisioning', 'active', 'stopped', 'failed')")
             print("\n".join(str(row[0]) for row in cur.fetchall()))
 except Exception:
-    pass
+    print("[ERROR] PostgreSQL port lookup failed; check executor psycopg dependency, database configuration and connectivity", file=sys.stderr)
+    raise SystemExit(1)
 PY
-)"
+)"; then
+        exit 1
+      fi
     fi
 
     port=""

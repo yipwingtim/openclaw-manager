@@ -45,6 +45,7 @@ Generation 的标准 Input/Output 字段。默认不记录 Authorization、Cooki
 ```
 
 `model-proxy` 会校验实例级 token，通过后将请求转发给上游模型服务，并替换为真实上游 API Key。
+请求路径只能用于选择配置好的上游服务路径；代理会拒绝绝对 URL、反斜杠和点段路径，不能通过请求路径改变上游主机。
 
 ## 配置
 

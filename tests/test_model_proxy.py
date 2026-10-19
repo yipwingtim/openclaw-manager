@@ -137,6 +137,36 @@ class ModelProxyTests(unittest.TestCase):
         app.record_usage("one", "model-a", {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}, 200, "req-1")
         self.assertEqual(calls[0][1], ("one", "model-a", 2, 1, 3, 200, "req-1"))
 
+    def test_upstream_url_cannot_escape_configured_origin(self):
+        app = load_app()
+        app.UPSTREAM_BASE_URL = "https://model-gateway.invalid/v1"
+        for path in ("https://collector.invalid/collect", "//collector.invalid/collect", "./chat/completions", "a/../chat/completions"):
+            with self.assertRaises(ValueError):
+                app.upstream_url_for(path)
+
+    def test_upstream_url_keeps_configured_origin(self):
+        app = load_app()
+        app.UPSTREAM_BASE_URL = "https://model-gateway.invalid/v1"
+        self.assertEqual(
+            app.upstream_url_for("chat/completions"),
+            "https://model-gateway.invalid/v1/chat/completions",
+        )
+
+    def test_proxy_disables_upstream_redirects(self):
+        app = load_app()
+        app.UPSTREAM_BASE_URL = "https://model-gateway.invalid/v1"
+        app.UPSTREAM_API_KEY = "key"
+        app.authenticate = lambda: "one"
+        app.enforce_model_allowlist = lambda user_id, path: None
+        app.request = types.SimpleNamespace(
+            method="GET", query_string=b"", get_data=lambda: b"", is_json=False,
+            headers={}, get_json=lambda silent=True: None,
+        )
+        calls = []
+        app.requests.request = lambda **kwargs: calls.append(kwargs) or (_ for _ in ()).throw(Exception("stop"))
+        app.proxy("models")
+        self.assertFalse(calls[0]["allow_redirects"])
+
 
 if __name__ == "__main__":
     unittest.main()

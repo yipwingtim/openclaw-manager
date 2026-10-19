@@ -3,7 +3,7 @@ import json
 import os
 import uuid
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin, urlsplit
 
 import requests
 from flask import Flask, Response, jsonify, request
@@ -272,6 +272,26 @@ def request_product():
     return request.headers.get("X-OpenClaw-Product", "model-proxy").strip() or "model-proxy"
 
 
+def upstream_url_for(path):
+    """Build an upstream URL without allowing the request path to change its host."""
+    raw_path = str(path or "")
+    decoded_path = unquote(raw_path)
+    if "\\" in raw_path or "\\" in decoded_path:
+        raise ValueError("invalid upstream path")
+    if any(segment in {".", ".."} for segment in decoded_path.split("/")):
+        raise ValueError("invalid upstream path")
+    candidate = urljoin(f"{UPSTREAM_BASE_URL}/", raw_path)
+    configured = urlsplit(UPSTREAM_BASE_URL)
+    resolved = urlsplit(candidate)
+    if (
+        resolved.scheme != configured.scheme
+        or resolved.netloc != configured.netloc
+        or not resolved.path.startswith(configured.path.rstrip("/") + "/")
+    ):
+        raise ValueError("invalid upstream path")
+    return candidate
+
+
 @app.get("/health")
 def health():
     return jsonify(
@@ -297,7 +317,10 @@ def proxy(path=""):
     if allowlist_error is not None:
         return allowlist_error
 
-    upstream_url = urljoin(f"{UPSTREAM_BASE_URL}/", path)
+    try:
+        upstream_url = upstream_url_for(path)
+    except ValueError:
+        return jsonify({"error": "invalid upstream path"}), 400
     if request.query_string:
         upstream_url = f"{upstream_url}?{request.query_string.decode('utf-8', errors='ignore')}"
 
@@ -349,6 +372,7 @@ def proxy(path=""):
             headers=upstream_headers(user_id),
             data=request_body,
             stream=True,
+            allow_redirects=False,
             timeout=REQUEST_TIMEOUT,
         )
         if span is not None:

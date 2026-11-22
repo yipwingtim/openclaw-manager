@@ -143,7 +143,7 @@ class OpenClawActivityAdapter:
 
 class HermesActivityAdapter:
     def collect(self, instance):
-        supported_schemas = {"v2026.7.20": 22, "v2026.7.30": 23}
+        supported_schemas = {"v2026.7.20": 22, "v2026.7.30": 23, "v0.23.2": 33}
         expected_schema = supported_schemas.get(instance.get("version"))
         if expected_schema is None:
             raise ValueError("unsupported Hermes version")

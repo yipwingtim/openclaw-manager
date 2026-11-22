@@ -4,14 +4,20 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 文档版本 | 1.1.0 |
-| 盘点日期 | 2026-08-05 |
-| 产品镜像 | `nousresearch/hermes-agent:v2026.7.20`、`nousresearch/hermes-agent:v2026.7.30` |
+| 文档版本 | 1.2.0 |
+| 盘点日期 | 2026-08-05；2026-11-22 补充 v0.23.2 |
+| 产品镜像 | `nousresearch/hermes-agent:v2026.7.20`、`nousresearch/hermes-agent:v2026.7.30`、`nousresearch/hermes-agent:v0.23.2` |
 | 镜像 ID | `v2026.7.20`: `sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a`；`v2026.7.30`: `sha256:b869e64d6496d4763d5e4fb675b5f504cb23b0e35ec9b790481a56118602b10f` |
-| `state.db` Schema | `v2026.7.20`: `schema_version=22`；`v2026.7.30`: `schema_version=23` |
+| `state.db` Schema | `v2026.7.20`: `schema_version=22`；`v2026.7.30`: `schema_version=23`；`v0.23.2`: `schema_version=33` |
 | 其他数据库 Schema | 无显式版本，使用白名单表字段作为指纹 |
 
 本字典只描述活动统计所需字段，不是 Hermes 完整数据库字典。
+
+2026-11-22 在升级后的生产实例只读核实：`v0.23.2` 的 `state.db`
+最高 schema 为 33，`sessions`、`task_runs`、`executions` 均保留现有采集查询
+所需字段。仅增加该精确版本与 schema 的映射，不自动接受其他版本或缺失字段。
+未读取聊天正文。新版真实时间值及单位尚未抽样确认，继续使用现有时间转换规则；
+自动化测试覆盖合成 Unix 秒和 ISO 时间，不代替生产时间语义验证。
 
 ## 数据源
 

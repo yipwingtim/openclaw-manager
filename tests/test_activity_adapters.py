@@ -51,6 +51,8 @@ class ActivityAdapterTests(unittest.TestCase):
             "last_activity_at_ms": 1785888005000, "model_responses": 1, "scheduled_runs": 1,
             "scheduled_tokens": 12, "sessions": 1, "subagent_runs": 1,
             "task_runs": 1, "tool_calls": 1, "user_interactions": 1,
+            "disk_bytes": sum(path.stat().st_size for path in self.root.rglob("*") if path.is_file()),
+            "session_files": 1,
         })
         self.assertNotIn("secret", repr(result))
 
@@ -68,13 +70,42 @@ class ActivityAdapterTests(unittest.TestCase):
             CREATE TABLE executions (status TEXT, started_at TEXT, finished_at TEXT, error TEXT);
             INSERT INTO executions VALUES ('ok', '1970-01-01T00:00:40+00:00', '1970-01-01T00:00:50+00:00', 'secret');
         """)
-        result = get_activity_adapter("hermes").collect({
-            "data_path": str(self.root), "version": "v2026.7.30",
-        })
-        self.assertEqual(result["metrics"], {
-            "last_activity_at_s": 50.0, "messages": 4, "model_calls": 2,
-            "scheduled_runs": 1, "sessions": 1, "task_runs": 1, "tool_calls": 1,
-        })
+        for version, schema in (("v2026.7.30", 23), ("v0.23.2", 33)):
+            with self.subTest(version=version):
+                with sqlite3.connect(self.root / "state.db") as connection:
+                    connection.execute("UPDATE schema_version SET version = ?", (schema,))
+                before = {path: path.read_bytes() for path in self.root.rglob("*.db")}
+                result = get_activity_adapter("hermes").collect({
+                    "data_path": str(self.root), "version": version,
+                })
+                self.assertEqual(result["source_version"], version)
+                self.assertEqual(result["source_schema"], f"hermes-state-{schema}")
+                self.assertEqual(result["metrics"], {
+                    "last_activity_at_s": 50.0, "messages": 4, "model_calls": 2,
+                    "scheduled_runs": 1, "sessions": 1, "task_runs": 1, "tool_calls": 1,
+                    "disk_bytes": sum(len(content) for content in before.values()),
+                    "session_files": 0,
+                })
+                self.assertNotIn("secret", repr(result))
+                self.assertEqual(before, {path: path.read_bytes() for path in before})
+
+    def test_hermes_v0232_rejects_missing_required_columns(self):
+        for database, table, columns in (
+            ("state.db", "sessions", "started_at REAL, ended_at REAL, message_count INTEGER, tool_call_count INTEGER, api_call_count INTEGER"),
+            ("kanban.db", "task_runs", "status TEXT, started_at INTEGER, ended_at INTEGER"),
+            ("cron/executions.db", "executions", "status TEXT, started_at TEXT, finished_at TEXT"),
+        ):
+            self.database(self.root / database, f"CREATE TABLE {table} ({columns});")
+        with sqlite3.connect(self.root / "state.db") as connection:
+            connection.executescript("CREATE TABLE schema_version (version INTEGER); INSERT INTO schema_version VALUES (33);")
+        for database, table in (("state.db", "sessions"), ("kanban.db", "task_runs"), ("cron/executions.db", "executions")):
+            with self.subTest(table=table):
+                with sqlite3.connect(self.root / database) as connection:
+                    connection.execute(f"ALTER TABLE {table} RENAME COLUMN started_at TO missing_started_at")
+                with self.assertRaisesRegex(ValueError, f"unsupported {table} schema"):
+                    get_activity_adapter("hermes").collect({"data_path": str(self.root), "version": "v0.23.2"})
+                with sqlite3.connect(self.root / database) as connection:
+                    connection.execute(f"ALTER TABLE {table} RENAME COLUMN missing_started_at TO started_at")
 
     def test_hermes_v2026_7_20_accepts_state_schema_22(self):
         self.database(self.root / "state.db", """
@@ -103,6 +134,10 @@ class ActivityAdapterTests(unittest.TestCase):
             get_activity_adapter("hermes").collect({
                 "data_path": str(self.root), "version": "v2026.7.20",
             })
+        with self.assertRaisesRegex(ValueError, "unsupported Hermes state schema"):
+            get_activity_adapter("hermes").collect({
+                "data_path": str(self.root), "version": "v0.23.2",
+            })
 
     def test_evoscientist_never_reads_blob_payloads(self):
         database = self.database(self.root / "evoscientist-data" / "sessions.db", """
@@ -119,6 +154,7 @@ class ActivityAdapterTests(unittest.TestCase):
         self.assertEqual(result["metrics"], {
             "checkpoints": 1, "last_activity_at_ms": 2000,
             "sessions": 1, "write_tasks": 1, "writes": 1,
+            "disk_bytes": database.stat().st_size, "session_files": 1,
         })
 
     def test_schema_mismatch_fails_closed(self):

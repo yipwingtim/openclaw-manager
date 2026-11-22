@@ -55,6 +55,23 @@ support the legacy two-container topology.
   readiness determines lifecycle success. Host-manager ACL application is best-effort
   because Hermes may tighten runtime-generated files with `chmod`; ACL failures are
   returned as warnings instead of triggering rollback.
+- Host-manager ACLs grant read/traverse access only (directories `r-x`, files
+  `r--`), including default ACLs. Group and other writes are removed without
+  changing the Hermes owner's permissions. Newer Hermes rejects writable control
+  paths with `gateway inaccessible: unsafe_control_permissions`; Dashboard
+  readiness alone does not verify Chat connectivity. Manager mutations run through
+  the Executor; the host-manager ACL is not a write-access contract.
+
+### Existing writable ACLs
+
+Deploying this fix does not change running instances. After deploying the updated
+Executor, a managed start, restart, upgrade, or restore reapplies the corrected
+ACLs to that instance. These actions can interrupt active tasks; schedule them
+accordingly. Check Chat connectivity afterwards and run
+`bash scripts/check_runtime_security.sh` to detect remaining writable top-level
+Hermes data directories. Do not recursively run `chmod` across instance data:
+owner permissions and executable files must be preserved. A top-level-only
+`chmod g-w` is a temporary workaround; it does not fix inherited default ACLs.
 
 Registration writes the instance, endpoint, allocated port, audit record,
 Nginx server configuration, port mapping, and external network attachment. A

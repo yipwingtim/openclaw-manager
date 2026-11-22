@@ -1615,9 +1615,11 @@ class HermesDockerAdapter(OpenClawDockerAdapter):
         except OSError as exc:
             return 1, f"Could not resolve host manager UID: {exc}"
         outputs = []
+        # Hermes control paths reject group/other writes, including inherited ACL masks.
         for file_type, acl in (
-            ("d", f"u:{manager_uid}:rwx,m::rwx,d:u:{manager_uid}:rwx,d:m::rwx"),
-            ("f", f"u:{manager_uid}:rw-,m::rwx"),
+            ("d", f"u:{manager_uid}:r-x,g::---,m::r-x,o::---,"
+                  f"d:u:{manager_uid}:r-x,d:g::---,d:m::r-x,d:o::---"),
+            ("f", f"u:{manager_uid}:r--,g::---,m::r--,o::---"),
         ):
             code, output = self.run_command(
                 [

@@ -166,6 +166,15 @@ mount_is_readonly() {
 for hermes_root in "$OPENCLAW_PUBLIC_DIR/hermes" "$OPENCLAW_PUBLIC_DIR/instances/hermes"; do
   [ -d "$hermes_root" ] || continue
   while IFS= read -r -d '' instance_dir; do
+    if instance_mode="$(stat -c '%a' -- "$instance_dir")"; then
+      if (( (8#$instance_mode & 0022) != 0 )); then
+        error "Hermes data directory is writable by group/other (mode $instance_mode): $instance_dir"
+      else
+        ok "Hermes data directory rejects group/other writes: $instance_dir"
+      fi
+    else
+      error "Cannot inspect Hermes data directory permissions: $instance_dir"
+    fi
     echo "[INFO] Hermes host ACL is best-effort; runtime chmod may restrict generated files: $instance_dir"
   done < <(find "$hermes_root" -mindepth 1 -maxdepth 1 -type d -print0)
 done

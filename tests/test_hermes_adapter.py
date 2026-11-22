@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import os
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -68,6 +70,15 @@ class HermesAdapterTests(unittest.TestCase):
             self.assertEqual([command[4] for command in acl_commands[:2]], ["d", "f"])
             self.assertIn("d:u:", acl_commands[0][8])
             self.assertNotIn("d:u:", acl_commands[1][8])
+            manager_uid = (root / "public").stat().st_uid
+            self.assertEqual(
+                acl_commands[0][8],
+                f"u:{manager_uid}:r-x,g::---,m::r-x,o::---,"
+                f"d:u:{manager_uid}:r-x,d:g::---,d:m::r-x,d:o::---",
+            )
+            self.assertEqual(
+                acl_commands[1][8], f"u:{manager_uid}:r--,g::---,m::r--,o::---",
+            )
             enable_nginx.assert_not_called()
             disable_nginx.assert_not_called()
 
@@ -86,6 +97,44 @@ class HermesAdapterTests(unittest.TestCase):
 
             self.assertEqual(code, 1)
             self.assertEqual(output, "setfacl failed")
+
+    @unittest.skipUnless(shutil.which("setfacl"), "requires Linux setfacl")
+    def test_host_acl_removes_writes_and_preserves_owner_and_inheritance(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = self.make_adapter(root)
+            data_path = root / "public" / "hermes" / "alice"
+            data_path.mkdir(parents=True)
+            control = data_path / "control"
+            control.mkdir()
+            script = control / "script"
+            script.write_text("#!/bin/sh\nexit 0\n")
+            script.chmod(0o700)
+            instance = {**self.INSTANCE, "data_path": str(data_path)}
+            manager_uid = (root / "public").stat().st_uid
+            subprocess.run(
+                ["setfacl", "-m", f"u:{manager_uid}:rwx,m::rwx,"
+                 f"d:u:{manager_uid}:rwx,d:m::rwx", str(data_path)],
+                check=True,
+            )
+            self.assertTrue(data_path.stat().st_mode & 0o022)
+
+            def run(command, **kwargs):
+                result = subprocess.run(command, capture_output=True, text=True, check=False)
+                return result.returncode, result.stdout + result.stderr
+
+            with patch.object(adapter, "run_command", side_effect=run):
+                self.assertEqual(adapter._grant_host_manager_access(instance)[0], 0)
+                self.assertEqual(adapter._grant_host_manager_access(instance)[0], 0)
+
+            inherited = control / "new-control"
+            inherited.mkdir()
+            state = inherited / "state"
+            state.write_text("state")
+            for path in (data_path, control, script, inherited, state):
+                self.assertEqual(path.stat().st_mode & 0o022, 0, str(path))
+            self.assertEqual(script.stat().st_mode & 0o700, 0o700)
+            self.assertEqual(data_path.stat().st_mode & 0o700, 0o700)
 
     def test_dashboard_wait_reports_readiness_failure_and_acl_warning_separately(self):
         with TemporaryDirectory() as temp_dir:

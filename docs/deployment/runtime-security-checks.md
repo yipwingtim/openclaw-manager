@@ -7,6 +7,7 @@
 `scripts/check_runtime_security.sh` 用于检查生产或测试环境中的运行时安全基线，重点覆盖：
 
 - `OPENCLAW_INTERNAL_TOKEN` 是否已配置
+- Hermes 实例数据顶层目录是否禁止组和其他用户写入（包括 ACL mask 反映的权限），避免新版 Chat 拒绝连接 Gateway；宿主机管理用户的读取 ACL 仍为尽力提供。
 - Nginx 代理到拆分 Web 服务的配置是否携带 `X-OpenClaw-Internal-Token`
 - Nginx 配置中的内部令牌值是否和 `OPENCLAW_INTERNAL_TOKEN` 一致
 - `manager-user-web` 和 `manager-admin-web` 是否只连接 `manager-net`

@@ -177,15 +177,22 @@ class TenantNetworkIsolationTests(unittest.TestCase):
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
             env["HOST_MANAGER_UID"] = "1000"
 
-            result = subprocess.run(
-                ["bash", str(scripts_dir / RUNTIME_SECURITY_CHECK.name)],
-                text=True, capture_output=True, env=env, check=False,
-            )
-
-            self.assertIn(
-                f"[INFO] Hermes host ACL is best-effort; runtime chmod may restrict generated files: {instance_dir}",
-                result.stdout,
-            )
+            for mode in (0o750, 0o770, 0o707):
+                with self.subTest(mode=oct(mode)):
+                    instance_dir.chmod(mode)
+                    result = subprocess.run(
+                        ["bash", str(scripts_dir / RUNTIME_SECURITY_CHECK.name)],
+                        text=True, capture_output=True, env=env, check=False,
+                    )
+                    self.assertIn(
+                        f"[INFO] Hermes host ACL is best-effort; runtime chmod may restrict generated files: {instance_dir}",
+                        result.stdout,
+                    )
+                    if mode == 0o750:
+                        self.assertIn("[OK] Hermes data directory rejects group/other writes:", result.stdout)
+                        self.assertNotIn("[ERROR] Hermes data directory", result.stdout)
+                    else:
+                        self.assertIn("[ERROR] Hermes data directory is writable by group/other", result.stdout)
 
     def test_runtime_check_ignores_nginx_backup_tokens_and_summarizes_active_errors(self):
         with tempfile.TemporaryDirectory() as temp_dir:

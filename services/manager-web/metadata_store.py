@@ -778,7 +778,7 @@ def finish_instance_provisioning(
                     """,
                     (instance["id"], port, access_url, now, now),
                 )
-            if instance["legacy_user_id"] is not None:
+            if instance["legacy_user_id"] is not None and instance["product"] != "deepseek-harness":
                 upsert_credentials(
                     user_id=instance["legacy_user_id"],
                     basic_auth_username=instance["legacy_user_id"],
@@ -805,6 +805,7 @@ def list_instances_for_user(user_public_id, *, db_file=None, conn=None):
             LEFT JOIN instance_members m
                 ON m.instance_id = i.id
                AND m.user_id = requesting_user.id
+               AND i.product <> 'deepseek-harness'
             WHERE (i.owner_user_id = requesting_user.id OR m.user_id IS NOT NULL)
               AND i.status IN ('active', 'stopped')
             ORDER BY i.id
@@ -831,6 +832,7 @@ def get_instance_for_user(instance_public_id, user_public_id, *, db_file=None, c
             LEFT JOIN instance_members m
                 ON m.instance_id = i.id
                AND m.user_id = requesting_user.id
+               AND i.product <> 'deepseek-harness'
             WHERE i.public_id = ?
               AND requesting_user.status = 'active'
               AND (i.owner_user_id = requesting_user.id OR m.user_id IS NOT NULL)
@@ -1433,12 +1435,13 @@ def list_instances(status=None, db_file=None, conn=None, *, limit=None, offset=0
     owns_conn = conn is None
     context = connect(db_file) if owns_conn else nullcontext(conn)
     with context as active_conn:
-        query = "SELECT * FROM instances"
+        query = ("SELECT i.*, u.username AS owner_username FROM instances i "
+                 "LEFT JOIN users u ON u.id = i.owner_user_id")
         params = []
         if status:
-            query += " WHERE status = ?"
+            query += " WHERE i.status = ?"
             params.append(status)
-        query += " ORDER BY created_at DESC, legacy_user_id ASC"
+        query += " ORDER BY i.created_at DESC, i.legacy_user_id ASC"
         if limit is not None:
             query += " LIMIT ? OFFSET ?"
             params.extend((limit, offset))

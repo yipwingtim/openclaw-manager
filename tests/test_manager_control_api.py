@@ -1198,7 +1198,7 @@ class ManagerControlApiTests(unittest.TestCase):
             "identities": {"local": 1, "uis": 1},
             "instances": {
                 "total": 1,
-                "products": {"openclaw": 1, "hermes": 0, "evoscientist": 0},
+                "products": {"openclaw": 1, "hermes": 0, "evoscientist": 0, "deepseek-harness": 0},
             },
             "activity": {"success": 0, "failed": 0, "uncollected": 1},
         })
@@ -1402,6 +1402,34 @@ class ManagerControlApiTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 400)
                 self.assertEqual(response.get_json(), {"error": error})
+
+    def test_harness_creation_requires_campus_owner_and_private_runtime(self):
+        store = self.control.metadata_store
+        store.set_user_role(self.user["id"], "admin", db_file=self.db_file)
+        store.upsert_identity(self.user["id"], "campus-uis", "alice-campus", "alice", db_file=self.db_file)
+        payload = dict(request_id="create-harness", actor_user_public_id=self.user["public_id"],
+                       owner_identity_type="local", owner_identity="alice-campus",
+                       legacy_user_id="alice-harness", instance_name="Alice Harness", product="deepseek-harness")
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer admin-token"}), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            self.assertEqual(response_parts(self.control.create_admin_instance())[1], 400)
+            payload["owner_identity_type"] = "campus-uis"
+            response, status = response_parts(self.control.create_admin_instance())
+            self.assertEqual(status, 202, response.get_json())
+        public_id = response.get_json()["instance"]["public_id"]
+        store.update_execution_job("create-harness", "running", db_file=self.db_file)
+        result = dict(port=None, version="0.2.2-rc.5", access_url=None, admin_url=None,
+                      basic_auth_password_ref=None, openclaw_token="", auth_mode="session")
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer executor-token"}), patch.object(
+            self.control.request, "get_json", return_value={"status": "succeeded", "result": result}
+        ):
+            result["port"] = 12345
+            self.assertEqual(response_parts(self.control.update_execution_job("create-harness"))[1], 400)
+            result["port"] = None
+            self.assertEqual(response_parts(self.control.update_execution_job("create-harness"))[1], 200)
+        instance = store.get_instance_by_public_id(public_id, db_file=self.db_file)
+        self.assertEqual((instance["owner_user_id"], instance["status"]), (self.user["id"], "active"))
 
     def test_admin_creates_hermes_provisioning_instance(self):
         self.control.metadata_store.set_user_role(

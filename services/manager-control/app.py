@@ -14,7 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import metadata_store
 from hermes_auth_bridge import BridgeStore, SigningKeys
-from product_capabilities import execution_action_capability, product_supports
+from product_capabilities import HARNESS_VERSION, execution_action_capability, product_supports
 
 
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
@@ -170,6 +170,8 @@ def admin_metadata_instance(instance):
 
 
 def default_version(product, conn=None):
+    if product == "deepseek-harness":
+        return HARNESS_VERSION
     env_defaults = {
         "openclaw": os.environ.get("OPENCLAW_VERSION", "").strip(),
         "hermes": os.environ.get("HERMES_VERSION", "v2026.7.20").strip(),
@@ -190,6 +192,8 @@ def default_version(product, conn=None):
 
 
 def product_version_error(product, version, confirm_latest=False):
+    if product == "deepseek-harness" and version != HARNESS_VERSION:
+        return f"Harness requires version {HARNESS_VERSION}"
     if product == "evoscientist":
         if version != "latest" and not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", version or ""):
             return "EvoScientist version must be latest or a sha256 digest"
@@ -467,7 +471,7 @@ def authorize_instance_access(instance_public_id):
     ):
         return jsonify({"error": "active session not found"}), 401
     instance = instance_for_entry(instance_public_id, user)
-    if instance is None or instance["status"] not in {"active", "stopped"}:
+    if instance is None or instance["product"] == "deepseek-harness" or instance["status"] not in {"active", "stopped"}:
         return jsonify({"error": "instance access is forbidden"}), 403
     return jsonify({"allowed": True, "identity": user["public_id"]})
 
@@ -793,6 +797,7 @@ def admin_instances():
                     "version": instance.get("openclaw_version"),
                     "basic_auth_enabled": bool(instance.get("basic_auth_enabled")),
                     "resource_usage": resource_usage(instance),
+                    "owner_username": instance.get("owner_username"),
                     "capabilities": sorted(
                         capability
                         for capability in (
@@ -1131,17 +1136,19 @@ def create_admin_instance():
         return jsonify({"error": "invalid legacy_user_id"}), 400
     if not isinstance(instance_name, str) or not instance_name.strip() or len(instance_name) > 128:
         return jsonify({"error": "invalid instance_name"}), 400
-    if product not in {"openclaw", "hermes", "evoscientist"} or not product_supports(product, "create"):
+    if not isinstance(product, str) or not product_supports(product, "create"):
         return jsonify({"error": "instance product does not support create"}), 400
-    if product == "hermes":
+    if product == "deepseek-harness" and owner_identity_type != "campus-uis":
+        return jsonify({"error": "Harness requires a campus-uis owner"}), 400
+    if product in {"hermes", "deepseek-harness"}:
         if password is not None or basic_auth_enabled not in {None, False}:
-            return jsonify({"error": "Hermes does not accept Basic Auth credentials"}), 400
+            return jsonify({"error": f"{product.capitalize()} does not accept Basic Auth credentials"}), 400
         basic_auth_enabled = False
     elif not isinstance(basic_auth_enabled, bool):
         return jsonify({"error": "basic_auth_enabled must be a boolean"}), 400
     if product == "evoscientist" and not basic_auth_enabled:
         return jsonify({"error": f"{product} requires Basic Auth"}), 400
-    if product != "hermes" and (not isinstance(password, str) or not password):
+    if product not in {"hermes", "deepseek-harness"} and (not isinstance(password, str) or not password):
         return jsonify({"error": "basic_auth_password is required"}), 400
     if version is not None and (not isinstance(version, str) or not VERSION_RE.fullmatch(version)):
         return jsonify({"error": "version must be valid"}), 400
@@ -1187,7 +1194,7 @@ def create_admin_instance():
             raise ValueError("active owner user not found")
         owner_public_id = owner["public_id"]
         params = {"version": version} if version else {}
-        if product != "hermes":
+        if product not in {"hermes", "deepseek-harness"}:
             PROVISIONING_SECRET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
             PROVISIONING_SECRET_DIR.chmod(0o700)
             descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -1482,7 +1489,7 @@ def admin_metadata():
                 """
             )
         }
-        product_counts = {product: 0 for product in ("openclaw", "hermes", "evoscientist")}
+        product_counts = {product: 0 for product in ("openclaw", "hermes", "evoscientist", "deepseek-harness")}
         for instance in active_instances:
             product_counts[instance["product"]] = product_counts.get(instance["product"], 0) + 1
         activity_counts = {"success": 0, "failed": 0, "uncollected": 0}
@@ -2582,7 +2589,12 @@ def update_execution_job(request_id):
         }
         if not isinstance(result, dict) or set(result) != required:
             return jsonify({"error": "invalid instance creation result"}), 400
-        if (
+        if product == "deepseek-harness":
+            expected = dict.fromkeys(required)
+            expected.update(version=HARNESS_VERSION, openclaw_token="", auth_mode="session")
+            if result != expected:
+                return jsonify({"error": "invalid private Harness creation result"}), 400
+        elif (
             not isinstance(result["port"], int)
             or not 1 <= result["port"] <= 65535
             or any(

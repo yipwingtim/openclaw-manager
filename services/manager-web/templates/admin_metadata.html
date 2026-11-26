@@ -31,7 +31,7 @@
       <div class="metric">
         <div class="metric-label">实例</div>
         <div class="metric-value">{{ overview.instances.total | default(0) }}</div>
-        <div class="muted-small">OpenClaw {{ overview.instances.products.openclaw | default(0) }} · Hermes {{ overview.instances.products.hermes | default(0) }} · EvoScientist {{ overview.instances.products.evoscientist | default(0) }}</div>
+        <div class="muted-small">OpenClaw {{ overview.instances.products.openclaw | default(0) }} · Hermes {{ overview.instances.products.hermes | default(0) }} · EvoScientist {{ overview.instances.products.evoscientist | default(0) }} · DeepSeek Harness {{ overview.instances.products.get("deepseek-harness", 0) }}</div>
       </div>
     </div>
     <div class="col-md-3">

@@ -665,6 +665,8 @@ def check_user(user_id, user_dir, users_csv, db_instances, db_ports, reporter, v
     if db_status in {"failed", "deleted"}:
         return
     product = (db_row or {}).get("product")
+    if product == "deepseek-harness":
+        return  # UUID-based state paths are checked directly in check_global.
     if product == "hermes":
         expected_container = f"hermes_{user_id}"
         if db_row.get("container_name") != expected_container:
@@ -877,6 +879,16 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
 
     for user_id, row in db_instances.items():
         legacy_user_id = row.get("legacy_user_id", row.get("user_id"))
+        if row.get("product") == "deepseek-harness":
+            if row.get("status") in {"active", "stopped", "deleted"}:
+                root = OPENCLAW_PUBLIC_DIR / "instances" / "deepseek-harness" / row["public_id"]
+                if str(root) != row.get("data_path") or not all(
+                    (root / name).is_dir() for name in ("state", "workspace")
+                ):
+                    reporter.error("harness_data_missing", f"{user_id}: Harness state or workspace missing")
+                if any(row.get(field) for field in ("port", "access_url", "admin_url")):
+                    reporter.error("harness_endpoint_unexpected", f"{user_id}: unexpected Harness endpoint")
+            continue
         if legacy_user_id is None:
             data_path = row.get("data_path")
             status = (row.get("status") or "active").strip().lower()

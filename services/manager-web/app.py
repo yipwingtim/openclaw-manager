@@ -22,6 +22,7 @@ import metadata_store
 import control_client
 import auth_providers
 from instance_adapters import (
+    DeepSeekHarnessDockerAdapter,
     EvoScientistDockerAdapter,
     HermesDockerAdapter,
     OpenClawDockerAdapter,
@@ -240,6 +241,7 @@ def get_instance_adapter(product="openclaw"):
     adapter_types = {
         "openclaw": OpenClawDockerAdapter,
         "evoscientist": EvoScientistDockerAdapter,
+        "deepseek-harness": DeepSeekHarnessDockerAdapter,
         "hermes": HermesDockerAdapter,
     }
     adapter_type = adapter_types.get(product)

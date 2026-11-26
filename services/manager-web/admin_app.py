@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, redirect, render_template, request, url_for
 
+from product_capabilities import HARNESS_VERSION
+
 import control_client
 import executor_client
 import web_common
@@ -120,6 +122,8 @@ def device_approvals_template():
 
 
 def default_instance_version(product):
+    if product == "deepseek-harness":
+        return HARNESS_VERSION
     if product == "openclaw":
         return os.environ.get("OPENCLAW_VERSION", "").strip()
     if product == "hermes":
@@ -164,7 +168,7 @@ def instance_list_context(instances):
     if status_filter not in {"running", "stopped", "deleted", "all"}:
         status_filter = "running"
     product_filter = request.args.get("product", "all").strip().lower()
-    if product_filter not in {"all", "openclaw", "hermes", "evoscientist"}:
+    if product_filter not in {"all", "openclaw", "hermes", "evoscientist", "deepseek-harness"}:
         product_filter = "all"
     query = request.args.get("q", "").strip()
     filtered = [
@@ -361,7 +365,7 @@ def create_instance_page():
     return render_template(
         "admin_create_instance.html", job=None, instance=None,
         batch=None, error=error,
-        default_versions=load_default_versions(),
+        default_versions={**load_default_versions(), "deepseek-harness": HARNESS_VERSION},
     )
 
 
@@ -384,11 +388,11 @@ def create_instance():
         return redirect(url_for("create_instance_page", error="请选择 Owner 身份类型并填写身份标识。"))
     if not LEGACY_USER_ID_RE.fullmatch(legacy_user_id):
         return redirect(url_for("create_instance_page", error="请填写有效的实例 ID。"))
-    if product not in {"openclaw", "hermes", "evoscientist"}:
+    if product not in {"openclaw", "hermes", "evoscientist", "deepseek-harness"}:
         return redirect(url_for("create_instance_page", error="不支持该实例产品。"))
     if not instance_name or len(instance_name) > 128:
         return redirect(url_for("create_instance_page", error="实例名称不能为空。"))
-    if product != "hermes" and not password:
+    if product not in {"hermes", "deepseek-harness"} and not password:
         return redirect(url_for("create_instance_page", error="Basic Auth 密码不能为空。"))
     if product == "hermes":
         basic_auth_enabled = False
@@ -407,7 +411,7 @@ def create_instance():
                 "instance_name": instance_name,
                 "product": product,
         }
-        if product != "hermes":
+        if product not in {"hermes", "deepseek-harness"}:
             payload["basic_auth_enabled"] = basic_auth_enabled
             payload["basic_auth_password"] = password
         if version:
@@ -1020,7 +1024,7 @@ def activity_page():
     if not current or current["role"] != "admin":
         return render_template("error.html", message="Forbidden"), 403
     product = request.args.get("product", "all").strip().lower()
-    if product not in {"all", "openclaw", "hermes", "evoscientist"}:
+    if product not in {"all", "openclaw", "hermes", "evoscientist", "deepseek-harness"}:
         product = "all"
     status_filter = request.args.get("status", "running").strip().lower()
     if status_filter not in {"running", "stopped", "all"}:

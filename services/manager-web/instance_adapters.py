@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 
 
-from product_capabilities import product_auth_contract, product_capabilities
+from product_capabilities import HARNESS_VERSION, product_auth_contract, product_capabilities
 
 
 HERMES_RUNTIME_UID = 10000
@@ -812,6 +812,72 @@ class OpenClawDockerAdapter:
 
             timeout=timeout,
         )
+
+class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
+    AUTH_PRODUCT = "deepseek-harness"
+    CAPABILITIES = product_capabilities(AUTH_PRODUCT)
+    VERSION = HARNESS_VERSION
+
+    def create(self, instance, basic_auth_enabled, basic_auth_password="", **kwargs):
+        if kwargs.get("version", self.VERSION) != self.VERSION:
+            return 1, "unsupported Harness version"
+        root = self.data_dir(instance)
+        root.mkdir(mode=0o700, parents=True, exist_ok=False)
+        for name in ("state", "workspace"):
+            directory = root / name
+            directory.mkdir(mode=0o700)
+            os.chown(directory, 1000, 1000)
+        return self._launch(instance)
+
+    def _launch(self, instance):
+        root = self.data_dir(instance)
+        if not all((root / name).is_dir() for name in ("state", "workspace")):
+            return 1, "Harness state or workspace directory missing"
+        target = self.get_runtime_target(instance)
+        code, output = self.run_command([
+            "docker", "run", "--detach", "--pull=never", "--name", target,
+            "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--user", "1000:1000", "--restart", "unless-stopped",
+            "--mount", f"type=bind,src={root / 'state'},dst=/state",
+            "--mount", f"type=bind,src={root / 'workspace'},dst=/workspace",
+            f"openclaw-manager/deepseek-harness:{self.VERSION}",
+        ])
+        if code:
+            return code, output
+        # The authenticated listener returns 401 before a launch token is exchanged.
+        probe = ("for(let i=0;i<60;i++){try{if((await fetch('http://127.0.0.1:3080/')).status"
+                 "===401)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,1000))}process.exit(1)")
+        try:
+            code, _ = self.run_command(["docker", "exec", target, "node", "--input-type=module",
+                                        "-e", probe], timeout=75)
+        except subprocess.TimeoutExpired:
+            code = 1
+        if code:
+            cleanup, _ = self.delete(instance)
+            return 1, "Harness listener failed readiness check" + ("; cleanup failed" if cleanup else "")
+        return 0, "Harness ready"
+
+    def start(self, instance):
+        return self.run_command(["docker", "start", self.get_runtime_target(instance)])
+
+    def stop(self, instance):
+        return self.run_command(["docker", "stop", self.get_runtime_target(instance)])
+
+    def restart(self, instance):
+        return self.run_command(["docker", "restart", self.get_runtime_target(instance)])
+
+    def delete(self, instance):
+        code, output = self.stop(instance)
+        if code:
+            return code, output
+        return self.run_command(["docker", "rm", self.get_runtime_target(instance)])
+
+    def restore(self, instance):
+        return self._launch(instance)
+
+    def logs(self, instance, tail=120):
+        return re.sub(r"([?&]token=)[^\s&#]+", r"\1[redacted]", super().logs(instance, tail))
+
 
 class EvoScientistDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities("evoscientist")

@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 
 from instance_adapters import (
+    DeepSeekHarnessDockerAdapter,
     EvoScientistDockerAdapter,
     HermesDockerAdapter,
     OpenClawDockerAdapter,
@@ -257,6 +258,9 @@ def evoscientist_creation_result(instance):
 
 
 def creation_result(instance):
+    if instance["product"] == "deepseek-harness":
+        return dict(port=None, version=DeepSeekHarnessDockerAdapter.VERSION, access_url=None,
+                    admin_url=None, basic_auth_password_ref=None, openclaw_token="", auth_mode="session")
     if instance["product"] == "hermes":
         return hermes_creation_result(instance)
     if instance["product"] == "evoscientist":
@@ -291,7 +295,7 @@ def reload_nginx_after_create(adapter):
 
 
 def rollback_created_instance(adapter, instance):
-    if instance["product"] in {"hermes", "evoscientist"}:
+    if instance["product"] in {"hermes", "evoscientist", "deepseek-harness"}:
         return adapter.delete(instance)
     return adapter.run_command(
         [str(adapter.manager_dir / "scripts" / "delete_user.sh"), instance["legacy_user_id"]],
@@ -304,6 +308,7 @@ def get_adapter(product):
     adapter_type = {
         "openclaw": OpenClawDockerAdapter,
         "evoscientist": EvoScientistDockerAdapter,
+        "deepseek-harness": DeepSeekHarnessDockerAdapter,
         "hermes": HermesDockerAdapter,
     }.get(product)
     if adapter_type is None:
@@ -352,7 +357,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
         if action == "create":
             control.update(request_id, "running", current_step="creating instance")
             password = (
-                "" if instance["product"] == "hermes"
+                "" if instance["product"] in {"hermes", "deepseek-harness"}
                 else consume_provisioning_secret(job["params"]["secret_path"])
             )
             instance["_creation_version"] = job["params"].get("version")
@@ -375,7 +380,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                 **create_kwargs,
             )
             created = code == 0
-            if created:
+            if created and instance["product"] != "deepseek-harness":
                 if instance["product"] in {"hermes", "evoscientist"}:
                     code, failure_output = adapter.configure_ingress(instance)
                 else:

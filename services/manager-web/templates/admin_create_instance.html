@@ -55,6 +55,7 @@
         <label class="form-label" for="product">产品</label>
         <select class="form-select" id="product" name="product" required>
           <option value="openclaw">OpenClaw</option>
+          <option value="deepseek-harness">DeepSeek Harness</option>
           <option value="hermes">Hermes</option>
           <option value="evoscientist">EvoScientist</option>
         </select>
@@ -128,9 +129,14 @@
         var value = defaults[product.value] || '';
         version.value = value;
         hint.textContent = value ? '默认版本：' + value : '请配置该产品的默认版本。';
-        var hermes = product.value === 'hermes';
+        var harness = product.value === 'deepseek-harness';
+        var ownerType = document.getElementById('owner_identity_type');
+        ownerType.querySelector('[value=local]').disabled = harness;
+        if (harness) ownerType.value = 'campus-uis';
+        version.readOnly = harness;
+        var hermes = product.value === 'hermes' || harness;
         authRows.forEach(function(row) { row.hidden = hermes; });
-        hermesHint.hidden = !hermes;
+        hermesHint.hidden = product.value !== 'hermes';
         password.required = !hermes;
         if (hermes) password.value = '';
         updateConfirmation();

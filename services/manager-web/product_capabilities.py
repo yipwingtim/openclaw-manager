@@ -1,4 +1,7 @@
+HARNESS_VERSION = "0.2.2-rc.5"
+
 PRODUCT_CAPABILITIES = {
+    "deepseek-harness": frozenset({"create", "status", "logs", "start", "stop", "restart", "delete", "restore"}),
     "openclaw": frozenset(
         {
             "status", "logs", "start", "stop", "restart", "create",

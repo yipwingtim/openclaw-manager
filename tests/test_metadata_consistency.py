@@ -52,6 +52,24 @@ class MetadataConsistencyTests(unittest.TestCase):
     def tearDown(self):
         self.instance_auth_token.stop()
 
+    def test_retained_harness_requires_both_directories_and_no_endpoint(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "instances/deepseek-harness/i"
+            root.mkdir(parents=True)
+            row = dict(product="deepseek-harness", legacy_user_id="alice", public_id="i",
+                       data_path=str(root), status="deleted", port=12345)
+            with patch.dict(check_global.__globals__, {"OPENCLAW_PUBLIC_DIR": Path(tmp)}):
+                reporter = Reporter()
+                check_global({}, {}, {"alice": row}, [], reporter)
+                self.assertTrue({"harness_data_missing", "harness_endpoint_unexpected"}
+                                <= {issue.code for issue in reporter.issues})
+                for name in ("state", "workspace"):
+                    (root / name).mkdir()
+                row["port"] = None
+                reporter = Reporter()
+                check_global({}, {}, {"alice": row}, [], reporter)
+                self.assertFalse(any(issue.code.startswith("harness_") for issue in reporter.issues))
+
     def test_hermes_bridge_reports_inconsistent_client_and_grant(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_file = Path(temp_dir) / "manager.db"

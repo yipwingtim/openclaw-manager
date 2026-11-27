@@ -821,6 +821,10 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
     def create(self, instance, basic_auth_enabled, basic_auth_password="", **kwargs):
         if kwargs.get("version", self.VERSION) != self.VERSION:
             return 1, "unsupported Harness version"
+        image = f"openclaw-manager/deepseek-harness:{self.VERSION}"
+        code, _ = self.run_command(["docker", "image", "inspect", image])
+        if code:
+            return 1, f"Harness image missing: {image}; build templates/deepseek-harness first"
         root = self.data_dir(instance)
         root.mkdir(mode=0o700, parents=True, exist_ok=False)
         for name in ("state", "workspace"):
@@ -871,6 +875,16 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
         if code:
             return code, output
         return self.run_command(["docker", "rm", self.get_runtime_target(instance)])
+
+    def cleanup_failed(self, instance):
+        if instance.get("status") != "failed":
+            return 1, "only failed Harness instances can be cleaned up"
+        code, output = self.run_command(
+            ["docker", "rm", "-f", self.get_runtime_target(instance)], timeout=60
+        )
+        if code and "no such container" not in output.lower():
+            return code, output
+        return 0, "Harness failed runtime removed; state and workspace retained"
 
     def restore(self, instance):
         return self._launch(instance)

@@ -673,6 +673,10 @@ def create_instance(
                 ),
             )
         except INTEGRITY_ERROR as exc:
+            if "legacy_user_id" in str(exc):
+                raise ValueError("instance ID already exists") from exc
+            if "owner_user_id" in str(exc):
+                raise ValueError("instance name already exists for this owner and product") from exc
             if "runtime_identifier" in str(exc):
                 raise ValueError("runtime identifier already exists") from exc
             if "data_path" in str(exc):

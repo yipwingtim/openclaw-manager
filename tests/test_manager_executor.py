@@ -27,6 +27,18 @@ class ManagerExecutorTests(unittest.TestCase):
     def setUpClass(cls):
         cls.executor = load_executor()
 
+    def test_harness_cleanup_failure_does_not_report_success(self):
+        for code in (0, 1):
+            control = Mock()
+            instance = dict(public_id="i", product="deepseek-harness", status="failed")
+            control.claim.return_value = dict(
+                job=dict(request_id="cleanup", action="instance.cleanup_failed"), instance=instance)
+            adapter = Mock()
+            adapter.cleanup_failed.return_value = (code, "runtime cleanup")
+            self.executor.run_once(control, lambda product: adapter)
+            adapter.cleanup_failed.assert_called_once_with(instance)
+            self.assertEqual(control.update.call_args_list[-1][0][1], "failed" if code else "succeeded")
+
     def test_refresh_ingress_passes_saved_upload_size(self):
         control = Mock()
         instance = {"public_id": "instance-1", "product": "hermes"}

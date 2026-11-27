@@ -594,6 +594,25 @@ class ManagerControlApiTests(unittest.TestCase):
             instance["public_id"],
         )
 
+    def test_admin_list_exposes_failed_cleanup_capability(self):
+        for product in ("deepseek-harness", "evoscientist", "openclaw"):
+            self.control.metadata_store.create_instance(
+                owner_public_id=self.user["public_id"], product=product,
+                instance_name=product, runtime_identifier=product + "_failed",
+                status="failed", db_file=self.db_file,
+            )
+        with patch.object(
+            self.control.request, "headers", {"Authorization": "Bearer admin-token"}
+        ):
+            response, status = response_parts(self.control.admin_instances())
+        self.assertEqual(status, 200)
+        for instance in response.get_json()["instances"]:
+            self.assertEqual(instance["status"], "failed")
+            self.assertEqual(
+                "cleanup_failed" in instance["capabilities"],
+                instance["product"] in {"deepseek-harness", "evoscientist"},
+            )
+
     def test_admin_instance_list_never_scans_instance_data_paths(self):
         self.control.metadata_store.create_instance(
             owner_public_id=self.user["public_id"],

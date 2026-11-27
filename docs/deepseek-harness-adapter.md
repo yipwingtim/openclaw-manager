@@ -23,7 +23,8 @@ require a subsequent change. The RC image should be retained for restores.
 ## Failed provisioning
 
 Duplicate instance IDs and duplicate names within an owner's product return a
-conflict response. Failed Harness instances have a dedicated cleanup action.
+conflict response. Failed Harness instances have a dedicated cleanup action. The admin instance list
+returns the cleanup capability so the UI can display this action.
 Cleanup tolerates an absent container, removes the failed metadata record, and
 releases its instance ID. The UUID-based state and workspace directories remain
 on disk for recovery; a new instance receives new directories. A Docker failure

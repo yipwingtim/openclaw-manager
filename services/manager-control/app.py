@@ -802,7 +802,7 @@ def admin_instances():
                         capability
                         for capability in (
                             "basic_auth", "update_version", "skill_install", "device_pairing",
-                            "delete", "restore", "purge_deleted", "batch_set_model_provider",
+                            "delete", "restore", "purge_deleted", "cleanup_failed", "batch_set_model_provider",
                         )
                         if product_supports(instance["product"], capability)
                     ),

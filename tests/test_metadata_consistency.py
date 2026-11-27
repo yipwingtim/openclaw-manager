@@ -52,6 +52,15 @@ class MetadataConsistencyTests(unittest.TestCase):
     def tearDown(self):
         self.instance_auth_token.stop()
 
+    def test_failed_harness_may_lack_data_but_must_have_no_endpoint(self):
+        row = dict(product="deepseek-harness", legacy_user_id="alice", public_id="i",
+                   status="failed", data_path="/missing", port=12345)
+        reporter = Reporter()
+        check_global({}, {}, {"alice": row}, [], reporter)
+        codes = {issue.code for issue in reporter.issues}
+        self.assertIn("harness_endpoint_unexpected", codes)
+        self.assertNotIn("harness_data_missing", codes)
+
     def test_retained_harness_requires_both_directories_and_no_endpoint(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / "instances/deepseek-harness/i"

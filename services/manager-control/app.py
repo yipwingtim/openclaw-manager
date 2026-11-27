@@ -2388,9 +2388,9 @@ def create_execution_job():
     if action == "instance.delete" and instance["status"] == "deleted":
         return jsonify({"error": "instance is already deleted"}), 409
     if action == "instance.cleanup_failed" and (
-        instance["status"] != "failed" or instance.get("product") != "evoscientist"
+        instance["status"] != "failed" or not product_supports(instance.get("product"), "cleanup_failed")
     ):
-        return jsonify({"error": "only failed EvoScientist instances can be cleaned up"}), 409
+        return jsonify({"error": "only failed instances supporting cleanup can be cleaned up"}), 409
     if action == "instance.purge_deleted" and (
         instance["status"] != "deleted" or instance.get("restore_state") != "restorable"
     ):

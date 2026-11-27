@@ -507,6 +507,10 @@ class AdminWebTests(unittest.TestCase):
         self.assertEqual(context["product_filter"], "hermes")
         self.assertEqual([item["public_id"] for item in context["instances"]], ["hermes-1"])
 
+    def test_failed_instance_cleanup_button_uses_product_capability(self):
+        template = (ADMIN_APP.parent / "templates" / "admin_instances.html").read_text()
+        self.assertIn('instance.status == "failed" and "cleanup_failed" in instance.capabilities', template)
+
     def test_admin_instances_template_preserves_table_and_collapses_extra_actions(self):
         template = (
             ROOT_DIR / "services" / "manager-web" / "templates" / "admin_instances.html"

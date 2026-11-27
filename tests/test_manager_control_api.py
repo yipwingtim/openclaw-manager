@@ -1418,6 +1418,15 @@ class ManagerControlApiTests(unittest.TestCase):
             response, status = response_parts(self.control.create_admin_instance())
             self.assertEqual(status, 202, response.get_json())
         public_id = response.get_json()["instance"]["public_id"]
+        payload["request_id"] = "create-harness-duplicate"
+        payload["instance_name"] = "Another Harness"
+        payload["legacy_user_id"] = "alice-harness"
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer admin-token"}), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            duplicate, status = response_parts(self.control.create_admin_instance())
+            self.assertEqual(status, 409)
+            self.assertIn(duplicate.get_json()["error"], {"instance ID already exists", "runtime identifier already exists"})
         store.update_execution_job("create-harness", "running", db_file=self.db_file)
         result = dict(port=None, version="0.2.2-rc.5", access_url=None, admin_url=None,
                       basic_auth_password_ref=None, openclaw_token="", auth_mode="session")
@@ -1430,6 +1439,31 @@ class ManagerControlApiTests(unittest.TestCase):
             self.assertEqual(response_parts(self.control.update_execution_job("create-harness"))[1], 200)
         instance = store.get_instance_by_public_id(public_id, db_file=self.db_file)
         self.assertEqual((instance["owner_user_id"], instance["status"]), (self.user["id"], "active"))
+
+    def test_failed_harness_cleanup_releases_id(self):
+        store = self.control.metadata_store
+        store.set_user_role(self.user["id"], "admin", db_file=self.db_file)
+        instance = store.create_instance(
+            owner_public_id=self.user["public_id"], product="deepseek-harness",
+            instance_name="Harness", runtime_identifier="deepseek-harness_DSH",
+            legacy_user_id="DSH", status="failed", db_file=self.db_file)
+        payload = dict(request_id="cleanup-harness", actor_user_public_id=self.user["public_id"],
+                       instance_public_id=instance["public_id"], action="instance.cleanup_failed", params={})
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer admin-token"}), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            response, status = response_parts(self.control.create_execution_job())
+            self.assertEqual(status, 200, response.get_json())
+        store.update_execution_job("cleanup-harness", "running", db_file=self.db_file)
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer executor-token"}), patch.object(
+            self.control.request, "get_json", return_value={"status": "succeeded"}
+        ):
+            response, status = response_parts(self.control.update_execution_job("cleanup-harness"))
+            self.assertEqual(status, 200, response.get_json())
+        self.assertIsNone(store.get_instance_by_public_id(instance["public_id"], db_file=self.db_file))
+        store.create_instance(owner_public_id=self.user["public_id"], product="deepseek-harness",
+                              instance_name="Harness", runtime_identifier="deepseek-harness_DSH",
+                              legacy_user_id="DSH", db_file=self.db_file)
 
     def test_admin_creates_hermes_provisioning_instance(self):
         self.control.metadata_store.set_user_role(

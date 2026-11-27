@@ -886,8 +886,8 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
                     (root / name).is_dir() for name in ("state", "workspace")
                 ):
                     reporter.error("harness_data_missing", f"{user_id}: Harness state or workspace missing")
-                if any(row.get(field) for field in ("port", "access_url", "admin_url")):
-                    reporter.error("harness_endpoint_unexpected", f"{user_id}: unexpected Harness endpoint")
+            if any(row.get(field) for field in ("port", "access_url", "admin_url")):
+                reporter.error("harness_endpoint_unexpected", f"{user_id}: unexpected Harness endpoint")
             continue
         if legacy_user_id is None:
             data_path = row.get("data_path")

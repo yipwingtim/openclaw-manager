@@ -490,6 +490,17 @@ class IdentityInstanceMetadataTests(unittest.TestCase):
 
         self.assertIsNotNone(self.store.get_session("token-hash", db_file=self.db_file))
 
+    def test_duplicate_instance_id_and_owner_name_have_readable_errors(self):
+        owner = self.store.create_user("owner", db_file=self.db_file)
+        base = dict(owner_public_id=owner["public_id"], product="deepseek-harness",
+                    instance_name="Primary", legacy_user_id="DSH_owner",
+                    runtime_identifier="deepseek-harness_owner", db_file=self.db_file)
+        self.store.create_instance(**base)
+        with self.assertRaisesRegex(ValueError, "instance ID already exists"):
+            self.store.create_instance(**{**base, "instance_name": "Other", "runtime_identifier": "other"})
+        with self.assertRaisesRegex(ValueError, "instance name already exists"):
+            self.store.create_instance(**{**base, "legacy_user_id": "other", "runtime_identifier": "other"})
+
     def test_runtime_identifier_is_globally_unique(self):
         alice = self.store.create_user("alice", db_file=self.db_file)
         bob = self.store.create_user("bob", db_file=self.db_file)

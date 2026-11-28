@@ -45,9 +45,13 @@ async function prepare() {
     const doc = await documentAt(file, '[]');
     if (!isSeq(doc.contents)) throw Error('Expected a Harness patch list');
     const original = String(doc);
-    function config(id) {
+    function plugin(id) {
       let entry = doc.contents.items.findLast(item => isMap(item) && item.get('id') === id);
       if (!entry) { entry = doc.createNode({id}); doc.contents.add(entry); }
+      return entry;
+    }
+    function config(id) {
+      const entry = plugin(id);
       if (!entry.has('config')) entry.set('config', doc.createNode({}));
       const value = entry.get('config', true);
       if (!isMap(value)) throw Error('Unsupported Harness plugin configuration');
@@ -69,6 +73,7 @@ async function prepare() {
     }
     const picker = config('workspace-controller');
     if (!picker.has('documentsDirectory')) picker.set('documentsDirectory', documents);
+    plugin('ui-settings-account').set('disabled', true);
     config('ui-settings-models').set('credentialOnboarding', false);
     if (String(doc) !== original) await writeFileAtomic(file, String(doc), {mode: 0o600});
   });

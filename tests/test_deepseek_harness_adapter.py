@@ -82,7 +82,7 @@ class HarnessTests(unittest.TestCase):
             instance = dict(public_id="11111111-1111-4111-8111-111111111111",
                             legacy_user_id="alice", runtime_identifier="deepseek-harness_alice")
             instance["data_path"] = tmp
-            (Path(tmp) / ".managed-defaults").touch()
+            (Path(tmp) / ".managed-defaults").write_bytes(adapter.PROFILE_REVISION)
             conf = adapter.ingress_conf(instance)
             conf.parent.mkdir()
             conf.write_text("previous")
@@ -110,7 +110,7 @@ class HarnessTests(unittest.TestCase):
             adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
             instance = dict(runtime_identifier="missing", public_id="11111111-1111-4111-8111-111111111111")
             instance["data_path"] = tmp
-            (Path(tmp) / ".managed-defaults").touch()
+            (Path(tmp) / ".managed-defaults").write_bytes(adapter.PROFILE_REVISION)
             conf = adapter.ingress_conf(instance)
             conf.parent.mkdir()
             conf.write_text("old ingress")
@@ -126,7 +126,7 @@ class HarnessTests(unittest.TestCase):
             instance = dict(public_id="11111111-1111-4111-8111-111111111111",
                             legacy_user_id="alice", runtime_identifier="deepseek-harness_alice")
             instance["data_path"] = tmp
-            (Path(tmp) / ".managed-defaults").touch()
+            (Path(tmp) / ".managed-defaults").write_bytes(adapter.PROFILE_REVISION)
             env = "/deepseek-harness_alice-ingress"
             with patch.object(adapter, "run_command", side_effect=[(0, env), (0, ""), (0, ""), (0, "")]), patch.object(
                 adapter, "reload_nginx", return_value=(0, "")
@@ -145,6 +145,7 @@ class HarnessTests(unittest.TestCase):
             adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
             instance = dict(public_id="11111111-1111-4111-8111-111111111111",
                             runtime_identifier="harness", legacy_user_id="alice", data_path=tmp)
+            (Path(tmp) / ".managed-defaults").touch()  # Previous releases wrote an empty marker.
             with patch.object(OpenClawDockerAdapter, "status", return_value="Up"), patch.object(
                 adapter, "run_command", return_value=(0, "")
             ) as run, patch.object(adapter, "reload_nginx", return_value=(0, "")):

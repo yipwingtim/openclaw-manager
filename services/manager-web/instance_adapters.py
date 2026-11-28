@@ -819,6 +819,7 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
     AUTH_PRODUCT = "deepseek-harness"
     CAPABILITIES = product_capabilities(AUTH_PRODUCT)
     VERSION = HARNESS_VERSION
+    PROFILE_REVISION = b"2\n"
 
     def access_url(self, instance):
         host = os.environ.get("PUBLIC_HOST", "").strip()
@@ -982,7 +983,7 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
             detail = re.sub(r"([?&]token=)[^\s&#]+", r"\1[redacted]", "\n".join(diagnostics))
             self.run_command(["docker", "rm", "-f", gateway, target])
             return 1, detail[-8192:]
-        (root / ".managed-defaults").touch(mode=0o600)
+        self._write_private_file(root / ".managed-defaults", self.PROFILE_REVISION)
         return 0, "Harness ready"
 
     def configure_ingress(self, instance, upload_max_body_size=None):
@@ -995,7 +996,7 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
                 return code, output
             return self.upgrade_ingress(instance)
         marker = self.data_dir(instance) / ".managed-defaults"
-        if not marker.exists():
+        if not marker.exists() or marker.read_bytes() != self.PROFILE_REVISION:
             code, output = self._prepare_defaults(instance)
             if code:
                 return code, output
@@ -1004,7 +1005,7 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
                 code, output = self.run_command(["docker", "restart", self.get_runtime_target(instance)])
                 if code:
                     return code, output
-            marker.touch(mode=0o600)
+            self._write_private_file(marker, self.PROFILE_REVISION)
         network = self.tenant_network(instance)
         target = self.get_runtime_target(instance)
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):

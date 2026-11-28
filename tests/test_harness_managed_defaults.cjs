@@ -18,6 +18,9 @@ test('first use, personal settings, and restored proxy credentials', () => {
   try {
     prepare();
     const entries = yaml.parse(fs.readFileSync(profile, 'utf8'));
+    const account = entries.find(entry => entry.id === 'ui-settings-account');
+    assert.equal(account.disabled, true);
+    account.config = {step: 'done'};
     const config = id => entries.find(entry => entry.id === id).config;
     assert.equal(config('agent-default-model').model, 'test-model');
     assert.equal(config('ui-settings-models').credentialOnboarding, false);
@@ -27,6 +30,8 @@ test('first use, personal settings, and restored proxy credentials', () => {
     config('agent-default-model').model = 'personal-model';
     fs.writeFileSync(profile, yaml.stringify(entries));
     const personal = fs.readFileSync(profile, 'utf8');
+    account.disabled = false;
+    fs.writeFileSync(profile, yaml.stringify(entries));
     const creds = yaml.parse(fs.readFileSync(credentials, 'utf8'));
     creds.refs.PERSONAL = 'personal-test-key';
     fs.writeFileSync(credentials, yaml.stringify(creds));

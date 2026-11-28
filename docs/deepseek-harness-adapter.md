@@ -28,7 +28,11 @@ Fresh profiles open the platform model and the persistent /workspace after the
 preview notice. Users can add personal providers and create or switch directories.
 Starting an existing instance prepares missing defaults and reloads a running
 application once. Existing provider entries, explicit model choices and workspace
-history are preserved. UIS continues to authorize application access.
+history are preserved. The managed Web profile disables the optional
+`ui-settings-account` plugin. The sidebar opens Settings directly, including
+Models for personal API keys. Existing instances apply this change on their next
+start or restart. UIS authorizes access to the owning instance; conversations
+persist in its state directory independently of a DeepSeek account.
 
 ## Failed provisioning
 

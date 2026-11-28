@@ -73,6 +73,13 @@ class MetadataConsistencyTests(unittest.TestCase):
                 check_global({}, {}, {"alice": row}, [], reporter)
                 self.assertFalse(any(issue.code.startswith("harness_") for issue in reporter.issues))
 
+    def test_active_harness_without_path_reports_pending_lifecycle_setup(self):
+        row = dict(product="deepseek-harness", legacy_user_id="alice", public_id="i",
+                   status="active", data_path="/missing", access_url=None)
+        reporter = Reporter()
+        check_global({}, {}, {"alice": row}, [], reporter)
+        self.assertIn("harness_access_pending", {issue.code for issue in reporter.issues})
+
     def test_failed_harness_may_lack_data_but_must_have_no_endpoint(self):
         row = dict(product="deepseek-harness", legacy_user_id="alice", public_id="i",
                    status="failed", data_path="/missing", port=12345)

@@ -2668,7 +2668,9 @@ def update_execution_job(request_id):
                     message="instance created" if status == "succeeded" else "instance creation failed",
                     conn=conn,
                 )
-            if status == "succeeded" and job["action"] == "instance.refresh_ingress":
+            if status == "succeeded" and job["action"] in {
+                "instance.refresh_ingress", "instance.start", "instance.restart",
+            }:
                 refreshed = metadata_store.get_instance_by_public_id(job["instance_public_id"], conn=conn)
                 if refreshed["product"] == "deepseek-harness":
                     path = harness_access_path(refreshed["legacy_user_id"])

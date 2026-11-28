@@ -125,3 +125,39 @@ class HarnessTests(unittest.TestCase):
             self.assertIn("proxy_set_header Host $http_host", text)
             self.assertNotIn("listen", text)
             self.assertEqual(adapter.instance_auth_contract()["edge_authorization"], "uis")
+
+    def test_start_prepares_ingress_before_starting_both_containers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
+            instance = dict(runtime_identifier="harness")
+            with patch.object(adapter, "configure_ingress", return_value=(1, "migration failed")), patch.object(
+                adapter, "run_command"
+            ) as run:
+                self.assertEqual(adapter.start(instance), (1, "migration failed"))
+                run.assert_not_called()
+            with patch.object(adapter, "configure_ingress", return_value=(0, "")), patch.object(
+                adapter, "run_command", return_value=(0, "")
+            ) as run:
+                self.assertEqual(adapter.start(instance)[0], 0)
+                self.assertEqual([call[0][0] for call in run.call_args_list],
+                                 [["docker", "start", "harness"], ["docker", "start", "harness-ingress"]])
+
+    def test_readiness_failure_returns_redacted_logs_before_removal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
+            root = Path(tmp)
+            for name in ("state", "workspace"):
+                (root / name).mkdir()
+            instance = dict(public_id="11111111-1111-4111-8111-111111111111", legacy_user_id="alice",
+                            runtime_identifier="harness", data_path=tmp)
+            def command(args, **kwargs):
+                if args[:2] == ["docker", "exec"]:
+                    return 1, "probe failed"
+                if args[:2] == ["docker", "logs"]:
+                    return 0, "EACCES /state/profiles\n/?token=private-token"
+                return 0, ""
+            with patch("instance_adapters.os.chown"), patch.object(adapter, "run_command", side_effect=command):
+                code, output = adapter._launch(instance)
+            self.assertEqual(code, 1)
+            self.assertIn("EACCES /state/profiles", output)
+            self.assertNotIn("private-token", output)

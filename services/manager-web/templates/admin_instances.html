@@ -131,12 +131,6 @@
               </td>
               <td style="min-width: 280px;">
                 <a class="btn btn-sm btn-oc-outline mb-2" href="{{ url_for('instance_usage_page', instance_public_id=instance.public_id) }}">用量明细</a>
-                {% if instance.product == "deepseek-harness" and instance.status in ["active", "stopped"] %}
-                  <form method="post" action="/admin/instances/{{ instance.public_id }}/ingress" onsubmit="return confirm('确认接入或刷新入口？旧版实例会保留数据重建容器，期间应用短暂中断。');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="btn btn-sm btn-oc-outline mb-2">接入／刷新入口</button>
-                  </form>
-                {% endif %}
                 {% if instance.status == "failed" and "cleanup_failed" in instance.capabilities %}
                   <form method="post" action="/admin/instances/{{ instance.public_id }}/retention" onsubmit="return confirm('确认清理失败实例元数据及残留资源？');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

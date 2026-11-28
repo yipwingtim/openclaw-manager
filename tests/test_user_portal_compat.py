@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import ast
+import types
+from unittest.mock import Mock
 import unittest
 from pathlib import Path
 
@@ -27,6 +30,27 @@ class UserPortalCompatibilityTests(unittest.TestCase):
 
         self.assertNotIn('current_user=current["username"]', source)
         self.assertIn('render_template("my_instances.html", instances=instances)', source)
+
+    def test_harness_user_list_uses_runtime_status(self):
+        source = ast.parse((WEB_DIR / "user_app.py").read_text())
+        function = next(node for node in source.body if isinstance(node, ast.FunctionDef)
+                        and node.name == "my_instances")
+        function.decorator_list = []
+        class ExecutorError(Exception):
+            pass
+        for runtime, expected in (("STOPPED", "stopped"), ("Up", "active"), ("UNKNOWN", "unknown")):
+            instance = dict(public_id="i", product="deepseek-harness", status="active")
+            executor = types.SimpleNamespace(snapshot=Mock(return_value={"status": runtime}),
+                                             ExecutorError=ExecutorError)
+            scope = dict(web_common=types.SimpleNamespace(actor=lambda: {"public_id": "owner"}),
+                         control_client=types.SimpleNamespace(list_instances=lambda actor: [instance]),
+                         executor_client=executor,
+                         render_template=lambda template, **kwargs: kwargs)
+            module = ast.Module(body=[function], type_ignores=[])
+            exec(compile(module, "user_app.py", "exec"), scope)
+            self.assertEqual(scope["my_instances"]()["instances"][0]["status"], expected)
+            executor.snapshot.side_effect = ExecutorError()
+            self.assertEqual(scope["my_instances"]()["instances"][0]["status"], "unknown")
 
     def test_device_action_does_not_redirect_with_executor_output(self):
         source = (WEB_DIR / "user_app.py").read_text(encoding="utf-8")

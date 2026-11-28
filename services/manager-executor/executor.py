@@ -661,7 +661,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
         if action not in {"start", "stop", "restart"}:
             raise ValueError(f"unsupported execution action: {job['action']}")
         status = adapter.status(instance)
-        if action == "start" and status.startswith("Up"):
+        if action == "start" and status.startswith("Up") and instance["product"] != "deepseek-harness":
             control.update(request_id, "succeeded", output="instance already running")
             return True
         if action == "stop" and status == "STOPPED":

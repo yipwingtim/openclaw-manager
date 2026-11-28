@@ -887,6 +887,8 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
                 ):
                     reporter.error("harness_data_missing", f"{user_id}: Harness state or workspace missing")
             expected_path = "/" + str(row.get("legacy_user_id") or "") + "/"
+            if row.get("status") == "active" and not row.get("access_url"):
+                reporter.warn("harness_access_pending", f"{user_id}: start or restart Harness to prepare its access path")
             if row.get("port") or any(
                 row.get(field) not in {None, "", expected_path} for field in ("access_url", "admin_url")
             ):

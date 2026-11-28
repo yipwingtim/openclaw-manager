@@ -90,3 +90,8 @@ entry after rollout.
 
 Failed readiness checks return redacted application and gateway logs before rollback.
 The Harness user list reads runtime status from the executor, matching the admin list.
+
+The image explicitly copies the launcher and gateway scripts with mode 0644 so
+UID 1000 and UID 65534 can read them regardless of build-context permissions.
+If an existing image reports EACCES for either /opt/harness-*.mjs script, rebuild
+the image from this Dockerfile, then start the instance again.

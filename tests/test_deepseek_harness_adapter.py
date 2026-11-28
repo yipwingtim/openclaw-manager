@@ -14,6 +14,11 @@ class HarnessTests(unittest.TestCase):
         self.host.start()
         self.addCleanup(self.host.stop)
 
+    def test_image_sets_script_permissions_for_both_runtime_users(self):
+        dockerfile = (Path(__file__).resolve().parents[1] / "templates/deepseek-harness/Dockerfile").read_text()
+        for name in ("gateway", "start"):
+            self.assertIn("COPY --chmod=0644 " + name + ".mjs /opt/harness-" + name + ".mjs", dockerfile)
+
     def test_private_runtime_preserves_workspace_on_restore(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")

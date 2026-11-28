@@ -57,6 +57,8 @@ server {
 {{MANAGER_INTERNAL_TOKEN_HEADER}}
     }
 
+    include /etc/nginx/conf.d/harness-paths/*.inc;
+
     location / {
         proxy_pass http://manager_user_web_backend;
 

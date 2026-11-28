@@ -15,7 +15,7 @@ from instance_adapters import (
     HermesDockerAdapter,
     OpenClawDockerAdapter,
 )
-from product_capabilities import execution_action_capability
+from product_capabilities import harness_access_path, execution_action_capability
 
 
 BASE_URL = os.environ.get(
@@ -259,8 +259,10 @@ def evoscientist_creation_result(instance):
 
 def creation_result(instance):
     if instance["product"] == "deepseek-harness":
-        return dict(port=None, version=DeepSeekHarnessDockerAdapter.VERSION, access_url=None,
-                    admin_url=None, basic_auth_password_ref=None, openclaw_token="", auth_mode="session")
+        return dict(port=None, version=DeepSeekHarnessDockerAdapter.VERSION,
+                    access_url=harness_access_path(instance["legacy_user_id"]),
+                    admin_url=harness_access_path(instance["legacy_user_id"]),
+                    basic_auth_password_ref=None, openclaw_token="", auth_mode="session")
     if instance["product"] == "hermes":
         return hermes_creation_result(instance)
     if instance["product"] == "evoscientist":
@@ -380,8 +382,8 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                 **create_kwargs,
             )
             created = code == 0
-            if created and instance["product"] != "deepseek-harness":
-                if instance["product"] in {"hermes", "evoscientist"}:
+            if created:
+                if instance["product"] in {"hermes", "evoscientist", "deepseek-harness"}:
                     code, failure_output = adapter.configure_ingress(instance)
                 else:
                     code, failure_output = reload_nginx_after_create(adapter)
@@ -400,7 +402,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             rollback_code = rollback_created_instance(adapter, instance)[0] if created else 0
             rollback_note = (
                 "resources removed"
-                if instance["product"] in {"hermes", "evoscientist"} and created and rollback_code == 0
+                if instance["product"] in {"hermes", "evoscientist", "deepseek-harness"} and created and rollback_code == 0
                 else "resources moved to recycle bin"
                 if created and rollback_code == 0
                 else "create script rolled back resources"
@@ -515,7 +517,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
                 )
             return True
         if action == "refresh_ingress":
-            control.update(request_id, "running", current_step="refreshing Hermes ingress")
+            control.update(request_id, "running", current_step="refreshing instance ingress")
             code, output = adapter.configure_ingress(
                 instance,
                 upload_max_body_size=job["params"].get("hermes_upload_max_body_size"),
@@ -524,7 +526,7 @@ def run_once(control, adapter_factory=get_adapter, max_attempts=MAX_ATTEMPTS):
             if code == 0:
                 control.update(request_id, "succeeded", output=output)
             else:
-                control.update(request_id, "failed", error_summary="Hermes ingress refresh failed", output=output)
+                control.update(request_id, "failed", error_summary="instance ingress refresh failed", output=output)
             return True
         if action == "update_version":
             params = job["params"]

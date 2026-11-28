@@ -52,6 +52,27 @@ class MetadataConsistencyTests(unittest.TestCase):
     def tearDown(self):
         self.instance_auth_token.stop()
 
+    def test_harness_path_endpoint_requires_matching_gateway_route(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "instances/deepseek-harness/i"
+            for name in ("state", "workspace"):
+                (root / name).mkdir(parents=True)
+            conf_dir = Path(tmp) / "nginx"
+            conf = conf_dir / "harness-paths/i.inc"
+            row = dict(product="deepseek-harness", legacy_user_id="alice", public_id="i",
+                       status="active", data_path=str(root), access_url="/alice/",
+                       runtime_identifier="deepseek-harness_alice")
+            with patch.dict(check_global.__globals__, {"OPENCLAW_PUBLIC_DIR": Path(tmp),
+                                                       "NGINX_USERS_CONF_DIR": conf_dir}):
+                reporter = Reporter()
+                check_global({}, {}, {"alice": row}, [], reporter)
+                self.assertIn("harness_ingress_missing", {issue.code for issue in reporter.issues})
+                conf.parent.mkdir(parents=True)
+                conf.write_text("location ^~ /alice/ { set $backend http://deepseek-harness_alice-ingress:3081; }")
+                reporter = Reporter()
+                check_global({}, {}, {"alice": row}, [], reporter)
+                self.assertFalse(any(issue.code.startswith("harness_") for issue in reporter.issues))
+
     def test_failed_harness_may_lack_data_but_must_have_no_endpoint(self):
         row = dict(product="deepseek-harness", legacy_user_id="alice", public_id="i",
                    status="failed", data_path="/missing", port=12345)

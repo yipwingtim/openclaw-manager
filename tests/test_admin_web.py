@@ -1157,6 +1157,20 @@ class AdminWebTests(unittest.TestCase):
         self.assertNotIn("legacy_user_id", payload)
         self.assertEqual(response, "instances")
 
+    def test_admin_harness_ingress_queues_refresh_and_rejects_non_admin(self):
+        actor = {"public_id": "admin-1", "role": "admin"}
+        with patch.object(self.admin.web_common, "actor", return_value=actor), patch.object(
+            self.admin.control_client, "create_execution_job"
+        ) as create_job:
+            self.admin.refresh_instance_ingress("instance-1")
+            self.assertEqual(create_job.call_args[0][0]["action"], "instance.refresh_ingress")
+            self.assertEqual(create_job.call_args[0][0]["instance_public_id"], "instance-1")
+        with patch.object(self.admin.web_common, "actor", return_value={"role": "user"}), patch.object(
+            self.admin.control_client, "create_execution_job"
+        ) as create_job:
+            self.assertEqual(self.admin.refresh_instance_ingress("instance-1")[1], 403)
+            create_job.assert_not_called()
+
     def test_admin_retention_queues_structured_instance_action(self):
         actor = {"public_id": "admin-1", "username": "admin", "role": "admin"}
         self.admin.request.form = {"action": "delete"}

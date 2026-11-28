@@ -1,7 +1,22 @@
+import re
+
 HARNESS_VERSION = "0.2.2-rc.5"
+HARNESS_RESERVED_PATHS = frozenset({
+    "admin", "auth", "login", "logout", "me", "instances", "instance-admin",
+    "static", "health", "emergency", "api", "_gateway_health",
+})
+
+
+def harness_access_path(instance_id):
+    if not isinstance(instance_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", instance_id):
+        raise ValueError("Harness instance ID must use letters, digits, underscores or hyphens")
+    if instance_id.lower() in HARNESS_RESERVED_PATHS:
+        raise ValueError("Harness instance ID conflicts with a Manager route")
+    return "/" + instance_id + "/"
+
 
 PRODUCT_CAPABILITIES = {
-    "deepseek-harness": frozenset({"create", "status", "logs", "start", "stop", "restart", "delete", "restore", "cleanup_failed"}),
+    "deepseek-harness": frozenset({"create", "status", "logs", "start", "stop", "restart", "delete", "restore", "cleanup_failed", "access", "ingress_refresh"}),
     "openclaw": frozenset(
         {
             "status", "logs", "start", "stop", "restart", "create",
@@ -25,6 +40,11 @@ PRODUCT_CAPABILITIES = {
 }
 
 INSTANCE_AUTH_CONTRACTS = {
+    "deepseek-harness": {
+        "edge_authorization": "uis",
+        "product_auth": "session",
+        "identity_header": None,
+    },
     "openclaw": {
         "edge_authorization": "uis",
         "product_auth": "trusted_proxy",

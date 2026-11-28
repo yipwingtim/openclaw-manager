@@ -886,8 +886,18 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
                     (root / name).is_dir() for name in ("state", "workspace")
                 ):
                     reporter.error("harness_data_missing", f"{user_id}: Harness state or workspace missing")
-            if any(row.get(field) for field in ("port", "access_url", "admin_url")):
-                reporter.error("harness_endpoint_unexpected", f"{user_id}: unexpected Harness endpoint")
+            expected_path = "/" + str(row.get("legacy_user_id") or "") + "/"
+            if row.get("port") or any(
+                row.get(field) not in {None, "", expected_path} for field in ("access_url", "admin_url")
+            ):
+                reporter.error("harness_endpoint_unexpected", f"{user_id}: invalid Harness path endpoint")
+            if row.get("status") in {"active", "stopped"} and row.get("access_url"):
+                ingress = NGINX_USERS_CONF_DIR / "harness-paths" / (row["public_id"] + ".inc")
+                text = read_text(ingress) if ingress.is_file() else ""
+                runtime = row.get("runtime_identifier") or row.get("container_name") or ""
+                if (f"location ^~ {expected_path}" not in text
+                        or f"http://{runtime}-ingress:3081" not in text):
+                    reporter.error("harness_ingress_missing", f"{user_id}: Harness path ingress missing or mismatched")
             continue
         if legacy_user_id is None:
             data_path = row.get("data_path")

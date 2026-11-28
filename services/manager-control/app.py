@@ -14,7 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import metadata_store
 from hermes_auth_bridge import BridgeStore, SigningKeys
-from product_capabilities import HARNESS_VERSION, execution_action_capability, product_supports
+from product_capabilities import harness_access_path, HARNESS_VERSION, execution_action_capability, product_supports
 
 
 PUBLIC_DIR = Path(os.environ.get("OPENCLAW_PUBLIC_DIR", "/data/docker/openclaw-public"))
@@ -471,7 +471,11 @@ def authorize_instance_access(instance_public_id):
     ):
         return jsonify({"error": "active session not found"}), 401
     instance = instance_for_entry(instance_public_id, user)
-    if instance is None or instance["product"] == "deepseek-harness" or instance["status"] not in {"active", "stopped"}:
+    if instance is None or instance["status"] not in {"active", "stopped"}:
+        return jsonify({"error": "instance access is forbidden"}), 403
+    if instance["product"] == "deepseek-harness" and (
+        user["provider"] != "campus-uis" or instance["owner_user_id"] != user["id"]
+    ):
         return jsonify({"error": "instance access is forbidden"}), 403
     return jsonify({"allowed": True, "identity": user["public_id"]})
 
@@ -579,6 +583,8 @@ def get_instance_entry(instance_public_id):
         return jsonify({"error": "active actor is required"}), 403
     instance = instance_for_entry(instance_public_id, user)
     if instance is None or instance["status"] not in {"active", "stopped"}:
+        return jsonify({"error": "instance access is forbidden"}), 403
+    if instance["product"] == "deepseek-harness" and instance["owner_user_id"] != user["id"]:
         return jsonify({"error": "instance access is forbidden"}), 403
     return jsonify({"instance": portal_instance(instance)})
 
@@ -1140,6 +1146,11 @@ def create_admin_instance():
         return jsonify({"error": "instance product does not support create"}), 400
     if product == "deepseek-harness" and owner_identity_type != "campus-uis":
         return jsonify({"error": "Harness requires a campus-uis owner"}), 400
+    if product == "deepseek-harness":
+        try:
+            harness_access_path(legacy_user_id)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
     if product in {"hermes", "deepseek-harness"}:
         if password is not None or basic_auth_enabled not in {None, False}:
             return jsonify({"error": f"{product.capitalize()} does not accept Basic Auth credentials"}), 400
@@ -2383,8 +2394,8 @@ def create_execution_job():
         return jsonify(
             {"job": execution_job_payload(job, actor_user_public_id, instance_public_id)}
         )
-    if action == "instance.refresh_ingress" and instance.get("product") != "hermes":
-        return jsonify({"error": "ingress refresh is only supported for Hermes instances"}), 400
+    if action == "instance.refresh_ingress" and instance.get("product") not in {"hermes", "deepseek-harness"}:
+        return jsonify({"error": "instance product does not support ingress refresh"}), 400
     if action == "instance.delete" and instance["status"] == "deleted":
         return jsonify({"error": "instance is already deleted"}), 409
     if action == "instance.cleanup_failed" and (
@@ -2591,7 +2602,9 @@ def update_execution_job(request_id):
             return jsonify({"error": "invalid instance creation result"}), 400
         if product == "deepseek-harness":
             expected = dict.fromkeys(required)
-            expected.update(version=HARNESS_VERSION, openclaw_token="", auth_mode="session")
+            expected.update(version=HARNESS_VERSION, openclaw_token="", auth_mode="session",
+                            access_url=harness_access_path(created_instance["legacy_user_id"]),
+                            admin_url=harness_access_path(created_instance["legacy_user_id"]))
             if result != expected:
                 return jsonify({"error": "invalid private Harness creation result"}), 400
         elif (
@@ -2655,6 +2668,12 @@ def update_execution_job(request_id):
                     message="instance created" if status == "succeeded" else "instance creation failed",
                     conn=conn,
                 )
+            if status == "succeeded" and job["action"] == "instance.refresh_ingress":
+                refreshed = metadata_store.get_instance_by_public_id(job["instance_public_id"], conn=conn)
+                if refreshed["product"] == "deepseek-harness":
+                    path = harness_access_path(refreshed["legacy_user_id"])
+                    conn.execute("UPDATE instances SET access_url = ?, admin_url = ? WHERE public_id = ?",
+                                 (path, path, refreshed["public_id"]))
             if status == "succeeded" and job["action"] == "instance.set_basic_auth":
                 enabled = json.loads(job["params_json"])["enabled"]
                 metadata_store.set_instance_basic_auth(

@@ -833,6 +833,50 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
     def tenant_network(self, instance):
         return "openclaw-user-" + hashlib.sha256(instance["public_id"].encode()).hexdigest()
 
+    def _proxy_files(self, instance):
+        user_id = self.get_legacy_user_id(instance)
+        harness_access_path(user_id)
+        directory = Path(os.environ.get("MODEL_PROXY_TOKEN_DIR") or self.public_dir / "model-proxy-tokens")
+        return directory / (user_id + ".token"), directory / (user_id + ".models")
+
+    def _prepare_defaults(self, instance):
+        # Use the same trusted shell config and short model ID as set_model_provider.sh.
+        code, model = self.run_command([
+            "bash", "-ec", 'source "$1"; printf "%s" "${MODEL_ID#${MODEL_PROVIDER_ID}/}"',
+            "bash", str(self.manager_dir / "config/model-providers.env"),
+        ])
+        if code or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}", model):
+            return 1, "Harness requires a valid MODEL_ID in config/model-providers.env"
+        url = os.environ.get("MODEL_PROXY_PUBLIC_BASE_URL") or "http://openclaw-model-proxy:8081/v1"
+        token_file, models_file = self._proxy_files(instance)
+        old_token = token_file.read_bytes() if token_file.exists() else None
+        old_models = models_file.read_bytes() if models_file.exists() else None
+        token = old_token.decode().strip() if old_token else "ocm_" + secrets.token_urlsafe(32)
+        if not token:
+            return 1, "Empty Harness model proxy token"
+        models = set(old_models.decode().splitlines()) if old_models else set()
+        script = (self.manager_dir / "templates/deepseek-harness/managed-defaults.cjs").read_text()
+        try:
+            if model not in models:
+                self._write_private_file(models_file, ("\n".join(sorted(models | {model})) + "\n").encode())
+            if not old_token:
+                self._write_private_file(token_file, (token + "\n").encode())
+            code, output = self.run_command([
+                "docker", "run", "--rm", "--pull=never", "--network", "none", "--read-only",
+                "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", "1000:1000",
+                "--mount", f"type=bind,src={self.data_dir(instance) / 'state'},dst=/state",
+                "--env", "DSH_HOME=/state", "--env", "OPENCLAW_MANAGER_MODEL_PROXY_TOKEN",
+                "--env", "HARNESS_MODEL_ID=" + model, "--env", "HARNESS_MODEL_PROXY_URL=" + url,
+                "--entrypoint", "node", "openclaw-manager/deepseek-harness:" + self.VERSION,
+                "-e", script,
+            ], env={**os.environ, "OPENCLAW_MANAGER_MODEL_PROXY_TOKEN": token}, timeout=60)
+            if code:
+                raise RuntimeError("Could not prepare Harness profile with the instance image")
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            self._restore_proxy_files({token_file: old_token, models_file: old_models})
+            return 1, str(exc)
+        return 0, "Harness defaults ready"
+
     def create(self, instance, basic_auth_enabled, basic_auth_password="", **kwargs):
         if kwargs.get("version", self.VERSION) != self.VERSION:
             return 1, "unsupported Harness version"
@@ -876,6 +920,29 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
         ], timeout=90)
         if code:
             return code, output
+        files = self._proxy_files(instance)
+        before = {path: path.read_bytes() if path.exists() else None for path in files}
+        code, output = self._prepare_defaults(instance)
+        if code:
+            return code, output
+        try:
+            code, output = self._launch_containers(instance, root, auth, target, network)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            self._restore_proxy_files(before)
+            raise
+        if code:
+            self._restore_proxy_files(before)
+        return code, output
+
+    @staticmethod
+    def _restore_proxy_files(before):
+        for path, previous in before.items():
+            if previous is None:
+                unlink_if_exists(path)
+            else:
+                OpenClawDockerAdapter._write_private_file(path, previous)
+
+    def _launch_containers(self, instance, root, auth, target, network):
         url = urllib.parse.urlsplit(self.access_url(instance))
         image = f"openclaw-manager/deepseek-harness:{self.VERSION}"
         common = ["--network", network, "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -915,6 +982,7 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
             detail = re.sub(r"([?&]token=)[^\s&#]+", r"\1[redacted]", "\n".join(diagnostics))
             self.run_command(["docker", "rm", "-f", gateway, target])
             return 1, detail[-8192:]
+        (root / ".managed-defaults").touch(mode=0o600)
         return 0, "Harness ready"
 
     def configure_ingress(self, instance, upload_max_body_size=None):
@@ -926,11 +994,23 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
             if "no such" not in output.lower():
                 return code, output
             return self.upgrade_ingress(instance)
+        marker = self.data_dir(instance) / ".managed-defaults"
+        if not marker.exists():
+            code, output = self._prepare_defaults(instance)
+            if code:
+                return code, output
+            # Existing running processes must reload both the profile and credential store.
+            if super().status(instance).startswith("Up"):
+                code, output = self.run_command(["docker", "restart", self.get_runtime_target(instance)])
+                if code:
+                    return code, output
+            marker.touch(mode=0o600)
         network = self.tenant_network(instance)
         target = self.get_runtime_target(instance)
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):
             return 1, "invalid Harness runtime identifier"
-        for service, target_network in ((self.nginx_container_name, network),
+        proxy = os.environ.get("MODEL_PROXY_CONTAINER_NAME") or "openclaw-model-proxy"
+        for service, target_network in ((self.nginx_container_name, network), (proxy, network),
                                         (self.gateway_target(instance), "instance-auth-net")):
             code, output = self.run_command(["docker", "network", "connect", target_network, service])
             if code and "already exists" not in output.lower():
@@ -1037,6 +1117,9 @@ location ^~ {path} {{
         code, output = self.reload_nginx()
         if code and old:
             conf.write_bytes(old)
+        if not code and self.get_legacy_user_id(instance, required=False):
+            for path in self._proxy_files(instance):
+                unlink_if_exists(path)
         return code, output
 
     def cleanup_failed(self, instance):

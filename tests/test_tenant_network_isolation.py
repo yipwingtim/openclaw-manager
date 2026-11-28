@@ -539,6 +539,7 @@ class TenantNetworkIsolationTests(unittest.TestCase):
                     containers = {
                         "openclaw_alice": ["openclaw-user-a"],
                         "hermes_bob": ["openclaw-user-b"],
+                        "deepseek-harness_dsh": ["openclaw-user-d"],
                         "evoscientist_cara": ["openclaw-user-c"],
                         "evoscientist_cara-proxy": ["openclaw-user-c"],
                         "evoscientist_cara-ingress": ["openclaw-user-c"],
@@ -612,6 +613,7 @@ class TenantNetworkIsolationTests(unittest.TestCase):
                     "proxy_openclaw-user-a",
                     "proxy_openclaw-user-b",
                     "proxy_openclaw-user-c",
+                    "proxy_openclaw-user-d",
                 },
             )
             self.assertTrue(

@@ -27,6 +27,26 @@ class ManagerExecutorTests(unittest.TestCase):
     def setUpClass(cls):
         cls.executor = load_executor()
 
+    def test_harness_create_publishes_path_only_after_ingress_succeeds(self):
+        control = Mock()
+        instance = dict(public_id="11111111-1111-4111-8111-111111111111",
+                        product="deepseek-harness", legacy_user_id="alice", status="provisioning")
+        control.claim.return_value = dict(job=dict(request_id="create", action="instance.create", params={}),
+                                         instance=instance)
+        adapter = Mock()
+        adapter.create.return_value = (0, "ready")
+        adapter.configure_ingress.return_value = (0, "published")
+        self.executor.run_once(control, lambda product: adapter)
+        adapter.configure_ingress.assert_called_once_with(instance)
+        result = control.update.call_args[1]["result"]
+        self.assertEqual(result["access_url"], "/alice/")
+        self.assertIsNone(result["port"])
+        adapter.configure_ingress.return_value = (1, "failed ingress")
+        adapter.delete.return_value = (0, "removed")
+        self.executor.run_once(control, lambda product: adapter)
+        self.assertEqual(control.update.call_args[0][1], "failed")
+        adapter.delete.assert_called_once_with(instance)
+
     def test_harness_cleanup_failure_does_not_report_success(self):
         for code in (0, 1):
             control = Mock()

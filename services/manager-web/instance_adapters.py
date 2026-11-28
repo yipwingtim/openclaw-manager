@@ -11,10 +11,12 @@ import stat
 import subprocess
 import tempfile
 import threading
+import uuid
+import urllib.parse
 from pathlib import Path
 
 
-from product_capabilities import HARNESS_VERSION, product_auth_contract, product_capabilities
+from product_capabilities import harness_access_path, HARNESS_VERSION, product_auth_contract, product_capabilities
 
 
 HERMES_RUNTIME_UID = 10000
@@ -818,6 +820,19 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
     CAPABILITIES = product_capabilities(AUTH_PRODUCT)
     VERSION = HARNESS_VERSION
 
+    def access_url(self, instance):
+        host = os.environ.get("PUBLIC_HOST", "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9.-]+", host):
+            raise ValueError("PUBLIC_HOST must be a hostname or IPv4 address")
+        return "https://" + host + ":30015" + harness_access_path(self.get_legacy_user_id(instance))
+
+    def ingress_conf(self, instance):
+        public_id = str(uuid.UUID(instance["public_id"]))
+        return self.nginx_users_conf_dir / "harness-paths" / (public_id + ".inc")
+
+    def tenant_network(self, instance):
+        return "openclaw-user-" + hashlib.sha256(instance["public_id"].encode()).hexdigest()
+
     def create(self, instance, basic_auth_enabled, basic_auth_password="", **kwargs):
         if kwargs.get("version", self.VERSION) != self.VERSION:
             return 1, "unsupported Harness version"
@@ -825,6 +840,7 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
         code, _ = self.run_command(["docker", "image", "inspect", image])
         if code:
             return 1, f"Harness image missing: {image}; build templates/deepseek-harness first"
+        self.access_url(instance)
         root = self.data_dir(instance)
         root.mkdir(mode=0o700, parents=True, exist_ok=False)
         for name in ("state", "workspace"):
@@ -833,61 +849,205 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
             os.chown(directory, 1000, 1000)
         return self._launch(instance)
 
+    def gateway_target(self, instance):
+        return self.get_runtime_target(instance) + "-ingress"
+
     def _launch(self, instance):
         root = self.data_dir(instance)
         if not all((root / name).is_dir() for name in ("state", "workspace")):
             return 1, "Harness state or workspace directory missing"
+        for name in ("state", "workspace"):
+            directory = root / name
+            if directory.is_symlink():
+                return 1, "Harness data directories must not be symlinks"
+            os.chown(directory, 1000, 1000)
+        auth = root / "gateway-auth"
+        if auth.is_symlink():
+            return 1, "Harness gateway auth directory must not be a symlink"
+        auth.mkdir(mode=0o755, exist_ok=True)
+        os.chown(auth, 1000, 1000)
         target = self.get_runtime_target(instance)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):
+            return 1, "invalid Harness runtime identifier"
+        network = self.tenant_network(instance)
+        code, output = self.run_command([
+            "bash", "-lc", 'source "$1"; prepare_tenant_networks "$2"', "bash",
+            str(self.manager_dir / "scripts/lib_tenant_network.sh"), network,
+        ], timeout=90)
+        if code:
+            return code, output
+        url = urllib.parse.urlsplit(self.access_url(instance))
+        image = f"openclaw-manager/deepseek-harness:{self.VERSION}"
+        common = ["--network", network, "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                  "--restart", "unless-stopped", "--env", "HARNESS_AUTHORITY=" + url.netloc,
+                  "--env", "HARNESS_MOUNT=" + url.path]
         code, output = self.run_command([
             "docker", "run", "--detach", "--pull=never", "--name", target,
-            "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--user", "1000:1000", "--restart", "unless-stopped",
+            *common, "--user", "1000:1000",
             "--mount", f"type=bind,src={root / 'state'},dst=/state",
             "--mount", f"type=bind,src={root / 'workspace'},dst=/workspace",
-            f"openclaw-manager/deepseek-harness:{self.VERSION}",
+            "--mount", f"type=bind,src={auth},dst=/run/harness-auth", image,
         ])
         if code:
             return code, output
-        # The authenticated listener returns 401 before a launch token is exchanged.
-        probe = ("for(let i=0;i<60;i++){try{if((await fetch('http://127.0.0.1:3080/')).status"
-                 "===401)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,1000))}process.exit(1)")
-        try:
-            code, _ = self.run_command(["docker", "exec", target, "node", "--input-type=module",
-                                        "-e", probe], timeout=75)
-        except subprocess.TimeoutExpired:
-            code = 1
+        gateway = self.gateway_target(instance)
+        code, output = self.run_command([
+            "docker", "run", "--detach", "--pull=never", "--name", gateway,
+            *common, "--user", "65534:65534", "--read-only", "--workdir", "/tmp",
+            "--env", "HARNESS_INSTANCE_ID=" + instance["public_id"],
+            "--env", "HARNESS_BACKEND=http://" + target + ":3080",
+            "--mount", f"type=bind,src={auth},dst=/run/harness-auth,readonly",
+            "--entrypoint", "node", image, "/opt/harness-gateway.mjs",
+        ])
+        if not code:
+            probe = ("for(let i=0;i<60;i++){try{if((await fetch('http://127.0.0.1:3081/_gateway_health')).status"
+                     "===200)process.exit(0)}catch{}await new Promise(r=>setTimeout(r,1000))}process.exit(1)")
+            try:
+                code, _ = self.run_command(["docker", "exec", gateway, "node", "--input-type=module",
+                                            "-e", probe], timeout=75)
+            except subprocess.TimeoutExpired:
+                code = 1
         if code:
-            cleanup, _ = self.delete(instance)
-            return 1, "Harness listener failed readiness check" + ("; cleanup failed" if cleanup else "")
+            self.run_command(["docker", "rm", "-f", gateway, target])
+            return 1, "Harness gateway failed readiness check"
         return 0, "Harness ready"
 
+    def configure_ingress(self, instance, upload_max_body_size=None):
+        self.access_url(instance)
+        code, output = self.run_command([
+            "docker", "inspect", "--format", "{{.Name}}", self.gateway_target(instance)
+        ])
+        if code:
+            if "no such" not in output.lower():
+                return code, output
+            return self.upgrade_ingress(instance)
+        network = self.tenant_network(instance)
+        target = self.get_runtime_target(instance)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):
+            return 1, "invalid Harness runtime identifier"
+        for service, target_network in ((self.nginx_container_name, network),
+                                        (self.gateway_target(instance), "instance-auth-net")):
+            code, output = self.run_command(["docker", "network", "connect", target_network, service])
+            if code and "already exists" not in output.lower():
+                return code, output
+        path = harness_access_path(self.get_legacy_user_id(instance))
+        conf = self.ingress_conf(instance)
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        old = conf.read_bytes() if conf.exists() else None
+        target = self.gateway_target(instance)
+        text = f"""location = {path[:-1]} {{ return 308 {path}; }}
+location ^~ {path} {{
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $harness_backend http://{target}:3081;
+    rewrite ^{path}(.*)$ /$1 break;
+    proxy_pass $harness_backend;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header X-OpenClaw-Internal-Token "";
+    proxy_buffering off;
+    proxy_read_timeout 86400;
+    access_log off;
+}}
+"""
+        conf.write_text(text, encoding="utf-8")
+        code, output = self.reload_nginx()
+        if code:
+            if old is None:
+                unlink_if_exists(conf)
+            else:
+                conf.write_bytes(old)
+            self.reload_nginx()
+        return code, output
+
+    def upgrade_ingress(self, instance):
+        target = self.get_runtime_target(instance)
+        backup = target + "-previous"
+        was_running = super().status(instance).startswith("Up")
+        code, output = self.run_command(["docker", "stop", target])
+        if code:
+            return code, output
+        code, output = self.run_command(["docker", "rename", target, backup])
+        if code:
+            if was_running:
+                self.run_command(["docker", "start", target])
+            return code, output
+        try:
+            code, output = self._launch(instance)
+            if not code:
+                code, output = self.configure_ingress(instance)
+            if code:
+                raise RuntimeError(output)
+        except Exception as exc:
+            self.run_command(["docker", "rm", "-f", self.gateway_target(instance), target])
+            self.run_command(["docker", "rename", backup, target])
+            if was_running:
+                self.run_command(["docker", "start", target])
+            return 1, str(exc)
+        code, output = self.run_command(["docker", "rm", backup])
+        if not code and not was_running:
+            code, output = self.stop(instance)
+        return code, output or "Harness path ingress enabled"
+
+    def status(self, instance):
+        app_status = super().status(instance)
+        gateway = {**instance, "runtime_identifier": self.gateway_target(instance)}
+        return "Up" if app_status == "Up" and super().status(gateway) == "Up" else "STOPPED"
+
     def start(self, instance):
-        return self.run_command(["docker", "start", self.get_runtime_target(instance)])
+        code, output = self.run_command(["docker", "start", self.get_runtime_target(instance)])
+        if code:
+            return code, output
+        return self.run_command(["docker", "start", self.gateway_target(instance)])
 
     def stop(self, instance):
-        return self.run_command(["docker", "stop", self.get_runtime_target(instance)])
+        for target in (self.gateway_target(instance), self.get_runtime_target(instance)):
+            code, output = self.run_command(["docker", "stop", target])
+            if code and "no such container" not in output.lower():
+                return code, output
+        return 0, "Harness stopped"
 
     def restart(self, instance):
-        return self.run_command(["docker", "restart", self.get_runtime_target(instance)])
+        code, output = self.stop(instance)
+        return (code, output) if code else self.start(instance)
 
     def delete(self, instance):
         code, output = self.stop(instance)
         if code:
             return code, output
-        return self.run_command(["docker", "rm", self.get_runtime_target(instance)])
+        for target in (self.gateway_target(instance), self.get_runtime_target(instance)):
+            code, output = self.run_command(["docker", "rm", target])
+            if code and "no such container" not in output.lower():
+                return code, output
+        return self._remove_ingress(instance)
+
+    def _remove_ingress(self, instance):
+        conf = self.ingress_conf(instance)
+        old = conf.read_bytes() if conf.is_file() else None
+        unlink_if_exists(conf)
+        code, output = self.reload_nginx()
+        if code and old:
+            conf.write_bytes(old)
+        return code, output
 
     def cleanup_failed(self, instance):
         if instance.get("status") != "failed":
             return 1, "only failed Harness instances can be cleaned up"
-        code, output = self.run_command(
-            ["docker", "rm", "-f", self.get_runtime_target(instance)], timeout=60
-        )
-        if code and "no such container" not in output.lower():
-            return code, output
-        return 0, "Harness failed runtime removed; state and workspace retained"
+        for target in (self.gateway_target(instance), self.get_runtime_target(instance)):
+            code, output = self.run_command(["docker", "rm", "-f", target], timeout=60)
+            if code and "no such container" not in output.lower():
+                return code, output
+        return self._remove_ingress(instance)
 
     def restore(self, instance):
-        return self._launch(instance)
+        code, output = self._launch(instance)
+        if code:
+            return code, output
+        code, output = self.configure_ingress(instance)
+        if code:
+            self.run_command(["docker", "rm", "-f", self.gateway_target(instance), self.get_runtime_target(instance)])
+        return code, output
 
     def logs(self, instance, tail=120):
         return re.sub(r"([?&]token=)[^\s&#]+", r"\1[redacted]", super().logs(instance, tail))

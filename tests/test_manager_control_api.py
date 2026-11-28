@@ -240,6 +240,47 @@ class ManagerControlApiTests(unittest.TestCase):
         })
         self.assertEqual(denied_status, 403)
 
+    def test_harness_ingress_requires_campus_session_and_exact_owner(self):
+        store = self.control.metadata_store
+        instance = store.create_instance(owner_public_id=self.user["public_id"],
+            product="deepseek-harness", instance_name="Harness", runtime_identifier="harness",
+            status="active", db_file=self.db_file)
+        stranger = store.create_user("stranger", db_file=self.db_file)
+        store.set_user_role(stranger["id"], "admin", db_file=self.db_file)
+        expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        for token, user, provider in (("a", self.user, "campus-uis"),
+                                     ("b", stranger, "campus-uis"), ("c", self.user, "local")):
+            store.create_session(token * 64, user["id"], provider, "csrf", expiry, db_file=self.db_file)
+        for token, expected in (("a", 200), ("b", 403), ("c", 401)):
+            with patch.object(self.control.request, "headers", {"Authorization": "Bearer instance-auth-token"}), patch.object(
+                self.control.request, "args", {"token_hash": token * 64}
+            ):
+                response, status = response_parts(self.control.authorize_instance_access(instance["public_id"]))
+                self.assertEqual(status, expected)
+
+    def test_harness_ingress_refresh_sets_existing_instance_path(self):
+        store = self.control.metadata_store
+        store.set_user_role(self.user["id"], "admin", db_file=self.db_file)
+        instance = store.create_instance(owner_public_id=self.user["public_id"],
+            legacy_user_id="DSH_existing", product="deepseek-harness", instance_name="Harness",
+            runtime_identifier="deepseek-harness_DSH_existing", status="active", db_file=self.db_file)
+        payload = dict(request_id="harness-ingress", actor_user_public_id=self.user["public_id"],
+                       instance_public_id=instance["public_id"], action="instance.refresh_ingress", params={})
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer admin-token"}), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            response, status = response_parts(self.control.create_execution_job())
+            self.assertEqual(status, 200, response.get_json())
+        store.update_execution_job("harness-ingress", "running", db_file=self.db_file)
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer executor-token"}), patch.object(
+            self.control.request, "get_json", return_value={"status": "succeeded"}
+        ):
+            response, status = response_parts(self.control.update_execution_job("harness-ingress"))
+            self.assertEqual(status, 200, response.get_json())
+        updated = store.get_instance_by_public_id(instance["public_id"], db_file=self.db_file)
+        self.assertEqual(updated["access_url"], "/DSH_existing/")
+        self.assertIsNone(updated["port"])
+
     def test_instance_auth_token_cannot_call_user_web_endpoints(self):
         with patch.object(
             self.control.request, "headers", {"Authorization": "Bearer instance-auth-token"}
@@ -1447,7 +1488,7 @@ class ManagerControlApiTests(unittest.TestCase):
             self.assertEqual(status, 409)
             self.assertIn(duplicate.get_json()["error"], {"instance ID already exists", "runtime identifier already exists"})
         store.update_execution_job("create-harness", "running", db_file=self.db_file)
-        result = dict(port=None, version="0.2.2-rc.5", access_url=None, admin_url=None,
+        result = dict(port=None, version="0.2.2-rc.5", access_url="/alice-harness/", admin_url="/alice-harness/",
                       basic_auth_password_ref=None, openclaw_token="", auth_mode="session")
         with patch.object(self.control.request, "headers", {"Authorization": "Bearer executor-token"}), patch.object(
             self.control.request, "get_json", return_value={"status": "succeeded", "result": result}

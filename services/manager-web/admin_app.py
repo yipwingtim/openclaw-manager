@@ -1297,6 +1297,24 @@ def set_model_provider(instance_public_id):
     return redirect(url_for("instances", result=f"Model provider update queued: {model_id}"))
 
 
+@app.post("/admin/instances/<instance_public_id>/ingress")
+def refresh_instance_ingress(instance_public_id):
+    current = web_common.actor()
+    if not current or current["role"] != "admin":
+        return render_template("error.html", message="Forbidden"), 403
+    try:
+        control_client.create_execution_job({
+            "request_id": str(uuid.uuid4()),
+            "actor_user_public_id": current["public_id"],
+            "instance_public_id": instance_public_id,
+            "action": "instance.refresh_ingress",
+            "params": {},
+        })
+    except control_client.ControlError as exc:
+        return redirect(url_for("instances", error=str(exc)))
+    return redirect(url_for("instances", result="入口接入任务已排队，请刷新确认访问地址。"))
+
+
 @app.post("/admin/instances/<instance_public_id>/retention")
 def retention(instance_public_id):
     current = web_common.actor()

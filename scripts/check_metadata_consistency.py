@@ -886,6 +886,10 @@ def check_global(users_dirs, users_csv, db_instances, recycle_dirs, reporter):
                     (root / name).is_dir() for name in ("state", "workspace")
                 ):
                     reporter.error("harness_data_missing", f"{user_id}: Harness state or workspace missing")
+            if row.get("status") in {"active", "stopped"} and (root / ".managed-defaults").is_file():
+                tokens = Path(os.environ.get("MODEL_PROXY_TOKEN_DIR") or OPENCLAW_PUBLIC_DIR / "model-proxy-tokens")
+                if not all((tokens / (str(legacy_user_id or "") + ext)).is_file() for ext in (".token", ".models")):
+                    reporter.error("harness_proxy_missing", f"{user_id}: managed Harness proxy files missing")
             expected_path = "/" + str(row.get("legacy_user_id") or "") + "/"
             if row.get("status") == "active" and not row.get("access_url"):
                 reporter.warn("harness_access_pending", f"{user_id}: start or restart Harness to prepare its access path")

@@ -236,7 +236,7 @@ for container, networks in container_networks.items():
     tenant_networks = {name for name in networks if name.startswith(network_prefix)}
     if container.startswith(os.environ.get("USER_CONTAINER_PREFIX", "openclaw_")):
         desired.update((service, network) for service in (nginx, model_proxy) for network in tenant_networks)
-    elif container.startswith("hermes_"):
+    elif container.startswith(("hermes_", "deepseek-harness_")):
         desired.update((model_proxy, network) for network in tenant_networks)
     elif container.startswith("evoscientist_") and not container.endswith(("-proxy", "-ingress")):
         desired.update((model_proxy, network) for network in tenant_networks)

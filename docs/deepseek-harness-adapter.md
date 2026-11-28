@@ -17,8 +17,18 @@ credentials) and workspace files live under instances/deepseek-harness/<public_i
 in state/ and workspace/. Retained deletion removes the container and preserves
 both directories; restore uses the same image and directories.
 
-The RC image should be retained for restores. Model proxy configuration remains
-a separate integration. Users can configure their own providers in Harness.
+Keep the pinned RC image for restores and for profile preparation. The adapter runs
+the profile initializer as UID 1000 in that image, with only the instance's state
+mounted and networking disabled. The model ID comes from config/model-providers.env
+(same provider-prefix removal as OpenClaw). The application reaches model-proxy over
+its tenant network with an instance token and model allowlist. Upstream keys stay
+at the proxy. Deletion revokes the token and restore issues a replacement.
+
+Fresh profiles open the platform model and the persistent /workspace after the
+preview notice. Users can add personal providers and create or switch directories.
+Starting an existing instance prepares missing defaults and reloads a running
+application once. Existing provider entries, explicit model choices and workspace
+history are preserved. UIS continues to authorize application access.
 
 ## Failed provisioning
 
@@ -80,6 +90,9 @@ configuration as part of rollback.
 ## Validation
 
 ```sh
+docker run --rm --read-only --network none --tmpfs /tmp -v "$PWD:/repo:ro" \
+  --entrypoint node openclaw-manager/deepseek-harness:0.2.2-rc.5 \
+  --test /repo/tests/test_harness_managed_defaults.cjs
 node --test tests/test_harness_gateway.mjs
 python3 -m unittest tests.test_deepseek_harness_adapter tests.test_manager_control_api
 ```

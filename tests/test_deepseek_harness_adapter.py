@@ -11,6 +11,9 @@ from instance_adapters import DeepSeekHarnessDockerAdapter, OpenClawDockerAdapte
 class HarnessTests(unittest.TestCase):
     def setUp(self):
         self.host = patch.dict("os.environ", {"PUBLIC_HOST": "manager.example.test"})
+        defaults = patch.object(DeepSeekHarnessDockerAdapter, "_prepare_defaults", autospec=True, return_value=(0, ""))
+        self.defaults = defaults.start()
+        self.addCleanup(defaults.stop)
         self.host.start()
         self.addCleanup(self.host.stop)
 
@@ -78,11 +81,13 @@ class HarnessTests(unittest.TestCase):
             adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
             instance = dict(public_id="11111111-1111-4111-8111-111111111111",
                             legacy_user_id="alice", runtime_identifier="deepseek-harness_alice")
+            instance["data_path"] = tmp
+            (Path(tmp) / ".managed-defaults").touch()
             conf = adapter.ingress_conf(instance)
             conf.parent.mkdir()
             conf.write_text("previous")
             env = "/deepseek-harness_alice-ingress"
-            with patch.object(adapter, "run_command", side_effect=[(0, env), (0, ""), (0, "")]), patch.object(
+            with patch.object(adapter, "run_command", side_effect=[(0, env), (0, ""), (0, ""), (0, "")]), patch.object(
                 adapter, "reload_nginx", return_value=(1, "bad config")
             ):
                 self.assertEqual(adapter.configure_ingress(instance)[0], 1)
@@ -104,6 +109,8 @@ class HarnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
             instance = dict(runtime_identifier="missing", public_id="11111111-1111-4111-8111-111111111111")
+            instance["data_path"] = tmp
+            (Path(tmp) / ".managed-defaults").touch()
             conf = adapter.ingress_conf(instance)
             conf.parent.mkdir()
             conf.write_text("old ingress")
@@ -118,8 +125,10 @@ class HarnessTests(unittest.TestCase):
             adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
             instance = dict(public_id="11111111-1111-4111-8111-111111111111",
                             legacy_user_id="alice", runtime_identifier="deepseek-harness_alice")
+            instance["data_path"] = tmp
+            (Path(tmp) / ".managed-defaults").touch()
             env = "/deepseek-harness_alice-ingress"
-            with patch.object(adapter, "run_command", side_effect=[(0, env), (0, ""), (0, "")]), patch.object(
+            with patch.object(adapter, "run_command", side_effect=[(0, env), (0, ""), (0, ""), (0, "")]), patch.object(
                 adapter, "reload_nginx", return_value=(0, "")
             ):
                 self.assertEqual(adapter.configure_ingress(instance)[0], 0)
@@ -130,6 +139,22 @@ class HarnessTests(unittest.TestCase):
             self.assertIn("proxy_set_header Host $http_host", text)
             self.assertNotIn("listen", text)
             self.assertEqual(adapter.instance_auth_contract()["edge_authorization"], "uis")
+
+    def test_running_instance_receives_defaults_and_reloads_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = DeepSeekHarnessDockerAdapter(tmp, tmp, tmp, tmp, "nginx")
+            instance = dict(public_id="11111111-1111-4111-8111-111111111111",
+                            runtime_identifier="harness", legacy_user_id="alice", data_path=tmp)
+            with patch.object(OpenClawDockerAdapter, "status", return_value="Up"), patch.object(
+                adapter, "run_command", return_value=(0, "")
+            ) as run, patch.object(adapter, "reload_nginx", return_value=(0, "")):
+                for _ in range(2):
+                    self.assertEqual(adapter.configure_ingress(instance)[0], 0)
+            self.defaults.assert_called_once_with(adapter, instance)
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(commands.count(["docker", "restart", "harness"]), 1)
+            self.assertIn(["docker", "network", "connect", adapter.tenant_network(instance),
+                           "openclaw-model-proxy"], commands)
 
     def test_start_prepares_ingress_before_starting_both_containers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -166,3 +191,29 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("EACCES /state/profiles", output)
             self.assertNotIn("private-token", output)
+
+
+class ManagedProxyTests(unittest.TestCase):
+    def test_scoped_token_rollback_and_revocation(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            adapter = DeepSeekHarnessDockerAdapter(Path(__file__).resolve().parents[1], tmp, tmp, tmp, "nginx")
+            instance = dict(legacy_user_id="alice", public_id="11111111-1111-4111-8111-111111111111", data_path=tmp)
+            with patch.dict("os.environ", {"MODEL_PROXY_TOKEN_DIR": str(root / "tokens")}):
+                token, models = adapter._proxy_files(instance)
+                with patch.object(adapter, "run_command", side_effect=[(0, "chat"), (1, "failed")]):
+                    self.assertNotEqual(adapter._prepare_defaults(instance)[0], 0)
+                    self.assertFalse(token.exists())
+                    self.assertFalse(models.exists())
+                with patch.object(adapter, "run_command", side_effect=[(0, "chat"), (0, "")]) as run:
+                    self.assertEqual(adapter._prepare_defaults(instance)[0], 0)
+                    secret = token.read_text().strip()
+                    self.assertTrue(secret.startswith("ocm_"))
+                    self.assertNotIn(secret, str(run.call_args.args))
+                    self.assertEqual(run.call_args.kwargs["env"]["OPENCLAW_MANAGER_MODEL_PROXY_TOKEN"], secret)
+                    self.assertEqual(models.read_text(), "chat\n")
+                with patch.object(adapter, "reload_nginx", return_value=(0, "")):
+                    adapter._remove_ingress(instance)
+                self.assertFalse(token.exists())
+                self.assertFalse(models.exists())

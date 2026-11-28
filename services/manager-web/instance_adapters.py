@@ -908,8 +908,13 @@ class DeepSeekHarnessDockerAdapter(OpenClawDockerAdapter):
             except subprocess.TimeoutExpired:
                 code = 1
         if code:
+            diagnostics = ["Harness gateway failed readiness check", output]
+            for container in (target, gateway):
+                _, logs = self.run_command(["docker", "logs", "--tail", "60", container])
+                diagnostics.append(container + ":\n" + logs)
+            detail = re.sub(r"([?&]token=)[^\s&#]+", r"\1[redacted]", "\n".join(diagnostics))
             self.run_command(["docker", "rm", "-f", gateway, target])
-            return 1, "Harness gateway failed readiness check"
+            return 1, detail[-8192:]
         return 0, "Harness ready"
 
     def configure_ingress(self, instance, upload_max_body_size=None):
@@ -996,6 +1001,9 @@ location ^~ {path} {{
         return "Up" if app_status == "Up" and super().status(gateway) == "Up" else "STOPPED"
 
     def start(self, instance):
+        code, output = self.configure_ingress(instance)
+        if code:
+            return code, output
         code, output = self.run_command(["docker", "start", self.get_runtime_target(instance)])
         if code:
             return code, output

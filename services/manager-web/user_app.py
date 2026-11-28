@@ -156,6 +156,13 @@ def my_instances():
     instances = control_client.list_instances(current["public_id"])
     for instance in instances:
         instance["allowed_actions"] = ["access", "status"]
+        if instance["product"] == "deepseek-harness":
+            try:
+                snapshot = executor_client.snapshot(current["public_id"], instance["public_id"])
+                raw = snapshot["status"]
+                instance["status"] = "active" if raw.startswith("Up") else "stopped" if raw == "STOPPED" else "unknown"
+            except executor_client.ExecutorError:
+                instance["status"] = "unknown"
     return render_template("my_instances.html", instances=instances)
 
 

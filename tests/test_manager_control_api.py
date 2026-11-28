@@ -281,6 +281,29 @@ class ManagerControlApiTests(unittest.TestCase):
         self.assertEqual(updated["access_url"], "/DSH_existing/")
         self.assertIsNone(updated["port"])
 
+    def test_harness_start_sets_existing_instance_path(self):
+        store = self.control.metadata_store
+        store.set_user_role(self.user["id"], "admin", db_file=self.db_file)
+        instance = store.create_instance(owner_public_id=self.user["public_id"],
+            legacy_user_id="DSH_existing", product="deepseek-harness", instance_name="Harness",
+            runtime_identifier="deepseek-harness_DSH_existing", status="active", db_file=self.db_file)
+        payload = dict(request_id="harness-start", actor_user_public_id=self.user["public_id"],
+                       instance_public_id=instance["public_id"], action="instance.start", params={})
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer admin-token"}), patch.object(
+            self.control.request, "get_json", return_value=payload
+        ):
+            response, status = response_parts(self.control.create_execution_job())
+            self.assertEqual(status, 200, response.get_json())
+        store.update_execution_job("harness-start", "running", db_file=self.db_file)
+        with patch.object(self.control.request, "headers", {"Authorization": "Bearer executor-token"}), patch.object(
+            self.control.request, "get_json", return_value={"status": "succeeded"}
+        ):
+            response, status = response_parts(self.control.update_execution_job("harness-start"))
+            self.assertEqual(status, 200, response.get_json())
+        updated = store.get_instance_by_public_id(instance["public_id"], db_file=self.db_file)
+        self.assertEqual(updated["access_url"], "/DSH_existing/")
+        self.assertIsNone(updated["port"])
+
     def test_instance_auth_token_cannot_call_user_web_endpoints(self):
         with patch.object(
             self.control.request, "headers", {"Authorization": "Bearer instance-auth-token"}

@@ -65,14 +65,14 @@ Deploy the updated Manager control, executor, executor API, admin web and
 instance-auth-proxy services through `scripts/deploy_services.sh`. This refreshes
 the Manager Nginx include. Rebuild the Harness image using the command above.
 
-Then select **接入／刷新入口** for each existing active or stopped Harness instance.
-Legacy containers are stopped and renamed while a new container starts with the
+Then select **启动** or **重启** for each existing Harness instance. These lifecycle
+actions automatically prepare the path ingress and persist the access URL.
+Legacy containers are stopped and renamed while replacement containers start with the
 same state and workspace mounts. A failed replacement restores the previous
 container. Successful completion persists the relative access URL and enables
-the user portal button. Stopped instances remain stopped and must be started
-before users open them.
+the user portal button. Successful start and restart leave both application and gateway running.
 
-This action briefly interrupts the target instance. Keep the previous image
+Restart and legacy migration briefly interrupt the target instance. Keep the previous image
 and back up instance state before rollout. Reverting only the Manager changes
 does not restore an upgraded runtime. Restore its previous image and network
 configuration as part of rollback.
@@ -87,3 +87,6 @@ python3 -m unittest tests.test_deepseek_harness_adapter tests.test_manager_contr
 The Node test binds local ports 3080 and 3081. Validate real campus login, logout,
 a second campus user's denial, and a saved session through the production HTTPS
 entry after rollout.
+
+Failed readiness checks return redacted application and gateway logs before rollback.
+The Harness user list reads runtime status from the executor, matching the admin list.
